@@ -20,9 +20,12 @@ config entries, merged by id), composed by profiles.
 
 Two flavors:
 - **Static (implemented)** — fixed, templated guidance text.
-- **Dynamic (planned)** — guidance computed at render time by a **provider** (a
-  native probe or an allowed command) whose live output is embedded. This is how
-  rosita natively answers "what machine/network am I on?" (see *Providers*).
+- **Dynamic (implemented)** — guidance computed at render time from a `provider`
+  (a built-in probe) or a `command` (a shell command), whose live output is
+  embedded as `{{ provider.output }}` / `{{ provider.data }}`. Cache-backed
+  (per-capability `cache` TTL), redacted, and **trust-gated** (see *Public vs
+  private* and *Providers*). This is how rosita natively answers "what
+  machine/network am I on?"
 
 Capabilities are parameterized (`params`), can self-gate (`when`), declare
 dependencies (`requires`), can be restricted to specific `agents`, and carry
@@ -50,7 +53,7 @@ A **profile** maps context → guidance. It has `when` rules and lists the
   lets "in `~` I get these, on repo X these, on macOS these" *layer* instead of
   fight.
 
-## Providers (native environment discovery) **(built-ins implemented; `command` + dynamic embedding planned)**
+## Providers (native environment discovery) **(implemented)**
 
 rosita owns environment discovery natively (the "agent-env idea", built in — not
 an external tool). A **provider** (`providers::EnvProvider`) probes the live
@@ -61,16 +64,17 @@ environment and returns output (`text` + structured `data`):
 - `ai-tools` — installed agent CLIs + versions.
 - `tailnet` — tailscale peers (parsed from `tailscale status`).
 - `docker` — running containers (parsed from `docker ps`).
-- `command` — **(planned)** generic escape hatch: run any command, embed stdout
-  (trust-gated).
 
-Probing is **opt-in** today via `rosita detect --probes` (a bare `detect` never
-spawns subprocesses). Provider output is **machine-specific and volatile**, so
-it is redacted, kept **out of `Context`** (never affects the context hash), and
+The generic escape hatch is a capability's `command` (run any shell command,
+embed redacted stdout) rather than a provider — trust-gated (see below).
+
+Probing is **opt-in** via `rosita detect --probes` (a bare `detect` never spawns
+subprocesses), and dynamic capabilities embed provider/command output into the
+(gitignored) overlay at render time. Output is **machine-specific and volatile**,
+so it is redacted, kept **out of `Context`** (never affects the context hash;
+dynamic overlays always rewrite, governed by the cache TTL not the hash), and
 cached under `.rosita/cache/<id>.json` with a TTL (default 60s). Missing tools
-degrade to "unavailable", never an error. **(Planned)** dynamic capabilities will
-embed provider output into the local/gitignored overlay and re-probe on
-`rosita run`.
+degrade to "unavailable", never an error.
 
 ## Agents & delivery **(implemented)**
 
@@ -113,9 +117,10 @@ specifics are private.**
   (`host_class == "work"`, `{{ params.host }}`). Lives in `config.toml`. Safe to
   commit, even open-source.
 - **Private** — the sensitive *definitions*: real hostnames, `host_classes`
-  globs, capability `params` values, and (planned) all dynamic provider output.
-  These live in `local.toml` (global and/or repo), gitignored, layered **after**
-  `config.toml` so they win. `[capability_params.<id>]` supplies a capability's
+  globs, capability `params` values, and all dynamic provider/command output
+  (which only ever lands in the gitignored overlay/cache). These live in
+  `local.toml` (global and/or repo), gitignored, layered **after** `config.toml`
+  so they win. `[capability_params.<id>]` supplies a capability's
   private params without redefining it; a profile may also pass public `params`
   overrides via `{ id = "x", params = … }`. Merge order: capability default ←
   profile-supplied ← local.

@@ -514,6 +514,10 @@ mod tests {
             params: toml::Value::Table(Default::default()),
             guidance: guidance.into(),
             agents: vec![],
+            provider: None,
+            command: None,
+            cache: None,
+            origin: crate::capability::Layer::default(),
         }
     }
 

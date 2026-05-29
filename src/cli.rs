@@ -60,6 +60,27 @@ pub enum Command {
     Clean(CleanArgs),
     /// Diagnose the environment and configuration.
     Doctor,
+    /// Trust this repo's `command`-backed capabilities (record its config hash).
+    Allow,
+    /// Revoke trust for this repo's `command`-backed capabilities.
+    Deny,
+    /// Show this repo's trust status (`rosita trust [status]`).
+    Trust(TrustArgs),
+}
+
+/// `trust` options.
+#[derive(Debug, Args)]
+pub struct TrustArgs {
+    /// Action (only `status` today; defaults to showing status).
+    #[command(subcommand)]
+    pub action: Option<TrustAction>,
+}
+
+/// `trust` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum TrustAction {
+    /// Show the current trust status (the default).
+    Status,
 }
 
 /// `init` options.

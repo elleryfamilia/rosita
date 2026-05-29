@@ -66,6 +66,14 @@ impl Fixture {
         );
         self.write("src/main.rs", "fn main() { println!(\"hi\"); }\n");
     }
+
+    /// Write a file into the isolated global config dir (the one `cmd()` points
+    /// `ROSITA_CONFIG_DIR` at), e.g. a trusted global `config.toml`.
+    fn write_global(&self, rel: &str, content: &str) {
+        let p = self.global.path().join("empty").join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, content).unwrap();
+    }
 }
 
 #[test]
@@ -622,6 +630,112 @@ fn detect_probes_is_opt_in_and_shows_host() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"probes\"").not());
+}
+
+#[test]
+fn dynamic_provider_capability_renders_live_output() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    // A capability backed by the built-in `host` provider (always available,
+    // no exec, no trust needed).
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\n\
+         id = \"machine\"\n\
+         description = \"Machine\"\n\
+         provider = \"host\"\n\
+         guidance = \"OS={{ provider.data.os }}\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"dyn\"\n\
+         priority = 70\n\
+         capabilities = [\"machine\"]\n",
+    );
+
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains(&format!("OS={}", std::env::consts::OS)));
+}
+
+#[test]
+fn global_layer_command_runs_without_allow() {
+    // A command authored in the GLOBAL config is trusted (you wrote it) and
+    // runs without `rosita allow`.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write_global(
+        "config.toml",
+        "[[capabilities]]\n\
+         id = \"greet\"\n\
+         command = \"echo global-ok\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"g\"\n\
+         priority = 80\n\
+         capabilities = [\"greet\"]\n",
+    );
+
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains("global-ok"));
+    assert!(!overlay.contains("skipped untrusted"));
+}
+
+#[test]
+fn repo_command_capability_is_trust_gated() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    let cfg = "[[capabilities]]\n\
+         id = \"greet\"\n\
+         command = \"echo hello-rosita\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"dyn\"\n\
+         priority = 70\n\
+         capabilities = [\"greet\"]\n";
+    fx.write(".rosita/config.toml", cfg);
+
+    // Before allow: a repo-authored command is refused.
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains("skipped untrusted command"));
+    assert!(!overlay.contains("hello-rosita"));
+
+    // trust status reflects untrusted.
+    fx.cmd()
+        .arg("trust")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("untrusted"));
+
+    // allow → the command now runs.
+    fx.cmd().arg("allow").assert().success();
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains("hello-rosita"));
+    assert!(!overlay.contains("skipped untrusted"));
+
+    // Editing the repo config re-locks trust → refused again.
+    fx.write(".rosita/config.toml", &format!("{cfg}\n# changed\n"));
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains("skipped untrusted command"));
+    assert!(!overlay.contains("hello-rosita"));
 }
 
 #[test]

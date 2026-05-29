@@ -30,13 +30,33 @@ max_output_kib = 32
 #   id (required); description, tags, risk (info|caution|dangerous),
 #   when (self-gate rules), requires (other capability ids), params (table),
 #   agents (restrict to specific agent ids), guidance (templated markdown).
+#   Dynamic: provider (built-in: host|toolchain|ai-tools|tailnet|docker),
+#   command (shell; trust-gated in repo layers — run `rosita allow`), cache (TTL).
 # Guidance is a minijinja template with { context, profile, capability, params,
-# agent } in scope.
+# agent, provider } in scope (provider.output / provider.data for dynamic caps).
 [[capabilities]]
 id = "house-style"
 description = "House style"
 tags = ["dev-workflow"]
 guidance = "Run the formatter and the linter before every commit."
+
+# Dynamic capability example: embed live machine identity (built-in provider,
+# always trusted). Uncomment and reference from a profile to use.
+# [[capabilities]]
+# id = "machine"
+# description = "This machine"
+# provider = "host"
+# cache = "60s"
+# guidance = "Running on {{ provider.output }}."
+#
+# A `command`-backed capability runs a shell command; in this (repo) layer it is
+# refused until you `rosita allow`. Its (redacted) stdout is embedded; an empty
+# `guidance` falls back to the raw output.
+# [[capabilities]]
+# id = "kernel"
+# description = "Kernel"
+# command = "uname -sm"
+# cache = "30s"
 
 # Profiles override the built-ins by name; add your own freely.
 # A profile matches when ALL `when` clauses match (AND). Selection is ADDITIVE:

@@ -215,12 +215,14 @@ pub fn apply(
     let mut notes = Vec::new();
     // Root-level files we created and therefore should gitignore.
     let mut gitignore_extra: Vec<String> = Vec::new();
+    // Dynamic overlays always rewrite (volatile output is excluded from the hash).
+    let force = opts.force || rendered.has_dynamic;
 
     // 1. Always: the gitignored generated overlay.
     let gen = generated_path(app, &d.generated_filename);
     files.push(write_hash_skipping(
         app,
-        opts,
+        force,
         &gen,
         &rendered.content,
         &rendered.context_hash,
@@ -268,7 +270,7 @@ pub fn apply(
         }
         files.push(write_hash_skipping(
             app,
-            opts,
+            force,
             &override_path,
             &new_content,
             &rendered.context_hash,
@@ -403,6 +405,13 @@ pub fn clean(d: &AgentDescriptor, app: &AppContext) -> crate::Result<CleanResult
 // --- shared mechanics --------------------------------------------------------
 
 fn render_overlay(d: &AgentDescriptor, app: &AppContext) -> crate::Result<render::RenderOutput> {
+    // Dry-run (and explain's dry apply) resolves dynamic capabilities cache-only
+    // — never executing providers/commands or writing — so it touches nothing.
+    let dynamic = if app.writer.is_dry_run() {
+        crate::dynamic::DynamicMode::ReadOnly
+    } else {
+        crate::dynamic::DynamicMode::Live
+    };
     render::render(&RenderRequest {
         agent: &d.id,
         template_name: &d.template,
@@ -410,19 +419,25 @@ fn render_overlay(d: &AgentDescriptor, app: &AppContext) -> crate::Result<render
         composition: app.composition,
         config: app.config,
         generated_at: app.generated_at.clone(),
+        dynamic,
     })
 }
 
 /// Write `content` to `path`, skipping when the embedded context hash already
 /// matches (unless `force`). Keeps renders idempotent despite the timestamp.
+///
+/// Dynamic overlays pass `force = true`: their volatile output is excluded from
+/// the context hash, so the hash alone can't detect that live output or a trust
+/// decision changed — always rewriting lets those land (the cache TTL still
+/// prevents re-executing the probe).
 fn write_hash_skipping(
     app: &AppContext,
-    opts: &ApplyOptions,
+    force: bool,
     path: &Path,
     content: &str,
     new_hash: &str,
 ) -> crate::Result<WrittenFile> {
-    if !opts.force {
+    if !force {
         if let Ok(existing) = std::fs::read_to_string(path) {
             if header::extract_context_hash(&existing).as_deref() == Some(new_hash) {
                 return Ok(WrittenFile {

@@ -197,9 +197,24 @@ into rendered overlays come in Phase 4.)
 - **Tests:** pure parsers (`parse_tailscale`, docker, version lines) with fixture
   strings; cache TTL logic; graceful `None` when tool absent.
 
-## Phase 4 — Dynamic capabilities + `command` provider + trust
+## Phase 4 — Dynamic capabilities + `command` provider + trust ✅ done
 
 **Goal:** capabilities embed live provider/command output, safely.
+
+**Status:** landed. `Capability` gained `provider`/`command`/`cache` (+ a
+`#[serde(skip)] origin: Layer` set during config load). `src/trust.rs` is a
+direnv-style store at `<global>/trust.toml` (repo path → sha256 of the
+`config.toml`+`local.toml` bundle) with `allow`/`deny`/`status` and testable
+`*_at` cores. `src/dynamic.rs` resolves dynamic capabilities (`DynamicMode`
+Live vs ReadOnly): built-in providers and built-in/global commands always run;
+repo-authored commands run only when the repo is trusted, else render a
+`> [rosita] skipped untrusted command` note. `providers` gained
+`probe_one`/`run_command` over a cache that honors the mode. Render exposes
+`provider.output`/`provider.data`; dynamic overlays bypass hash-skip so output
+and trust changes land (volatile output stays out of the context hash; the cache
+TTL governs churn). `explain`/dry-run are ReadOnly (no exec, no writes). New
+commands `rosita allow`/`deny`/`trust`. 123 tests (trust unit tests landed
+first), clippy+fmt clean.
 
 - `src/capability.rs`: add `provider: Option<String>`, `command: Option<String>`,
   `cache: Option<String>` (duration). In render, if a capability is dynamic:

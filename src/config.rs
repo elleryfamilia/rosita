@@ -85,23 +85,30 @@ impl Config {
     /// hostnames, `host_classes`, capability `params`); the `config.toml` files
     /// are the public, shareable layer.
     pub fn load_from(global: Option<&Path>, repo_base: &Path) -> Result<Self> {
+        use crate::capability::Layer;
+
         // Layers in precedence order (later wins). `None` entries (e.g. no
-        // global dir) are skipped; missing files contribute nothing.
-        let mut layers: Vec<PathBuf> = Vec::new();
+        // global dir) are skipped; missing files contribute nothing. Each layer
+        // tags its capabilities with their origin so command-trust can tell
+        // repo-authored commands from your own global ones.
+        let mut layers: Vec<(Layer, PathBuf)> = Vec::new();
         if let Some(global) = global {
-            layers.push(global.to_path_buf());
+            layers.push((Layer::Global, global.to_path_buf()));
             if let Some(dir) = global.parent() {
-                layers.push(dir.join("local.toml")); // global-local
+                layers.push((Layer::GlobalLocal, dir.join("local.toml")));
             }
         }
-        layers.push(repo_config_path(repo_base));
-        layers.push(repo_local_path(repo_base)); // repo-local
+        layers.push((Layer::Repo, repo_config_path(repo_base)));
+        layers.push((Layer::RepoLocal, repo_local_path(repo_base)));
 
         let mut sources = Vec::new();
         let mut raw = RawConfig::default();
-        for path in layers {
-            if let Some(layer) = RawConfig::from_path(&path)? {
-                raw.merge(layer);
+        for (layer, path) in layers {
+            if let Some(mut parsed) = RawConfig::from_path(&path)? {
+                for cap in &mut parsed.capabilities {
+                    cap.origin = layer;
+                }
+                raw.merge(parsed);
                 sources.push(path);
             }
         }

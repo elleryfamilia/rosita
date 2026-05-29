@@ -31,6 +31,9 @@ fn main() -> ExitCode {
         Command::Refresh(args) => commands::refresh::run(&rt, args),
         Command::Clean(args) => commands::clean::run(&rt, args),
         Command::Doctor => commands::doctor::run(&rt),
+        Command::Allow => commands::trust::allow(&rt),
+        Command::Deny => commands::trust::deny(&rt),
+        Command::Trust(_) => commands::trust::status(&rt),
     };
 
     match result {

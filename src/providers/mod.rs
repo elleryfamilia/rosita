@@ -11,8 +11,8 @@
 //!   hash (it lives in a separate [`Probes`] value used only for display/render),
 //! - **cached** under `.rosita/cache/<id>.json` with a TTL.
 //!
-//! New providers are rows in [`builtin_providers`]; a generic trust-gated
-//! `command` provider arrives in a later phase.
+//! New providers are rows in [`builtin_providers`]. Dynamic capabilities embed
+//! provider output (or a trust-gated shell `command`) via [`crate::dynamic`].
 
 mod ai_tools;
 mod docker;
@@ -81,13 +81,46 @@ impl Probes {
 pub fn gather(ctx: &Context, repo_base: &Path, ttl: Duration, now: DateTime<Utc>) -> Probes {
     let mut entries = Vec::new();
     for p in builtin_providers() {
-        match probe_cached(p.as_ref(), ctx, repo_base, ttl, now) {
+        match probe_provider(p.as_ref(), ctx, repo_base, ttl, now, true) {
             Ok(Some(out)) => entries.push((p.id().to_string(), out)),
             Ok(None) => {}
             Err(e) => vlog!("provider '{}' degraded: {e:#}", p.id()),
         }
     }
     Probes { entries }
+}
+
+/// Probe a single built-in provider by id (cache-backed). `live = false` serves
+/// only an existing cache entry (any age) and never executes — for read-only
+/// callers (`explain`, dry-run). Returns `None` if the id is unknown or the
+/// provider is unavailable.
+pub fn probe_one(
+    id: &str,
+    ctx: &Context,
+    repo_base: &Path,
+    ttl: Duration,
+    now: DateTime<Utc>,
+    live: bool,
+) -> Option<ProviderOutput> {
+    let providers = builtin_providers();
+    let p = providers.iter().find(|p| p.id() == id)?;
+    probe_provider(p.as_ref(), ctx, repo_base, ttl, now, live).unwrap_or(None)
+}
+
+/// Run a shell command (cached under `key`), embedding its redacted stdout.
+/// `live = false` serves only an existing cache entry and never executes.
+pub fn run_command(
+    command: &str,
+    repo_base: &Path,
+    key: &str,
+    ttl: Duration,
+    now: DateTime<Utc>,
+    live: bool,
+) -> Option<ProviderOutput> {
+    cached(repo_base, key, ttl, now, live, || {
+        Ok(Some(exec_command(command)))
+    })
+    .unwrap_or(None)
 }
 
 /// A cache entry on disk.
@@ -98,29 +131,54 @@ struct CacheEntry {
     data: serde_json::Value,
 }
 
-/// Probe `p`, serving a fresh cache hit when available; otherwise probe live,
-/// redact, and (best-effort) write the cache. `None` results are not cached.
-fn probe_cached(
+fn probe_provider(
     p: &dyn EnvProvider,
     ctx: &Context,
     repo_base: &Path,
     ttl: Duration,
     now: DateTime<Utc>,
+    live: bool,
 ) -> crate::Result<Option<ProviderOutput>> {
-    let path = config::cache_dir(repo_base).join(format!("{}.json", p.id()));
+    cached(repo_base, p.id(), ttl, now, live, || p.probe(ctx))
+}
 
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(entry) = serde_json::from_str::<CacheEntry>(&text) {
-            if is_fresh(&entry.generated_at, ttl, now) {
-                return Ok(Some(ProviderOutput {
-                    text: entry.text,
-                    data: entry.data,
-                }));
-            }
+/// Cache wrapper. Serves a fresh cache hit; otherwise (when `live`) runs
+/// `produce`, redacts its text, and writes the cache. When `!live`, returns any
+/// existing cache entry (regardless of age) and never runs `produce` or writes.
+/// `None` results are not cached.
+fn cached<F>(
+    repo_base: &Path,
+    key: &str,
+    ttl: Duration,
+    now: DateTime<Utc>,
+    live: bool,
+    produce: F,
+) -> crate::Result<Option<ProviderOutput>>
+where
+    F: FnOnce() -> crate::Result<Option<ProviderOutput>>,
+{
+    let path = config::cache_dir(repo_base).join(format!("{}.json", sanitize_key(key)));
+    let cached = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<CacheEntry>(&t).ok());
+
+    if !live {
+        // Read-only: surface any cached value (even stale), never execute.
+        return Ok(cached.map(|e| ProviderOutput {
+            text: e.text,
+            data: e.data,
+        }));
+    }
+    if let Some(e) = &cached {
+        if is_fresh(&e.generated_at, ttl, now) {
+            return Ok(Some(ProviderOutput {
+                text: e.text.clone(),
+                data: e.data.clone(),
+            }));
         }
     }
 
-    let Some(mut out) = p.probe(ctx)? else {
+    let Some(mut out) = produce()? else {
         return Ok(None);
     };
     out.text = redact::redact_secrets(&out.text);
@@ -136,6 +194,48 @@ fn probe_cached(
         }
     }
     Ok(Some(out))
+}
+
+/// Keep cache filenames safe regardless of provider id / command key.
+fn sanitize_key(key: &str) -> String {
+    key.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Run `sh -c <command>` and capture its output into a [`ProviderOutput`].
+/// stdout is preferred for `text`, falling back to stderr; the structured form
+/// keeps both plus the exit code.
+fn exec_command(command: &str) -> ProviderOutput {
+    match Command::new("sh").arg("-c").arg(command).output() {
+        Ok(o) => {
+            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            let text = if !stdout.is_empty() {
+                stdout.clone()
+            } else {
+                stderr.clone()
+            };
+            ProviderOutput {
+                text,
+                data: serde_json::json!({
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "status": o.status.code(),
+                }),
+            }
+        }
+        Err(e) => ProviderOutput {
+            text: format!("(command failed to run: {e})"),
+            data: serde_json::Value::Null,
+        },
+    }
 }
 
 /// Whether a cache `generated_at` (RFC3339) is within `ttl` of `now`.

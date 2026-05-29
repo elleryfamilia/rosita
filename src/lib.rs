@@ -30,6 +30,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod context;
+pub mod dynamic;
 pub mod hash;
 pub mod profile;
 pub mod providers;
@@ -37,6 +38,7 @@ pub mod redact;
 pub mod render;
 pub mod report;
 pub mod templates;
+pub mod trust;
 pub mod writer;
 
 /// Crate-wide result alias built on [`anyhow`].

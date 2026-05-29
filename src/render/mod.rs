@@ -10,13 +10,16 @@ pub mod header;
 
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
 use minijinja::{Environment, UndefinedBehavior, Value};
 use serde::Serialize;
 
 use crate::capability::Capability;
 use crate::config::{self, Config};
 use crate::context::Context;
+use crate::dynamic::{self, DynamicMode};
 use crate::profile::Composition;
+use crate::providers::ProviderOutput;
 use crate::templates;
 
 /// Abstraction over a template engine.
@@ -61,6 +64,9 @@ pub struct RenderRequest<'a> {
     pub config: &'a Config,
     /// Injected generation timestamp (RFC3339) — passed in for testability.
     pub generated_at: String,
+    /// Whether dynamic capabilities may execute (Live) or are cache-only
+    /// (ReadOnly, for explain/dry-run).
+    pub dynamic: DynamicMode,
 }
 
 /// Result of a render.
@@ -74,6 +80,11 @@ pub struct RenderOutput {
     /// Concatenated capability guidance (the `profile_guidance` body; may be
     /// empty, e.g. when every capability is restricted to other agents).
     pub profile_guidance: String,
+    /// Whether any rendered capability was dynamic. Dynamic overlays bypass the
+    /// hash-skip so live output and trust changes always land (their volatile
+    /// output is excluded from the context hash, so the cache TTL — not the
+    /// hash — governs churn).
+    pub has_dynamic: bool,
 }
 
 /// The serializable model exposed to the base overlay template.
@@ -95,6 +106,16 @@ struct CapabilityModel<'a> {
     capability: &'a Capability,
     /// Convenience alias for `capability.params`.
     params: &'a toml::Value,
+    /// Live provider/command output for a dynamic capability (`{{ provider.output }}`,
+    /// `{{ provider.data }}`); absent for static capabilities.
+    provider: Option<ProviderRef<'a>>,
+}
+
+/// The dynamic-output view exposed to a capability's template as `provider`.
+#[derive(Serialize)]
+struct ProviderRef<'a> {
+    output: &'a str,
+    data: &'a serde_json::Value,
 }
 
 /// Render an overlay for `req`.
@@ -112,8 +133,19 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
     let template_name = template_override.unwrap_or(req.template_name);
     let base = templates::resolve(&req.context.repo_base, template_name)?;
 
-    // 2. Render the composed capabilities into the guidance body.
-    let profile_guidance = render_capabilities(&renderer, req.context, req.composition, req.agent)?;
+    // 2. Render the composed capabilities into the guidance body. Dynamic
+    //    capabilities resolve against `now` (parsed from the render timestamp).
+    let now = DateTime::parse_from_rfc3339(&req.generated_at)
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let (profile_guidance, has_dynamic) = render_capabilities(
+        &renderer,
+        req.context,
+        req.composition,
+        req.agent,
+        req.dynamic,
+        now,
+    )?;
 
     // 3. Context hash.
     let context_hash = req.context.compute_hash();
@@ -150,22 +182,30 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
         context_hash,
         template_source: base.source,
         profile_guidance,
+        has_dynamic,
     })
 }
 
-/// Render each composed capability (in order) into a single guidance body.
+/// Render each composed capability (in order) into a single guidance body, and
+/// report whether any rendered capability was dynamic.
 ///
 /// Capabilities restricted to other agents are skipped (the active agent varies
 /// per render). Each capability becomes a `### <title>` section, annotated with
 /// its risk when not `Info`. A synthetic `<profile>:inline` capability can still
 /// be overridden by a `profiles/<name>.md.j2` template file (repo, then global).
+/// A **dynamic** capability resolves its provider/command output (trust-gated,
+/// cache-backed) with `provider.output`/`provider.data` in scope; an untrusted
+/// command renders a skip note instead.
 fn render_capabilities(
     renderer: &MinijinjaRenderer,
     ctx: &Context,
     composition: &Composition,
     agent: &str,
-) -> crate::Result<String> {
+    mode: DynamicMode,
+    now: DateTime<Utc>,
+) -> crate::Result<(String, bool)> {
     let mut sections: Vec<String> = Vec::new();
+    let mut has_dynamic = false;
 
     for rc in &composition.capabilities {
         let cap = &rc.capability;
@@ -173,32 +213,71 @@ fn render_capabilities(
             continue;
         }
 
-        // Guidance source: an inline capability may be overridden by a
-        // `profiles/<name>.md.j2` file; otherwise the capability's own text.
-        let template_src = if rc.inline {
-            read_profile_template(&ctx.repo_base, &rc.via_profile)
-                .unwrap_or_else(|| cap.guidance.clone())
-        } else {
-            cap.guidance.clone()
+        // Render a template with the per-capability model, optionally exposing
+        // dynamic `provider` output.
+        let render_tmpl = |src: &str, provider: Option<&ProviderOutput>| -> crate::Result<String> {
+            let model = CapabilityModel {
+                agent,
+                profile: &rc.via_profile,
+                context: ctx,
+                capability: cap,
+                params: &cap.params,
+                provider: provider.map(|o| ProviderRef {
+                    output: &o.text,
+                    data: &o.data,
+                }),
+            };
+            Ok(renderer
+                .render_str(src, &Value::from_serialize(&model))?
+                .trim()
+                .to_string())
         };
-        if template_src.trim().is_empty() {
-            continue;
+
+        let dyn_res = dynamic::resolve(cap, ctx, &ctx.repo_base, mode, now);
+        if dyn_res.is_some() {
+            has_dynamic = true;
         }
 
-        let model = CapabilityModel {
-            agent,
-            profile: &rc.via_profile,
-            context: ctx,
-            capability: cap,
-            params: &cap.params,
+        let body: String = match &dyn_res {
+            // Dynamic, but the command was refused for lack of trust.
+            Some(res) if res.skipped.is_some() => {
+                format!("> [rosita] {}", res.skipped.as_ref().unwrap())
+            }
+            // Dynamic with resolved (or absent) output.
+            Some(res) => {
+                let out = res.output.as_ref();
+                if cap.guidance.trim().is_empty() {
+                    // No template → embed the raw output, or omit if none.
+                    match out {
+                        Some(o) => o.text.clone(),
+                        None => continue,
+                    }
+                } else {
+                    let rendered = render_tmpl(&cap.guidance, out)?;
+                    if rendered.is_empty() {
+                        continue;
+                    }
+                    rendered
+                }
+            }
+            // Static capability.
+            None => {
+                let template_src = if rc.inline {
+                    read_profile_template(&ctx.repo_base, &rc.via_profile)
+                        .unwrap_or_else(|| cap.guidance.clone())
+                } else {
+                    cap.guidance.clone()
+                };
+                if template_src.trim().is_empty() {
+                    continue;
+                }
+                let rendered = render_tmpl(&template_src, None)?;
+                if rendered.is_empty() {
+                    continue;
+                }
+                rendered
+            }
         };
-        let rendered = renderer
-            .render_str(&template_src, &Value::from_serialize(&model))?
-            .trim()
-            .to_string();
-        if rendered.is_empty() {
-            continue;
-        }
 
         // Inline capabilities are titled by their profile (their description is
         // synthetic); named capabilities use their title.
@@ -211,10 +290,10 @@ fn render_capabilities(
             Some(ann) => format!("### {title} — {ann}"),
             None => format!("### {title}"),
         };
-        sections.push(format!("{heading}\n\n{rendered}"));
+        sections.push(format!("{heading}\n\n{body}"));
     }
 
-    Ok(sections.join("\n\n"))
+    Ok((sections.join("\n\n"), has_dynamic))
 }
 
 fn read_profile_template(repo_base: &Path, profile: &str) -> Option<String> {
@@ -249,6 +328,10 @@ mod tests {
             params: toml::Value::Table(Default::default()),
             guidance: guidance.into(),
             agents: vec![],
+            provider: None,
+            command: None,
+            cache: None,
+            origin: crate::capability::Layer::default(),
         }
     }
 
@@ -296,6 +379,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
 
@@ -330,6 +414,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
 
@@ -355,6 +440,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
         // Restricted to codex → absent from a claude render's guidance.
@@ -388,6 +474,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
 
@@ -407,6 +494,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
         assert!(!out.content.contains("Profile guidance —"));
@@ -425,6 +513,7 @@ mod tests {
             composition: &comp,
             config: &cfg,
             generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
         })
         .unwrap();
         assert!(out.content.contains("agent context"));

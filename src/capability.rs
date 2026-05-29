@@ -19,6 +19,32 @@ use serde::{Deserialize, Serialize};
 
 use crate::profile::Rule;
 
+/// Which config layer defined a capability. Used for trust: commands authored
+/// in built-in/global layers are trusted; commands from a repo layer require
+/// `rosita allow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layer {
+    /// Shipped with rosita.
+    #[default]
+    BuiltIn,
+    /// Global `config.toml`.
+    Global,
+    /// Global `local.toml`.
+    GlobalLocal,
+    /// Repo `.rosita/config.toml`.
+    Repo,
+    /// Repo `.rosita/local.toml`.
+    RepoLocal,
+}
+
+impl Layer {
+    /// Whether commands authored in this layer run without `rosita allow`
+    /// (you authored built-in/global config; repo config is untrusted by default).
+    pub fn is_trusted_authorship(self) -> bool {
+        matches!(self, Layer::BuiltIn | Layer::Global | Layer::GlobalLocal)
+    }
+}
+
 /// How attention-worthy a capability's guidance is. Rendered as an annotation
 /// when it is not [`Risk::Info`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -69,13 +95,30 @@ pub struct Capability {
     /// Free-form parameters exposed to the guidance template as `params`.
     #[serde(default = "empty_params")]
     pub params: toml::Value,
-    /// The guidance markdown, itself rendered as a minijinja template.
+    /// The guidance markdown, itself rendered as a minijinja template. For a
+    /// dynamic capability, `provider.output`/`provider.data` are in scope; an
+    /// empty `guidance` falls back to the raw provider/command output.
     #[serde(default)]
     pub guidance: String,
     /// Optional agent restriction (ids); empty = all agents. Applied at render
     /// time because the active agent varies per render.
     #[serde(default)]
     pub agents: Vec<String>,
+    /// Dynamic: a built-in provider id (`host`/`docker`/…) whose live output is
+    /// embedded. Always trusted (built-in probes are safe).
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Dynamic: a shell command whose (redacted) stdout is embedded.
+    /// Trust-gated when authored in a repo layer (see [`crate::trust`]).
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Cache TTL for dynamic output (e.g. `60s`, `5m`); default 60s.
+    #[serde(default)]
+    pub cache: Option<String>,
+    /// Which config layer defined this capability (set during config load, not
+    /// deserialized). Drives command trust.
+    #[serde(skip)]
+    pub origin: Layer,
 }
 
 /// Default `params`: an empty TOML table (so `{{ params.x }}` is just empty).
@@ -87,6 +130,11 @@ impl Capability {
     /// The heading title for this capability: its description, else its id.
     pub fn title(&self) -> &str {
         self.description.as_deref().unwrap_or(&self.id)
+    }
+
+    /// Whether this capability resolves live output (provider- or command-backed).
+    pub fn is_dynamic(&self) -> bool {
+        self.provider.is_some() || self.command.is_some()
     }
 
     /// The synthetic capability that carries a profile's inline `guidance`
@@ -103,6 +151,10 @@ impl Capability {
             params: empty_params(),
             guidance,
             agents: Vec::new(),
+            provider: None,
+            command: None,
+            cache: None,
+            origin: Layer::default(),
         }
     }
 
@@ -131,6 +183,10 @@ pub fn builtin_capabilities() -> Vec<Capability> {
             params: empty_params(),
             guidance: guidance.to_string(),
             agents: Vec::new(),
+            provider: None,
+            command: None,
+            cache: None,
+            origin: Layer::default(),
         }
     }
     fn tagged(mut c: Capability, tags: &[&str]) -> Capability {
