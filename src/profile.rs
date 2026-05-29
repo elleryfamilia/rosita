@@ -35,9 +35,11 @@ pub struct ProfileConfig {
     /// Higher wins for ordering and exclusivity among multiple matches.
     #[serde(default)]
     pub priority: i32,
-    /// Capability ids this profile composes (in declaration order).
+    /// Capabilities this profile composes (in declaration order). Each entry is
+    /// either a bare id (`"rust-conventions"`) or an id with inline `params`
+    /// overrides (`{ id = "ssh", params = { user = "deploy" } }`).
     #[serde(default)]
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<CapabilityRef>,
     /// Capability ids to suppress across the whole composition.
     #[serde(default)]
     pub exclude: Vec<String>,
@@ -54,6 +56,41 @@ pub struct ProfileConfig {
     /// capability appended after the explicit ones).
     #[serde(default)]
     pub guidance: Option<String>,
+}
+
+/// How a profile references a capability: a bare id, or an id with inline
+/// `params` overrides. Inline params are public (they live in the profile);
+/// sensitive values belong in `local.toml`'s `[capability_params]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CapabilityRef {
+    /// `capabilities = ["rust-conventions"]`
+    Id(String),
+    /// `capabilities = [{ id = "ssh", params = { user = "deploy" } }]`
+    Detailed {
+        /// The capability id.
+        id: String,
+        /// Inline params overrides (merged over the capability's defaults).
+        #[serde(default)]
+        params: Option<toml::Value>,
+    },
+}
+
+impl CapabilityRef {
+    /// The referenced capability id.
+    pub fn id(&self) -> &str {
+        match self {
+            CapabilityRef::Id(s) => s,
+            CapabilityRef::Detailed { id, .. } => id,
+        }
+    }
+    /// The inline params overrides, if any.
+    pub fn params(&self) -> Option<&toml::Value> {
+        match self {
+            CapabilityRef::Detailed { params, .. } => params.as_ref(),
+            CapabilityRef::Id(_) => None,
+        }
+    }
 }
 
 /// A single match condition.
@@ -160,10 +197,15 @@ impl Composition {
 ///
 /// Agent restriction (`Capability::agents`) is intentionally **not** applied
 /// here — the active agent varies per render, so it is applied at render time.
+///
+/// Effective `params` for each resolved capability are merged (later wins):
+/// the capability's own defaults ← the profile reference's inline `params` ←
+/// the `capability_params[id]` (the private/local) overrides.
 pub fn compose(
     ctx: &Context,
     profiles: &[ProfileConfig],
     capabilities: &[Capability],
+    capability_params: &BTreeMap<String, toml::Value>,
 ) -> Composition {
     // 1. Matching profiles + their per-rule reasons.
     let mut matching: Vec<(&ProfileConfig, Vec<String>)> = profiles
@@ -187,20 +229,23 @@ pub fn compose(
         .flat_map(|(p, _)| p.exclude.iter().map(String::as_str))
         .collect();
 
-    let lib: BTreeMap<&str, &Capability> =
-        capabilities.iter().map(|c| (c.id.as_str(), c)).collect();
+    let cx = ComposeCtx {
+        ctx,
+        lib: capabilities.iter().map(|c| (c.id.as_str(), c)).collect(),
+        exclude,
+        capability_params,
+    };
 
     let mut acc = Accumulator::default();
     for (p, prule) in &matching {
         let provenance = format!("via profile '{}' ({})", p.name, prule.join(", "));
-        for cap_id in &p.capabilities {
+        for cap_ref in &p.capabilities {
             acc.add(
-                cap_id,
+                &cx,
+                cap_ref.id(),
                 &p.name,
                 &provenance,
-                &lib,
-                &exclude,
-                ctx,
+                cap_ref.params(),
                 &mut HashSet::new(),
             );
         }
@@ -208,7 +253,7 @@ pub fn compose(
         // appended after this profile's explicit capabilities.
         if let Some(text) = &p.guidance {
             let inline = Capability::inline(&p.name, text.clone());
-            if exclude.contains(inline.id.as_str()) || !acc.added.insert(inline.id.clone()) {
+            if cx.exclude.contains(inline.id.as_str()) || !acc.added.insert(inline.id.clone()) {
                 continue;
             }
             let reason = format!("inline guidance via profile '{}'", p.name);
@@ -229,6 +274,14 @@ pub fn compose(
     }
 }
 
+/// Immutable inputs shared across [`Accumulator::add`] recursion.
+struct ComposeCtx<'a> {
+    ctx: &'a Context,
+    lib: BTreeMap<&'a str, &'a Capability>,
+    exclude: HashSet<&'a str>,
+    capability_params: &'a BTreeMap<String, toml::Value>,
+}
+
 /// Mutable state threaded through capability resolution.
 #[derive(Default)]
 struct Accumulator {
@@ -238,52 +291,57 @@ struct Accumulator {
 }
 
 impl Accumulator {
-    /// Resolve `id` (and its `requires`, dependencies first) into the set.
-    #[allow(clippy::too_many_arguments)]
+    /// Resolve `id` (and its `requires`, dependencies first) into the set,
+    /// applying `ref_params` (the profile reference's inline overrides) and the
+    /// private `capability_params` to the capability's effective params.
     fn add(
         &mut self,
+        cx: &ComposeCtx,
         id: &str,
         via_profile: &str,
         provenance: &str,
-        lib: &BTreeMap<&str, &Capability>,
-        exclude: &HashSet<&str>,
-        ctx: &Context,
+        ref_params: Option<&toml::Value>,
         in_progress: &mut HashSet<String>,
     ) {
-        if exclude.contains(id) || self.added.contains(id) {
+        if cx.exclude.contains(id) || self.added.contains(id) {
             return;
         }
         if !in_progress.insert(id.to_string()) {
             crate::warn_user!("capability dependency cycle at '{id}' — skipping");
             return;
         }
-        let outcome = match lib.get(id) {
+        let outcome = match cx.lib.get(id) {
             None => {
                 crate::warn_user!("unknown capability '{id}' ({provenance})");
                 None
             }
-            Some(cap) if !capability_applies(ctx, cap) => None, // `when` not satisfied
+            Some(cap) if !capability_applies(cx.ctx, cap) => None, // `when` not satisfied
             Some(cap) => Some(*cap),
         };
         if let Some(cap) = outcome {
-            // Dependencies first, so they render before the dependent.
+            // Dependencies first, so they render before the dependent. Deps
+            // carry no per-reference params (they aren't listed by a profile).
             for dep in &cap.requires {
                 let dep_provenance = format!("required by '{id}'");
-                self.add(
-                    dep,
-                    via_profile,
-                    &dep_provenance,
-                    lib,
-                    exclude,
-                    ctx,
-                    in_progress,
-                );
+                self.add(cx, dep, via_profile, &dep_provenance, None, in_progress);
             }
             self.added.insert(id.to_string());
             let reason = format!("capability '{id}' {provenance}");
             self.reasons.push(reason.clone());
+
+            // Effective params: defaults ← ref params ← private params.
+            let mut params = cap.params.clone();
+            if let Some(rp) = ref_params {
+                params = crate::config::merge_toml(params, rp.clone());
+            }
+            if let Some(lp) = cx.capability_params.get(id) {
+                params = crate::config::merge_toml(params, lp.clone());
+            }
+            let mut resolved_cap = cap.clone();
+            resolved_cap.params = params;
+
             self.resolved.push(ResolvedCapability {
-                capability: cap.clone(),
+                capability: resolved_cap,
                 via_profile: via_profile.to_string(),
                 reason,
                 inline: false,
@@ -378,7 +436,10 @@ pub fn builtin_profiles() -> Vec<ProfileConfig> {
             name: name.to_string(),
             when,
             priority,
-            capabilities: capabilities.iter().map(|s| s.to_string()).collect(),
+            capabilities: capabilities
+                .iter()
+                .map(|s| CapabilityRef::Id(s.to_string()))
+                .collect(),
             exclude: Vec::new(),
             exclusive: false,
             template: None,
@@ -469,12 +530,20 @@ mod tests {
             name: name.into(),
             when,
             priority,
-            capabilities: caps.iter().map(|s| s.to_string()).collect(),
+            capabilities: caps
+                .iter()
+                .map(|s| CapabilityRef::Id(s.to_string()))
+                .collect(),
             exclude: vec![],
             exclusive: false,
             template: None,
             guidance: None,
         }
+    }
+
+    /// compose() with no private params (the common test case).
+    fn compose_t(ctx: &Context, profiles: &[ProfileConfig], caps: &[Capability]) -> Composition {
+        compose(ctx, profiles, caps, &BTreeMap::new())
     }
 
     fn ids(c: &Composition) -> Vec<String> {
@@ -537,7 +606,7 @@ mod tests {
         let mut ctx = sample_context();
         ctx.stacks = vec!["rust".into()];
         ctx.cwd = ctx.git.as_ref().unwrap().root.join("infra/db");
-        let c = compose(&ctx, &builtin_profiles(), &builtin_capabilities());
+        let c = compose_t(&ctx, &builtin_profiles(), &builtin_capabilities());
         assert_eq!(c.profiles, vec!["infra", "rust", "default"]);
         assert_eq!(
             ids(&c),
@@ -555,7 +624,7 @@ mod tests {
             prof("hi", 10, vec![], &["shared", "a"]),
             prof("lo", 1, vec![], &["shared", "b"]),
         ];
-        let c = compose(&sample_context(), &profiles, &caps);
+        let c = compose_t(&sample_context(), &profiles, &caps);
         // `shared` appears once, attributed to the higher-priority profile.
         assert_eq!(ids(&c), vec!["shared", "a", "b"]);
         let shared = c
@@ -572,7 +641,7 @@ mod tests {
         let mut excluder = prof("x", 5, vec![], &["a"]);
         excluder.exclude = vec!["b".into()];
         let profiles = vec![excluder, prof("y", 1, vec![], &["a", "b"])];
-        let c = compose(&sample_context(), &profiles, &caps);
+        let c = compose_t(&sample_context(), &profiles, &caps);
         // `b` is excluded everywhere; `a` survives once.
         assert_eq!(ids(&c), vec!["a"]);
     }
@@ -583,7 +652,7 @@ mod tests {
         top.requires = vec!["dep".into()];
         let caps = vec![top, cap("dep", "D")];
         let profiles = vec![prof("p", 1, vec![], &["top"])];
-        let c = compose(&sample_context(), &profiles, &caps);
+        let c = compose_t(&sample_context(), &profiles, &caps);
         // Dependency renders before the dependent.
         assert_eq!(ids(&c), vec!["dep", "top"]);
         let dep = c
@@ -601,7 +670,7 @@ mod tests {
         let mut b = cap("b", "B");
         b.requires = vec!["a".into()];
         let caps = vec![a, b];
-        let c = compose(&sample_context(), &[prof("p", 1, vec![], &["a"])], &caps);
+        let c = compose_t(&sample_context(), &[prof("p", 1, vec![], &["a"])], &caps);
         // No panic/infinite loop; both still land exactly once.
         let got = ids(&c);
         assert_eq!(got.len(), 2);
@@ -618,12 +687,12 @@ mod tests {
         // Stack is rust → gated capability is filtered out.
         let mut ctx = sample_context();
         ctx.stacks = vec!["rust".into()];
-        assert_eq!(ids(&compose(&ctx, &profiles, &caps)), vec!["always"]);
+        assert_eq!(ids(&compose_t(&ctx, &profiles, &caps)), vec!["always"]);
 
         // Stack is go → it applies.
         ctx.stacks = vec!["go".into()];
         assert_eq!(
-            ids(&compose(&ctx, &profiles, &caps)),
+            ids(&compose_t(&ctx, &profiles, &caps)),
             vec!["gated", "always"]
         );
     }
@@ -638,7 +707,7 @@ mod tests {
             lockdown,
             prof("default", 0, vec![], &["base"]),
         ];
-        let c = compose(&sample_context(), &profiles, &caps);
+        let c = compose_t(&sample_context(), &profiles, &caps);
         // Only the (highest-priority) exclusive profile contributes.
         assert_eq!(c.profiles, vec!["lockdown"]);
         assert_eq!(ids(&c), vec!["b"]);
@@ -648,7 +717,7 @@ mod tests {
     fn compose_back_compat_inline_guidance() {
         let mut p = prof("legacy", 5, vec![], &[]);
         p.guidance = Some("legacy inline guidance".into());
-        let c = compose(&sample_context(), &[p], &[]);
+        let c = compose_t(&sample_context(), &[p], &[]);
         assert_eq!(ids(&c), vec!["legacy:inline"]);
         let inline = &c.capabilities[0];
         assert!(inline.inline);
@@ -660,7 +729,7 @@ mod tests {
         let caps = vec![cap("a", "A")];
         let mut p = prof("p", 5, vec![], &["a"]);
         p.guidance = Some("note".into());
-        let c = compose(&sample_context(), &[p], &caps);
+        let c = compose_t(&sample_context(), &[p], &caps);
         assert_eq!(ids(&c), vec!["a", "p:inline"]);
     }
 
@@ -668,16 +737,41 @@ mod tests {
     fn compose_unknown_capability_is_skipped() {
         let profiles = vec![prof("p", 1, vec![], &["does-not-exist", "real"])];
         let caps = vec![cap("real", "R")];
-        let c = compose(&sample_context(), &profiles, &caps);
+        let c = compose_t(&sample_context(), &profiles, &caps);
         assert_eq!(ids(&c), vec!["real"]);
     }
 
     #[test]
     fn default_only_when_nothing_else_matches() {
         let ctx = sample_context(); // no stack, not in infra/
-        let c = compose(&ctx, &builtin_profiles(), &builtin_capabilities());
+        let c = compose_t(&ctx, &builtin_profiles(), &builtin_capabilities());
         assert_eq!(c.profiles, vec!["default"]);
         assert_eq!(ids(&c), vec!["baseline"]);
         assert_eq!(c.label(), "default");
+    }
+
+    #[test]
+    fn compose_merges_params_defaults_then_ref_then_private() {
+        // Capability default params…
+        let mut ssh = cap("ssh", "ssh {{ params.user }}@{{ params.host }}");
+        ssh.params = toml::from_str("user = \"root\"\nport = 22\n").unwrap();
+        // …profile-supplied override (public)…
+        let mut p = prof("p", 1, vec![], &[]);
+        p.capabilities = vec![CapabilityRef::Detailed {
+            id: "ssh".into(),
+            params: Some(toml::from_str("user = \"deploy\"").unwrap()),
+        }];
+        // …private (local) params win, and fill in the sensitive host.
+        let mut private = BTreeMap::new();
+        private.insert(
+            "ssh".to_string(),
+            toml::from_str("host = \"box.local\"\nport = 2222\n").unwrap(),
+        );
+
+        let c = compose(&sample_context(), &[p], &[ssh], &private);
+        let params = &c.capabilities[0].capability.params;
+        assert_eq!(params.get("user").unwrap().as_str(), Some("deploy")); // ref > default
+        assert_eq!(params.get("host").unwrap().as_str(), Some("box.local")); // private adds
+        assert_eq!(params.get("port").unwrap().as_integer(), Some(2222)); // private > default
     }
 }

@@ -118,9 +118,20 @@ capability set. 102 tests, clippy+fmt clean.
 - **Tests:** compose() additive union/order/exclude/requires/when; back-compat
   inline guidance; render concatenation; explain provenance.
 
-## Phase 2 — Public/private layering + `local.toml` + doctor lint
+## Phase 2 — Public/private layering + `local.toml` + doctor lint ✅ done
 
 **Goal:** keep sensitive specifics out of shareable config.
+
+**Status:** landed. `Config::load_from` now layers built-in ← global
+`config.toml` ← global `local.toml` ← repo `config.toml` ← repo `local.toml`
+(`global_local_path`/`repo_local_path` helpers, each recorded in `sources`).
+`capability_params` (keyed by id) deep-merge across layers via `merge_toml`;
+`CapabilityRef` lets a profile pass public `params` overrides; compose resolves
+effective params as default ← profile-supplied ← local. `init` scaffolds a
+gitignored `local.toml` stub and gitignores it (repo + `--global`); the sample
+`[host_classes]` moved out of the public `config.toml` into `local.toml`.
+`doctor` adds a leak lint over public layers (IPv4 / `*.tld` globs / multi-label
+hostnames). 108 tests, clippy+fmt clean.
 
 - `src/config.rs`: extend `load_from` to also read `<global>/local.toml` (after
   global) and `<repo_base>/.rosita/local.toml` (after repo). New helpers

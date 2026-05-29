@@ -272,6 +272,78 @@ fn init_scaffolds_config_and_templates() {
     assert!(fx.exists(".rosita/templates/overlay.md.j2"));
     assert!(fx.read(".gitignore").contains(".rosita/generated/"));
     assert!(fx.read(".rosita/config.toml").contains("[profiles]"));
+    // The private layer stub is scaffolded and gitignored.
+    assert!(fx.exists(".rosita/local.toml"));
+    assert!(fx.read(".gitignore").contains(".rosita/local.toml"));
+}
+
+#[test]
+fn local_toml_supplies_private_params_to_capabilities() {
+    // Public config defines a capability whose guidance references params but
+    // names no machine; the private local.toml fills them in. The rendered
+    // overlay carries the private values; the public config never does.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\n\
+         id = \"deploy\"\n\
+         description = \"Deploy target\"\n\
+         guidance = \"Deploy as {{ params.user }}@{{ params.host }}.\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"deploy\"\n\
+         priority = 70\n\
+         capabilities = [\"deploy\"]\n",
+    );
+    fx.write(
+        ".rosita/local.toml",
+        "[capability_params.deploy]\nhost = \"box.private.example\"\nuser = \"deployer\"\n",
+    );
+
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success();
+
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(overlay.contains("Deploy as deployer@box.private.example."));
+    // The shareable config never contained the private host.
+    assert!(!fx
+        .read(".rosita/config.toml")
+        .contains("box.private.example"));
+}
+
+#[test]
+fn doctor_leak_lint_flags_public_but_not_local() {
+    // A machine-specific literal in the PUBLIC config.toml is flagged…
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write(
+        ".rosita/config.toml",
+        "[host_classes]\nwork = [\"*.corp.example.com\"]\n",
+    );
+    fx.cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("looks private"))
+        .stdout(predicate::str::contains("corp.example.com"));
+
+    // …but the same literal in the PRIVATE local.toml is not.
+    let fx2 = Fixture::new();
+    fx2.rust_project();
+    fx2.write(".rosita/config.toml", "[defaults]\nagent = \"claude\"\n");
+    fx2.write(
+        ".rosita/local.toml",
+        "[host_classes]\nwork = [\"*.corp.example.com\"]\n",
+    );
+    fx2.cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no private-looking literals"))
+        .stdout(predicate::str::contains("looks private").not());
 }
 
 #[test]

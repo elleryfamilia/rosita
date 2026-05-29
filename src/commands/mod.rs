@@ -61,7 +61,12 @@ pub fn prepare(rt: &Runtime) -> crate::Result<Prepared> {
     let repo_base = context::repo_base_for(&rt.cwd);
     let config = Config::load(&repo_base).context("loading configuration")?;
     let context = context::detect_context(&rt.cwd, &config).context("detecting context")?;
-    let composition = profile::compose(&context, &config.profiles, &config.capabilities);
+    let composition = profile::compose(
+        &context,
+        &config.profiles,
+        &config.capabilities,
+        &config.capability_params,
+    );
     Ok(Prepared {
         repo_base,
         config,
@@ -105,6 +110,10 @@ pub fn resolve_agents(arg: Option<&str>, config: &Config) -> crate::Result<Vec<S
 /// documented example are the same single source of truth.
 pub const SAMPLE_REPO_CONFIG: &str = include_str!("../../examples/config.toml");
 
+/// The sample (gitignored) `local.toml` written by `rosita init` — the private
+/// layer stub with commented `host_classes`/`capability_params` examples.
+pub const SAMPLE_LOCAL_CONFIG: &str = include_str!("../../examples/local.toml");
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,10 +128,18 @@ mod tests {
             SAMPLE_REPO_CONFIG,
         )
         .unwrap();
+        // The private layer stub sits beside it and must also parse.
+        std::fs::write(
+            crate::config::repo_local_path(d.path()),
+            SAMPLE_LOCAL_CONFIG,
+        )
+        .unwrap();
         // No global layer → fully hermetic.
         let cfg = Config::load_from(None, d.path()).expect("sample config must parse");
         assert_eq!(cfg.default_agent, "claude");
         assert!(cfg.profiles.iter().any(|p| p.name == "infra"));
+        // The public sample must not name a machine (host_classes moved to local).
+        assert!(!SAMPLE_REPO_CONFIG.contains("example.com"));
     }
 
     #[test]

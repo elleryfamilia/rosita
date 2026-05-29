@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{Runtime, SAMPLE_REPO_CONFIG};
+use super::{Runtime, SAMPLE_LOCAL_CONFIG, SAMPLE_REPO_CONFIG};
 use crate::cli::InitArgs;
 use crate::context::{git, repo_base_for};
 use crate::writer::{self, AtomicWriter, Writer};
@@ -23,11 +23,17 @@ pub fn run(rt: &Runtime, args: &InitArgs) -> crate::Result<()> {
         println!("(dry run — no files written)");
     }
 
-    // Repo config.
+    // Repo config (public) + private local.toml stub.
     scaffold(
         &writer,
         &config::repo_config_path(&repo_base),
         SAMPLE_REPO_CONFIG,
+        args.force,
+    )?;
+    scaffold(
+        &writer,
+        &config::repo_local_path(&repo_base),
+        SAMPLE_LOCAL_CONFIG,
         args.force,
     )?;
 
@@ -58,6 +64,20 @@ pub fn run(rt: &Runtime, args: &InitArgs) -> crate::Result<()> {
                     SAMPLE_REPO_CONFIG,
                     args.force,
                 )?;
+                scaffold(
+                    &writer,
+                    &dir.join("local.toml"),
+                    SAMPLE_LOCAL_CONFIG,
+                    args.force,
+                )?;
+                // Keep the private global layer out of any VCS that dir lives in.
+                let gi = dir.join(".gitignore");
+                if let Some(updated) =
+                    writer::ensure_line(std::fs::read_to_string(&gi).ok().as_deref(), "local.toml")
+                {
+                    let wf = writer.write(&gi, &updated)?;
+                    println!("  {:<13} {}", wf.action.label(), gi.display());
+                }
                 for (name, content) in templates::embedded_all() {
                     scaffold(
                         &writer,
@@ -90,7 +110,7 @@ fn ensure_gitignore(writer: &dyn Writer, repo_base: &Path) -> crate::Result<()> 
     let gitignore = repo_base.join(".gitignore");
     let mut content = std::fs::read_to_string(&gitignore).ok();
     let mut changed = false;
-    for entry in [".rosita/generated/", ".rosita/logs/"] {
+    for entry in [".rosita/generated/", ".rosita/logs/", ".rosita/local.toml"] {
         if let Some(updated) = writer::ensure_line(content.as_deref(), entry) {
             content = Some(updated);
             changed = true;

@@ -1,10 +1,15 @@
-//! Layered configuration: built-in defaults ← global ← repo.
+//! Layered configuration: built-in ← global `config.toml` ← global `local.toml`
+//! ← repo `config.toml` ← repo `local.toml` (later wins).
 //!
 //! - Global: `$XDG_CONFIG_HOME/rosita/config.toml` (falls back to
 //!   `~/.config/rosita/config.toml`). Overridable via `ROSITA_CONFIG_DIR`
 //!   (used in tests and for isolation).
 //! - Repo: `<repo_base>/.rosita/config.toml`, where `repo_base` is the git
 //!   root (or the cwd when not in a repo).
+//! - `local.toml` (in either dir) is the **private**, gitignored layer for
+//!   sensitive specifics (real hostnames, `host_classes`, capability `params`);
+//!   `config.toml` is the **public**, shareable layer. `rosita doctor` lints the
+//!   public layers for machine-specific literals that belong in `local.toml`.
 //!
 //! Each layer is parsed into a [`RawConfig`] of optional fields so we can tell
 //! "unset" from "set to the default", merge precisely, then finalize against the
@@ -33,6 +38,10 @@ pub struct Config {
     pub profiles: Vec<ProfileConfig>,
     /// Capability library (built-ins merged with `[[capabilities]]` by id).
     pub capabilities: Vec<Capability>,
+    /// Per-capability `params` overrides keyed by capability id, deep-merged
+    /// across layers. The private (`local.toml`) place for sensitive values
+    /// a public capability's guidance references.
+    pub capability_params: BTreeMap<String, toml::Value>,
     /// Agent descriptors (built-ins merged with `[[agents]]` overrides by id).
     pub agents: Vec<AgentDescriptor>,
     /// hostname-glob → host class (e.g. `work`).
@@ -69,23 +78,33 @@ impl Config {
 
     /// Like [`Config::load`] but with an explicit global config path (or none).
     /// Keeps tests hermetic without mutating process-global environment.
+    ///
+    /// Merge order (later wins): built-in ← global `config.toml` ← global
+    /// `local.toml` ← repo `config.toml` ← repo `local.toml`. The `*.toml`
+    /// files named `local.toml` are the private, gitignored layer (real
+    /// hostnames, `host_classes`, capability `params`); the `config.toml` files
+    /// are the public, shareable layer.
     pub fn load_from(global: Option<&Path>, repo_base: &Path) -> Result<Self> {
-        let mut sources = Vec::new();
-        let mut raw = RawConfig::default();
-
+        // Layers in precedence order (later wins). `None` entries (e.g. no
+        // global dir) are skipped; missing files contribute nothing.
+        let mut layers: Vec<PathBuf> = Vec::new();
         if let Some(global) = global {
-            if let Some(layer) = RawConfig::from_path(global)? {
-                raw.merge(layer);
-                sources.push(global.to_path_buf());
+            layers.push(global.to_path_buf());
+            if let Some(dir) = global.parent() {
+                layers.push(dir.join("local.toml")); // global-local
             }
         }
+        layers.push(repo_config_path(repo_base));
+        layers.push(repo_local_path(repo_base)); // repo-local
 
-        let repo = repo_config_path(repo_base);
-        if let Some(layer) = RawConfig::from_path(&repo)? {
-            raw.merge(layer);
-            sources.push(repo);
+        let mut sources = Vec::new();
+        let mut raw = RawConfig::default();
+        for path in layers {
+            if let Some(layer) = RawConfig::from_path(&path)? {
+                raw.merge(layer);
+                sources.push(path);
+            }
         }
-
         Ok(raw.finalize(sources))
     }
 
@@ -108,6 +127,8 @@ struct RawConfig {
     profiles: Vec<ProfileConfig>,
     #[serde(default)]
     capabilities: Vec<Capability>,
+    #[serde(default)]
+    capability_params: BTreeMap<String, toml::Value>,
     #[serde(default)]
     agents: Vec<AgentDescriptor>,
     #[serde(default)]
@@ -190,6 +211,15 @@ impl RawConfig {
                 None => self.capabilities.push(cap),
             }
         }
+        // Capability params deep-merge across layers (later wins per key), so a
+        // private layer can supply just the sensitive values.
+        for (id, params) in other.capability_params {
+            let slot = self
+                .capability_params
+                .entry(id)
+                .or_insert(toml::Value::Table(toml::map::Map::new()));
+            *slot = merge_toml(slot.clone(), params);
+        }
         // Repo agent descriptors replace built-in/global ones of the same id.
         for a in other.agents {
             match self.agents.iter_mut().find(|e| e.id == a.id) {
@@ -249,10 +279,29 @@ impl RawConfig {
             },
             profiles,
             capabilities,
+            capability_params: self.capability_params,
             agents,
             host_classes: self.host_classes,
             sources,
         }
+    }
+}
+
+/// Deep-merge two TOML values, with `over` winning. Tables merge key-by-key
+/// (recursing); any non-table (or a type mismatch) is replaced wholesale.
+pub(crate) fn merge_toml(base: toml::Value, over: toml::Value) -> toml::Value {
+    match (base, over) {
+        (toml::Value::Table(mut b), toml::Value::Table(o)) => {
+            for (k, v) in o {
+                let merged = match b.remove(&k) {
+                    Some(existing) => merge_toml(existing, v),
+                    None => v,
+                };
+                b.insert(k, merged);
+            }
+            toml::Value::Table(b)
+        }
+        (_, over) => over,
     }
 }
 
@@ -327,6 +376,17 @@ pub fn global_config_dir() -> Option<PathBuf> {
 /// Path to the global `config.toml`, if a config dir can be resolved.
 pub fn global_config_path() -> Option<PathBuf> {
     global_config_dir().map(|d| d.join("config.toml"))
+}
+
+/// Path to the global private `local.toml` (gitignored), if resolvable.
+pub fn global_local_path() -> Option<PathBuf> {
+    global_config_dir().map(|d| d.join("local.toml"))
+}
+
+/// Repo private `local.toml` path (gitignored): real hostnames, `host_classes`,
+/// capability `params` — the sensitive layer kept out of the shareable config.
+pub fn repo_local_path(repo_base: &Path) -> PathBuf {
+    repo_dir(repo_base).join("local.toml")
 }
 
 /// Global templates directory.
@@ -467,5 +527,59 @@ mod tests {
         // HOME-based fallback shape when override/XDG are absent is plausible.
         let dir = global_config_dir();
         assert!(dir.is_some() || std::env::var_os("HOME").is_none());
+    }
+
+    #[test]
+    fn merge_toml_deep_merges_tables_over_wins() {
+        let base: toml::Value = toml::from_str("a = 1\n[t]\nx = 1\ny = 2\n").unwrap();
+        let over: toml::Value = toml::from_str("a = 9\n[t]\ny = 20\nz = 30\n").unwrap();
+        let m = merge_toml(base, over);
+        assert_eq!(m.get("a").unwrap().as_integer(), Some(9)); // scalar replaced
+        let t = m.get("t").unwrap();
+        assert_eq!(t.get("x").unwrap().as_integer(), Some(1)); // kept from base
+        assert_eq!(t.get("y").unwrap().as_integer(), Some(20)); // overridden
+        assert_eq!(t.get("z").unwrap().as_integer(), Some(30)); // added
+    }
+
+    #[test]
+    fn capability_params_deep_merge_across_layers() {
+        // Public layer sets a non-sensitive default; private layer fills in the
+        // sensitive value without clobbering the rest.
+        let mut base: RawConfig =
+            toml::from_str("[capability_params.ssh]\nuser = \"deploy\"\nport = 22\n").unwrap();
+        let local: RawConfig =
+            toml::from_str("[capability_params.ssh]\nhost = \"box.private\"\nport = 2222\n")
+                .unwrap();
+        base.merge(local);
+        let c = base.finalize(vec![]);
+        let ssh = c.capability_params.get("ssh").unwrap();
+        assert_eq!(ssh.get("user").unwrap().as_str(), Some("deploy")); // kept
+        assert_eq!(ssh.get("host").unwrap().as_str(), Some("box.private")); // added
+        assert_eq!(ssh.get("port").unwrap().as_integer(), Some(2222)); // overridden
+    }
+
+    #[test]
+    fn local_layer_loads_after_and_overrides_config() {
+        // A repo `local.toml` is read after `config.toml` and wins.
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
+        std::fs::write(
+            repo_config_path(repo.path()),
+            "[defaults]\nagent = \"codex\"\n[capability_params.x]\nv = 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo_local_path(repo.path()),
+            "[capability_params.x]\nv = 2\nsecret = \"shh\"\n",
+        )
+        .unwrap();
+
+        let c = Config::load_from(None, repo.path()).unwrap();
+        let x = c.capability_params.get("x").unwrap();
+        assert_eq!(x.get("v").unwrap().as_integer(), Some(2)); // local wins
+        assert_eq!(x.get("secret").unwrap().as_str(), Some("shh"));
+        // Both files are recorded as sources, in load order.
+        assert!(c.sources[0].ends_with("config.toml"));
+        assert!(c.sources[1].ends_with("local.toml"));
     }
 }

@@ -1,5 +1,8 @@
-# .rosita/config.toml — repo-level rosita configuration.
-# Layered under the global config (~/.config/rosita/config.toml); repo wins.
+# .rosita/config.toml — repo-level rosita configuration. PUBLIC / shareable:
+# safe to commit. Keep sensitive specifics (real hostnames, host_classes globs,
+# capability params values) in the gitignored .rosita/local.toml instead.
+# Layer order (later wins): built-in ← global config.toml ← global local.toml ←
+# repo config.toml ← repo local.toml.
 
 [defaults]
 # Agent used when `rosita render` / `rosita run` omit --agent.
@@ -17,9 +20,9 @@ write_override = false
 # Warn when generated output exceeds this many KiB.
 max_output_kib = 32
 
-# Map hostnames (globs) to a class you can match on in profile rules.
-[host_classes]
-work = ["*.corp.example.com", "work-*"]
+# `host_classes` (hostname globs → class) and capability `params` values are
+# private — define them in .rosita/local.toml, not here. You can still *match*
+# on `host_class` in profile rules below; only the definitions are private.
 
 # Capabilities are reusable guidance atoms that profiles compose. Built-ins are
 # always present (e.g. baseline, rust-conventions, infra-caution, terse-comms,

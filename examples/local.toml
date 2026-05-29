@@ -1,0 +1,21 @@
+# .rosita/local.toml — PRIVATE, machine-/repo-specific overrides.
+#
+# This file is gitignored and layered AFTER config.toml (it wins). Put sensitive
+# specifics here so the shareable config.toml stays free of them:
+#   - real hostnames and host_classes globs
+#   - capability `params` values (hosts, users, paths, tokens-by-reference)
+#
+# Everything valid in config.toml is valid here. Nothing below is active until
+# you uncomment it.
+
+# Map your real hostnames (globs) to a class. Profiles in config.toml can then
+# match on `host_class` without the public config ever naming a machine.
+# [host_classes]
+# work = ["*.corp.example.com", "work-laptop-*"]
+# home = ["nas.local", "*.home.arpa"]
+
+# Fill in the private params a public capability's guidance references. These
+# deep-merge over the capability's defaults and any profile-supplied params.
+# [capability_params.ssh]
+# host = "build-box.corp.example.com"
+# user = "deploy"

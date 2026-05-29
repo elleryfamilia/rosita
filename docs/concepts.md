@@ -100,20 +100,27 @@ rosita knows the context is current; one launched directly knows to check.
 `doctor` flags drift by comparing hashes. Staleness is made *evident*, not
 prevented.
 
-## Public vs private **(partially implemented; private layer planned)**
+## Public vs private **(layering + lint implemented; provider output planned)**
 
 The guiding principle: **references are public; definitions of sensitive
 specifics are private.**
 
 - **Public / shareable** — capability guidance and profile rule *references*
-  (`host_class == "work"`, `params.allowed_hosts`). Safe to commit, even
-  open-source.
+  (`host_class == "work"`, `{{ params.host }}`). Lives in `config.toml`. Safe to
+  commit, even open-source.
 - **Private** — the sensitive *definitions*: real hostnames, `host_classes`
-  globs, capability `params` values, and all dynamic provider output. These live
-  in a gitignored local layer (and/or a separate private repo), never in the
-  shareable config.
+  globs, capability `params` values, and (planned) all dynamic provider output.
+  These live in `local.toml` (global and/or repo), gitignored, layered **after**
+  `config.toml` so they win. `[capability_params.<id>]` supplies a capability's
+  private params without redefining it; a profile may also pass public `params`
+  overrides via `{ id = "x", params = … }`. Merge order: capability default ←
+  profile-supplied ← local.
+- **`rosita doctor` lints** the public layers for machine-specific literals
+  (IPv4, `*.domain.tld` globs, multi-label hostnames) and nudges you to move
+  them to `local.toml`. `rosita init` scaffolds a gitignored `local.toml` stub.
 - **Prefer detection over storage** — don't store network topology; let a
-  provider probe it at runtime. It can't leak (it's local) and can't go stale.
+  provider probe it at runtime (planned). It can't leak (it's local) and can't
+  go stale.
 
 This is what lets you share a capability library across machines (and publicly)
 without exposing what your machines are or what they can reach.
