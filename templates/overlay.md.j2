@@ -1,0 +1,25 @@
+# {{ context.repo_name | default("Project", true) }} — agent context
+
+_Active profile: **{{ profile }}**_{% if context.git and context.git.branch %} · _branch_ `{{ context.git.branch }}`{% endif %}
+
+{% if context.stacks %}**Stack:** {{ context.stacks | join(", ") }}
+{% endif %}{% if context.languages %}**Languages:** {{ context.languages | join(", ") }}
+{% endif %}{% if context.package_managers %}**Package managers:** {{ context.package_managers | join(", ") }}
+{% endif %}
+{% if context.commands.build or context.commands.test or context.commands.lint or context.commands.run %}## Commands
+
+{% if context.commands.build %}- **Build:** {% for c in context.commands.build %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if context.commands.test %}- **Test:** {% for c in context.commands.test %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if context.commands.lint %}- **Lint:** {% for c in context.commands.lint %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if context.commands.run %}- **Run:** {% for c in context.commands.run %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}
+{% endif %}{% if profile_guidance %}## Profile guidance — {{ profile }}
+
+{{ profile_guidance }}
+
+{% endif %}## Runtime
+
+- OS / arch: **{{ context.system.os }} / {{ context.system.arch }}**
+{% if context.system.host_class %}- Host class: **{{ context.system.host_class }}**
+{% endif %}{% if context.git and context.git.is_worktree %}- ⚠️ This is a linked git **worktree**; changes here are not on the primary checkout.
+{% endif %}

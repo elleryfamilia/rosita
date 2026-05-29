@@ -1,0 +1,53 @@
+# .rosita/config.toml — repo-level rosita configuration.
+# Layered under the global config (~/.config/rosita/config.toml); repo wins.
+
+[defaults]
+# Agent used when `rosita render` / `rosita run` omit --agent.
+agent = "claude"
+
+[env]
+# ONLY these env var NAMES are ever surfaced (values are redacted as a backstop).
+allowlist = ["LANG", "LC_ALL", "TERM", "TZ", "EDITOR", "CI"]
+# Names matching these regexes are dropped even if allowlisted above.
+deny_name_patterns = ["(?i)(secret|token|key|password|credential|auth)"]
+
+[codex]
+# Opt-in to writing AGENTS.override.md. AGENTS.md itself is never overwritten.
+write_override = false
+# Warn when generated output exceeds this many KiB.
+max_output_kib = 32
+
+# Map hostnames (globs) to a class you can match on in profile rules.
+[host_classes]
+work = ["*.corp.example.com", "work-*"]
+
+# Profiles override the built-ins by name; add your own freely.
+# A profile matches when ALL `when` clauses match (AND); highest priority wins.
+# Fields: stack | language | package_manager | path | branch | repo | host_class | os | arch
+# Ops:    equals | starts_with | contains | matches
+[[profiles]]
+name = "experimental"
+priority = 40
+when = [{ field = "branch", op = "starts_with", value = "experiment/" }]
+guidance = "Experimental branch — iterate fast and keep changes scoped here."
+
+[[profiles]]
+name = "infra"
+priority = 50
+when = [{ field = "path", op = "starts_with", value = "infra/" }]
+guidance = "Infrastructure code — prefer plans over direct mutation; never touch shared/remote state without explicit confirmation."
+
+# Agents are built in (claude, codex, gemini, opencode, copilot, generic).
+# Override one by id, or add your own — no code change needed. Fields:
+#   id, generated_filename (required); display_name, template, launch,
+#   importer (auto-wire @import into a LOCAL file), override_target/override_base
+#   (opt-in merge), wire_hint, append_prompt_flag.
+# rosita auto-wires only agents with a LOCAL importer; everything else is
+# emit-only (a gitignored overlay + a hint), so committed AGENTS.md/GEMINI.md
+# are never touched by default.
+#
+# [[agents]]
+# id = "myagent"
+# generated_filename = "myagent.md"
+# launch = "myagent"
+# wire_hint = "include .rosita/generated/myagent.md from your agent's config"

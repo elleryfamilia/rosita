@@ -1,0 +1,33 @@
+# ~/.config/rosita/config.toml — global rosita configuration.
+#
+# Applies to every repo, then each repo's .rosita/config.toml layers on top
+# (repo wins). Good place for machine-wide defaults: env allowlist, host
+# classes, and org-wide profiles. Install with `rosita init --global`.
+
+[defaults]
+agent = "claude"
+
+[env]
+# Conservative machine-wide allowlist (repos can widen/replace this).
+allowlist = ["LANG", "LC_ALL", "TERM", "TZ", "EDITOR", "CI"]
+deny_name_patterns = ["(?i)(secret|token|key|password|credential|auth|session|cookie)"]
+
+[codex]
+write_override = false
+max_output_kib = 32
+
+# Classify your hosts once, globally; match `host_class` in any profile.
+[host_classes]
+work = ["*.corp.example.com", "*.internal", "work-laptop"]
+personal = ["*.lan", "home-*"]
+
+# A stricter posture on work machines, regardless of stack.
+[[profiles]]
+name = "work-strict"
+priority = 70
+when = [{ field = "host_class", op = "equals", value = "work" }]
+guidance = """
+Work machine. Be conservative: no force-pushes, no destructive commands without
+explicit confirmation, keep secrets out of logs and commits, and prefer opening
+a PR over pushing to shared branches.
+"""

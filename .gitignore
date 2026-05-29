@@ -1,0 +1,10 @@
+# Rust build artifacts
+/target
+
+# agentctx-generated agent overlays (machine-specific, regenerated on demand)
+.agentctx/generated/
+.agentctx/logs/
+
+# OS / editor noise
+.DS_Store
+*.swp
