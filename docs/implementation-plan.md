@@ -151,10 +151,22 @@ hostnames). 108 tests, clippy+fmt clean.
 - **Tests:** layer precedence (local overrides global/repo); params merge; lint
   flags a domain in public config and not in local.
 
-## Phase 3 — Native environment providers
+## Phase 3 — Native environment providers ✅ done
 
 **Goal:** rosita natively discovers host/tailnet/docker/toolchain (the agent-env
 idea, built in).
+
+**Status:** landed. `src/providers/` ships the `EnvProvider` trait +
+`ProviderOutput` + `builtin_providers()` registry with five built-ins (`host`
+reuses `context::system`; `toolchain`/`ai-tools` probe `--version`; `tailnet`
+parses `tailscale status`; `docker` parses `docker ps`), each with a pure parser
+and graceful `None` when the tool is absent. `gather()` is cache-backed
+(`.rosita/cache/<id>.json`, TTL via `parse_duration`, pure `is_fresh`) and
+redacts output; results live in a separate `Probes` value kept out of `Context`
+(hash-safe). `detect --probes` shows them (human + `--json`), opt-in so a bare
+`detect` spawns no subprocesses. `.rosita/cache/` gitignored in init + apply.
+117 tests, clippy+fmt clean. (The `command` provider + embedding probe output
+into rendered overlays come in Phase 4.)
 
 - New `src/providers/` with:
   ```rust

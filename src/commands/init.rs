@@ -110,7 +110,12 @@ fn ensure_gitignore(writer: &dyn Writer, repo_base: &Path) -> crate::Result<()> 
     let gitignore = repo_base.join(".gitignore");
     let mut content = std::fs::read_to_string(&gitignore).ok();
     let mut changed = false;
-    for entry in [".rosita/generated/", ".rosita/logs/", ".rosita/local.toml"] {
+    for entry in [
+        ".rosita/generated/",
+        ".rosita/logs/",
+        ".rosita/cache/",
+        ".rosita/local.toml",
+    ] {
         if let Some(updated) = writer::ensure_line(content.as_deref(), entry) {
             content = Some(updated);
             changed = true;

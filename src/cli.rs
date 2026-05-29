@@ -79,6 +79,10 @@ pub struct DetectArgs {
     /// Emit JSON instead of a human summary.
     #[arg(long)]
     pub json: bool,
+    /// Also run environment probes (host/tailnet/docker/toolchain/ai-tools).
+    /// Opt-in because probes shell out to external tools.
+    #[arg(long)]
+    pub probes: bool,
 }
 
 /// `render` options.

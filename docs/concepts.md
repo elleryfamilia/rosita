@@ -50,23 +50,27 @@ A **profile** maps context → guidance. It has `when` rules and lists the
   lets "in `~` I get these, on repo X these, on macOS these" *layer* instead of
   fight.
 
-## Providers (native environment discovery) **(planned)**
+## Providers (native environment discovery) **(built-ins implemented; `command` + dynamic embedding planned)**
 
 rosita owns environment discovery natively (the "agent-env idea", built in — not
-an external tool). A **provider** probes the live environment and returns
-output a dynamic capability embeds:
+an external tool). A **provider** (`providers::EnvProvider`) probes the live
+environment and returns output (`text` + structured `data`):
 
-- `host` — machine identity (OS/arch/hostname/user) — extends current detection.
-- `tailnet` — tailscale peers / exit nodes.
-- `docker` — running containers.
-- `toolchain` — installed CLIs + versions.
+- `host` — machine identity (OS/arch/hostname/user) — reuses detection, no exec.
+- `toolchain` — installed dev CLIs + versions (`<tool> --version`).
 - `ai-tools` — installed agent CLIs + versions.
-- `command` — generic escape hatch: run any command, embed stdout (trust-gated).
+- `tailnet` — tailscale peers (parsed from `tailscale status`).
+- `docker` — running containers (parsed from `docker ps`).
+- `command` — **(planned)** generic escape hatch: run any command, embed stdout
+  (trust-gated).
 
-Provider output is **machine-specific and sensitive**, so it only ever lands in
-the local/gitignored overlay, is redacted, is excluded from the context hash,
-and is cached with a TTL (re-probed on `rosita run`). Missing tools degrade to
-empty, never an error.
+Probing is **opt-in** today via `rosita detect --probes` (a bare `detect` never
+spawns subprocesses). Provider output is **machine-specific and volatile**, so
+it is redacted, kept **out of `Context`** (never affects the context hash), and
+cached under `.rosita/cache/<id>.json` with a TTL (default 60s). Missing tools
+degrade to "unavailable", never an error. **(Planned)** dynamic capabilities will
+embed provider output into the local/gitignored overlay and re-probe on
+`rosita run`.
 
 ## Agents & delivery **(implemented)**
 

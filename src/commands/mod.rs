@@ -80,6 +80,11 @@ pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// Current UTC time, injected into probe cache-freshness checks.
+pub fn now_utc() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
+}
+
 /// Resolve an `--agent` value (id, `all`, or absent → default) to concrete ids,
 /// validating against the configured agents.
 pub fn resolve_agents(arg: Option<&str>, config: &Config) -> crate::Result<Vec<String>> {

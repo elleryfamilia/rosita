@@ -282,9 +282,12 @@ pub fn apply(
         notes.push(hint.clone());
     }
 
-    // 3. gitignore (only inside a repo): the generated dir + any files we created.
+    // 3. gitignore (only inside a repo): the generated/cache dirs + any files we created.
     if app.in_repo() {
-        let mut entries = vec![".rosita/generated/".to_string()];
+        let mut entries = vec![
+            ".rosita/generated/".to_string(),
+            ".rosita/cache/".to_string(),
+        ];
         entries.extend(gitignore_extra);
         if let Some(wf) = ensure_gitignored(app, &entries)? {
             files.push(wf);

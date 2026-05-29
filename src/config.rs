@@ -414,6 +414,11 @@ pub fn generated_dir(repo_base: &Path) -> PathBuf {
     repo_dir(repo_base).join("generated")
 }
 
+/// Directory provider probe results are cached in (gitignored, volatile).
+pub fn cache_dir(repo_base: &Path) -> PathBuf {
+    repo_dir(repo_base).join("cache")
+}
+
 /// Audit log path.
 pub fn audit_log_path(repo_base: &Path) -> PathBuf {
     repo_dir(repo_base).join("logs").join("events.jsonl")

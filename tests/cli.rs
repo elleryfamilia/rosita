@@ -596,6 +596,35 @@ fn user_capability_via_config_is_composed() {
 }
 
 #[test]
+fn detect_probes_is_opt_in_and_shows_host() {
+    let fx = Fixture::new();
+    fx.rust_project();
+
+    // The `host` provider always resolves (no exec), so --probes is deterministic.
+    fx.cmd()
+        .args(["detect", "--probes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Probes"))
+        .stdout(predicate::str::contains("host"));
+
+    // JSON form nests provider output under a "probes" key.
+    fx.cmd()
+        .args(["detect", "--probes", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"probes\""))
+        .stdout(predicate::str::contains("\"host\""));
+
+    // Bare detect never probes (no subprocesses, no "probes" key).
+    fx.cmd()
+        .args(["detect", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"probes\"").not());
+}
+
+#[test]
 fn explain_lists_active_capabilities() {
     let fx = Fixture::new();
     fx.rust_project();

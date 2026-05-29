@@ -12,6 +12,7 @@
 //! - [`capability`] — reusable guidance atoms composed by profiles.
 //! - [`profile`]    — rule-based profiles + additive capability composition.
 //! - [`render`]   — template rendering (minijinja) + generated header.
+//! - [`providers`]— native environment discovery (host/tailnet/docker/…).
 //! - [`adapters`] — per-agent wiring (Claude / Codex / generic).
 //! - [`writer`]   — atomic file writes and managed marker-block upserts.
 //! - [`redact`]   — secret/credential redaction.
@@ -31,6 +32,7 @@ pub mod config;
 pub mod context;
 pub mod hash;
 pub mod profile;
+pub mod providers;
 pub mod redact;
 pub mod render;
 pub mod report;
