@@ -199,15 +199,27 @@ Every render appends a JSON line to `.rosita/logs/events.jsonl`: selected
 agent & profile, detected stacks, files written, the rule-match reasons, the
 context hash, and whether it was a dry-run.
 
+## Documentation
+
+Full docs live in [`docs/`](docs/):
+
+- [Concepts](docs/concepts.md) · [Configuration](docs/configuration.md) ·
+  [Security & trust](docs/security.md) — for consumers.
+- [Architecture](docs/architecture.md) · [Extending](docs/extending.md) — for devs.
+- [Implementation plan](docs/implementation-plan.md) — the roadmap for
+  capabilities, native environment providers, dynamic capabilities, and the
+  public/private layer.
+
 ## Architecture
 
 A small library (`rosita`) with trait seams; the binary (`rosita`) is a thin
-shell over it.
+shell over it (see [docs/architecture.md](docs/architecture.md)).
 
 - `ContextDetector` — `git`, `languages`, `commands`, `system`, `env` detectors.
 - profile selection — rule matching engine.
 - `TemplateRenderer` — minijinja-backed; pluggable.
-- `AgentAdapter` — `claude` / `codex` / `generic`.
+- agent delivery — one descriptor-driven engine (`claude`/`codex`/`gemini`/
+  `opencode`/`copilot`/`generic`), extensible via `[[agents]]`.
 - `Writer` — atomic FS writer with dry-run; pure marker-block helpers.
 - redaction, audit, hashing as focused modules.
 
