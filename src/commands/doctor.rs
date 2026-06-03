@@ -208,7 +208,6 @@ fn check_env_policy(c: &mut Checks, cfg: &config::Config) {
 /// multi-label hostnames — which belong in the gitignored `local.toml`. Only
 /// public layers are scanned; `local.toml` is the place for these.
 fn check_public_leaks(c: &mut Checks, prep: &super::Prepared) {
-    let patterns = leak_patterns();
     let mut scanned = 0usize;
     let mut flagged = 0usize;
     for src in &prep.config.sources {
@@ -218,15 +217,8 @@ fn check_public_leaks(c: &mut Checks, prep: &super::Prepared) {
         let Ok(text) = std::fs::read_to_string(src) else {
             continue;
         };
-        let Ok(value) = toml::from_str::<toml::Value>(&text) else {
-            continue; // parse errors surface elsewhere
-        };
         scanned += 1;
-        let mut hits: Vec<String> = Vec::new();
-        collect_leaky_strings(&value, &patterns, &mut hits);
-        hits.sort();
-        hits.dedup();
-        for h in &hits {
+        for h in crate::lint::find_in_text(&text) {
             flagged += 1;
             c.line(
                 Status::Warn,
@@ -239,41 +231,6 @@ fn check_public_leaks(c: &mut Checks, prep: &super::Prepared) {
     }
     if scanned > 0 && flagged == 0 {
         c.line(Status::Ok, "public config has no private-looking literals");
-    }
-}
-
-/// Regexes for machine-specific literals (compiled once per call). Patterns are
-/// static and valid, so `unwrap` is sound.
-fn leak_patterns() -> Vec<regex::Regex> {
-    [
-        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",                    // IPv4
-        r"\*\.[A-Za-z0-9-]+\.[A-Za-z0-9.-]+",              // *.domain.tld glob
-        r"\b[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.[A-Za-z]{2,}\b", // multi-label hostname
-    ]
-    .iter()
-    .map(|p| regex::Regex::new(p).unwrap())
-    .collect()
-}
-
-/// Walk a TOML value, recording each string leaf that matches any leak pattern.
-fn collect_leaky_strings(value: &toml::Value, patterns: &[regex::Regex], out: &mut Vec<String>) {
-    match value {
-        toml::Value::String(s) => {
-            if patterns.iter().any(|re| re.is_match(s)) {
-                out.push(s.clone());
-            }
-        }
-        toml::Value::Array(items) => {
-            for v in items {
-                collect_leaky_strings(v, patterns, out);
-            }
-        }
-        toml::Value::Table(t) => {
-            for v in t.values() {
-                collect_leaky_strings(v, patterns, out);
-            }
-        }
-        _ => {}
     }
 }
 
