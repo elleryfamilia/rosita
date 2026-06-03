@@ -18,13 +18,16 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context as _};
 
+use crate::capability::{palette, Layer};
 use crate::cli::StudioArgs;
 use crate::commands::Runtime;
 use crate::config::{self, Config};
 use crate::context;
-use crate::studio::edit::Session;
+use crate::studio::assets;
+use crate::studio::edit::{Session, StagedOp};
 use crate::studio::state::{self, PreviewOutcome, Simulated, StudioState};
-use crate::studio::{assets, views};
+use crate::studio::views::{self, TrustBanner};
+use crate::trust;
 
 /// The sole route reachable without the session cookie (carries the token).
 pub const BOOTSTRAP_PATH: &str = "/__studio/bootstrap";
@@ -118,16 +121,55 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         return Resp::forbidden("bad Origin/Referer");
     }
 
-    // 5. Dispatch (Slice 1 is read-only).
+    // 5. Dispatch.
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => handle_shell(state),
+        ("GET", "/welcome") => Resp::html(views::center_placeholder_fragment()),
         ("GET", "/library") => handle_library(state),
         ("POST", "/preview") => handle_preview(state, req),
         ("GET", "/fs-status") => handle_fs_status(state),
+        ("GET", "/diff") => handle_diff(state),
+        ("POST", "/apply") => handle_apply(state),
+        ("POST", "/trust/allow") => handle_trust(state, true),
+        ("POST", "/trust/deny") => handle_trust(state, false),
+        ("GET", "/capabilities/new") => Resp::html(views::capability_form(None, Layer::Repo, true)),
+        ("POST", "/capabilities") => handle_cap_save(state, req),
+        ("GET", "/profiles/new") => handle_profile_new(state),
+        ("POST", "/profiles") => handle_profile_save(state, req),
         ("GET", p) if p.starts_with("/assets/") => match assets::get(p) {
             Some((body, ct)) => Resp::asset(body, ct),
             None => Resp::not_found(),
         },
+        (m, p) if p.starts_with("/capabilities/") => handle_cap_param(state, m, p),
+        (m, p) if p.starts_with("/profiles/") => handle_profile_param(state, m, p),
+        _ => Resp::not_found(),
+    }
+}
+
+/// Split `/<prefix>/<id>[/action]` into the decoded id and the action.
+fn id_and_action<'a>(path: &'a str, prefix: &str) -> (String, &'a str) {
+    let rest = path.strip_prefix(prefix).unwrap_or("");
+    match rest.split_once('/') {
+        Some((id, action)) => (state::percent_decode(id), action),
+        None => (state::percent_decode(rest), ""),
+    }
+}
+
+fn handle_cap_param(state: &Arc<Mutex<StudioState>>, method: &str, path: &str) -> Resp {
+    let (id, action) = id_and_action(path, "/capabilities/");
+    match (method, action) {
+        ("GET", "edit") => handle_cap_edit(state, &id),
+        ("DELETE", "") => handle_cap_delete(state, &id),
+        ("POST", "duplicate") => handle_cap_duplicate(state, &id),
+        _ => Resp::not_found(),
+    }
+}
+
+fn handle_profile_param(state: &Arc<Mutex<StudioState>>, method: &str, path: &str) -> Resp {
+    let (name, action) = id_and_action(path, "/profiles/");
+    match (method, action) {
+        ("GET", "edit") => handle_profile_edit(state, &name),
+        ("DELETE", "") => handle_profile_delete(state, &name),
         _ => Resp::not_found(),
     }
 }
@@ -135,7 +177,10 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
 // --- handlers (snapshot under the lock, render outside it) -------------------
 
 fn handle_shell(state: &Arc<Mutex<StudioState>>) -> Resp {
-    let snap = state.lock().unwrap().snapshot();
+    let (snap, staged) = {
+        let s = state.lock().unwrap();
+        (s.snapshot(), s.session.ops().len())
+    };
     let cfg = match state::staged_config(&snap) {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_page(&e.to_string())),
@@ -152,14 +197,243 @@ fn handle_shell(state: &Arc<Mutex<StudioState>>) -> Resp {
         overlay: String::new(),
         note: Some(format!("preview error: {e}")),
     });
-    Resp::html(views::shell(&lib, &snap.sim, &agents, &preview))
+    Resp::html(views::shell(&lib, staged, &snap.sim, &agents, &preview))
 }
 
 fn handle_library(state: &Arc<Mutex<StudioState>>) -> Resp {
-    let snap = state.lock().unwrap().snapshot();
+    let (snap, staged) = {
+        let s = state.lock().unwrap();
+        (s.snapshot(), s.session.ops().len())
+    };
     match state::library_view(&snap) {
-        Ok(l) => Resp::html(views::library_fragment(&l)),
+        Ok(l) => Resp::html(views::library_fragment(&l, staged)),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+// --- write handlers (Slice 2) ------------------------------------------------
+
+fn handle_cap_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let pairs = state::parse_pairs(&req.body);
+    let cap = match state::capability_from_form(&pairs) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let layer = state::layer_from_form(&pairs);
+    let id = cap.id.clone();
+    // EditCapability upserts by id (creates if absent), so save covers new+edit.
+    let res = state
+        .lock()
+        .unwrap()
+        .session
+        .stage(StagedOp::EditCapability {
+            layer,
+            id: id.clone(),
+            cap: Box::new(cap),
+        });
+    match res {
+        Ok(()) => Resp::html(views::action_result(&format!("✓ staged capability “{id}”"))),
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+fn handle_cap_edit(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let cfg = match state::staged_config(&snap) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    if let Some(c) = cfg.capabilities.iter().find(|c| c.id == id) {
+        Resp::html(views::capability_form(Some(c), c.origin, true))
+    } else if let Some(c) = palette().into_iter().find(|c| c.id == id) {
+        Resp::html(views::capability_form(Some(&c), Layer::Repo, false))
+    } else {
+        Resp::html(views::error_fragment(&format!("unknown capability '{id}'")))
+    }
+}
+
+fn handle_cap_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let mut s = state.lock().unwrap();
+    match s.session.capability_layer(id) {
+        Some(layer) => match s.session.stage(StagedOp::DeleteCapability {
+            layer,
+            id: id.to_string(),
+        }) {
+            Ok(()) => Resp::html(views::action_result(&format!(
+                "✓ staged deletion of “{id}”"
+            ))),
+            Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+        },
+        None => Resp::html(views::error_fragment(&format!(
+            "“{id}” isn't in your library — palette items can't be deleted"
+        ))),
+    }
+}
+
+fn handle_cap_duplicate(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let res = state
+        .lock()
+        .unwrap()
+        .session
+        .stage(StagedOp::DuplicatePaletteItem {
+            id: id.to_string(),
+            to_layer: Layer::Repo,
+        });
+    match res {
+        Ok(()) => Resp::html(views::action_result(&format!(
+            "✓ duplicated “{id}” into your repo config — edit it from YOURS"
+        ))),
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+fn handle_profile_new(state: &Arc<Mutex<StudioState>>) -> Resp {
+    let texts = state.lock().unwrap().session.staged_layer_texts();
+    Resp::html(views::profile_form(None, &available_capabilities(texts)))
+}
+
+fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
+    let texts = state.lock().unwrap().session.staged_layer_texts();
+    let available = available_capabilities(texts.clone());
+    let cfg = match Config::from_layer_strs(texts) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    match cfg.profiles.iter().find(|p| p.name == name) {
+        Some(p) => Resp::html(views::profile_form(Some(p), &available)),
+        None => Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
+    }
+}
+
+fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let pairs = state::parse_pairs(&req.body);
+    let profile = match state::profile_from_form(&pairs) {
+        Ok(p) => p,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let layer = state::layer_from_form(&pairs); // profiles are public; visibility absent → Repo/Global
+    let name = profile.name.clone();
+    let res = state.lock().unwrap().session.stage(StagedOp::EditProfile {
+        layer,
+        name: name.clone(),
+        profile: Box::new(profile),
+    });
+    match res {
+        Ok(()) => Resp::html(views::action_result(&format!("✓ staged profile “{name}”"))),
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+fn handle_profile_delete(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
+    let mut s = state.lock().unwrap();
+    match s.session.profile_layer(name) {
+        Some(layer) => match s.session.stage(StagedOp::DeleteProfile {
+            layer,
+            name: name.to_string(),
+        }) {
+            Ok(()) => Resp::html(views::action_result(&format!(
+                "✓ staged deletion of “{name}”"
+            ))),
+            Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+        },
+        None => Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
+    }
+}
+
+fn handle_diff(state: &Arc<Mutex<StudioState>>) -> Resp {
+    let (diffs, texts, staged, fs_changed, repo_base) = {
+        let s = state.lock().unwrap();
+        (
+            s.session.diff(),
+            s.session.staged_layer_texts(),
+            s.session.ops().len(),
+            s.session.external_edits(),
+            s.repo_base.clone(),
+        )
+    };
+    // Leak-lint the full staged PUBLIC config (the sync-safety guard, §7) — what
+    // would land in the shareable config.toml after apply, not just the diff.
+    let mut leaks: Vec<String> = texts
+        .iter()
+        .filter(|(layer, _, _)| matches!(layer, Layer::Repo | Layer::Global))
+        .flat_map(|(_, _, text)| crate::lint::find_in_text(text))
+        .collect();
+    leaks.sort();
+    leaks.dedup();
+    let trust = match Config::from_layer_strs(texts) {
+        Ok(cfg) => trust_banner(&cfg, &repo_base),
+        Err(_) => TrustBanner {
+            command_caps: vec![],
+            status: "unknown".into(),
+            trusted: false,
+        },
+    };
+    Resp::html(views::diff_view(
+        &diffs,
+        &leaks,
+        &fs_changed,
+        &trust,
+        staged,
+    ))
+}
+
+fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
+    // Apply mutates + writes atomically; it's the one serialized operation, so
+    // holding the lock across its (brief, small-file) I/O is correct here.
+    let result = state.lock().unwrap().session.apply();
+    match result {
+        Ok(written) => Resp::html(views::action_result(&format!(
+            "✓ applied {} file change(s) — command caps may need re-allowing",
+            written.len()
+        ))),
+        Err(e) => Resp::html(views::error_fragment(&format!("apply failed: {e}"))),
+    }
+}
+
+fn handle_trust(state: &Arc<Mutex<StudioState>>, allow: bool) -> Resp {
+    let repo_base = state.lock().unwrap().repo_base.clone();
+    let res = if allow {
+        trust::allow(&repo_base)
+    } else {
+        trust::deny(&repo_base).map(|_| ())
+    };
+    match res {
+        Ok(()) => Resp::html(views::action_result(if allow {
+            "✓ repo trusted — its command capabilities can run"
+        } else {
+            "✓ trust revoked for this repo"
+        })),
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+/// Capability ids you can compose into a profile: your library plus palette
+/// items you haven't duplicated yet.
+fn available_capabilities(texts: Vec<(Layer, std::path::PathBuf, String)>) -> Vec<String> {
+    let mut ids: Vec<String> = Config::from_layer_strs(texts)
+        .map(|c| c.capabilities.iter().map(|c| c.id.clone()).collect())
+        .unwrap_or_default();
+    let owned: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    for c in palette() {
+        if !owned.contains(&c.id) {
+            ids.push(c.id);
+        }
+    }
+    ids
+}
+
+fn trust_banner(cfg: &Config, repo_base: &std::path::Path) -> TrustBanner {
+    let command_caps: Vec<String> = cfg
+        .capabilities
+        .iter()
+        .filter(|c| c.command.is_some() && matches!(c.origin, Layer::Repo | Layer::RepoLocal))
+        .map(|c| c.id.clone())
+        .collect();
+    let status = trust::status(repo_base);
+    TrustBanner {
+        command_caps,
+        status: status.label().to_string(),
+        trusted: status == trust::Status::Trusted,
     }
 }
 
@@ -513,5 +787,175 @@ mod tests {
         let body = String::from_utf8(r.body).unwrap();
         assert!(body.contains("profile none"));
         assert!(body.contains("No profile applies"));
+    }
+
+    fn body_of(r: Resp) -> String {
+        assert_eq!(r.status, 200);
+        String::from_utf8(r.body).unwrap()
+    }
+
+    #[test]
+    fn create_capability_then_diff_then_apply_writes_disk() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+
+        // Stage a new capability via the editor POST.
+        let saved = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "id=rc&description=Rust&guidance=Use+clippy&risk=info&scope=repo&visibility=public",
+            ),
+        ));
+        assert!(saved.contains("staged capability"));
+
+        // Review shows the staged addition against the (empty) on-disk bytes.
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff.contains("rc"));
+        assert!(diff.contains("Use clippy"));
+
+        // Apply writes it to disk, comment-preservingly via toml_edit.
+        let applied = body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        assert!(applied.contains("applied"));
+
+        let on_disk = std::fs::read_to_string(config::repo_config_path(d.path())).unwrap();
+        assert!(on_disk.contains("id = \"rc\""));
+        assert!(on_disk.contains("Use clippy"));
+
+        // Baseline reset: nothing staged now.
+        let diff2 = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff2.contains("No staged changes"));
+    }
+
+    #[test]
+    fn delete_capability_stages_and_applies_removal() {
+        let cfg = "[[capabilities]]\nid = \"rc\"\nguidance = \"keep clippy\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        let r = body_of(route(
+            &st,
+            &req(
+                "DELETE",
+                "/capabilities/rc",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(r.contains("staged deletion"));
+
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(config::repo_config_path(d.path())).unwrap();
+        assert!(!on_disk.contains("id = \"rc\""));
+    }
+
+    #[test]
+    fn duplicate_palette_item_stages_into_repo() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+        let r = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities/rust-conventions/duplicate",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(r.contains("duplicated"));
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff.contains("rust-conventions"));
+    }
+
+    #[test]
+    fn profile_save_enforces_at_least_one_capability() {
+        let cfg = "[[capabilities]]\nid = \"rc\"\nguidance = \"x\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // No capability selected → rejected with the ≥1 rule, nothing staged.
+        let err = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/profiles",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "name=p&targets=rust",
+            ),
+        ));
+        assert!(err.contains("at least one capability"));
+
+        // With a capability → staged.
+        let ok = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/profiles",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "name=p&targets=rust&capabilities=rc&scope=repo",
+            ),
+        ));
+        assert!(ok.contains("staged profile"));
+    }
+
+    #[test]
+    fn diff_surfaces_leak_warning_and_trust_banner() {
+        // A repo command cap whose guidance carries a machine-specific literal.
+        let cfg = "[[capabilities]]\n\
+             id = \"deploy\"\n\
+             command = \"echo hi\"\n\
+             guidance = \"ssh to build-box.corp.example.com\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        // Leak-lint flags the private-looking hostname in the public layer.
+        assert!(diff.contains("leak check"));
+        assert!(diff.contains("build-box.corp.example.com"));
+        // Trust banner appears for the repo command cap (untrusted by default).
+        assert!(diff.contains("trust this repo") || diff.contains("Allow this repo"));
+        assert!(diff.contains("deploy"));
+    }
+
+    #[test]
+    fn capability_editor_form_loads_for_palette_and_owned() {
+        let cfg = "[[capabilities]]\nid = \"mine\"\nguidance = \"owned\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // Owned cap → editable form.
+        let owned = body_of(route(
+            &st,
+            &req("GET", "/capabilities/mine/edit", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(owned.contains("Edit capability"));
+        assert!(owned.contains("Stage change"));
+
+        // Palette cap → read-only with a duplicate action.
+        let palette = body_of(route(
+            &st,
+            &req(
+                "GET",
+                "/capabilities/rust-conventions/edit",
+                "",
+                &[HOST, COOKIE],
+                "",
+            ),
+        ));
+        assert!(palette.contains("read-only"));
+        assert!(palette.contains("Duplicate"));
     }
 }

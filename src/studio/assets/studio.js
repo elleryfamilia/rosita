@@ -1,9 +1,11 @@
-// Minimal htmx-compatible shim for rosita studio (Slice 1).
+// Minimal htmx-compatible processor for rosita studio.
 //
-// Reads the htmx attribute subset we use — `hx-post`, `hx-target`,
-// `hx-trigger` (event names + optional `delay:Nms` debounce) — and swaps the
-// server-rendered fragment into the target. Same-origin fetch sends the session
-// cookie automatically. Drop in real htmx later and the markup still works.
+// Implements the htmx attribute subset we use: hx-get/hx-post/hx-delete drive a
+// same-origin fetch; hx-target selects where the returned fragment is swapped
+// (innerHTML); hx-trigger picks the event(s) (default: submit for forms, click
+// otherwise; `load` fires once; `delay:Nms` debounces); hx-confirm gates on a
+// window.confirm. Swapped-in content is re-processed so nested controls work.
+// Drop in real htmx later and the markup is unchanged.
 (function () {
   "use strict";
 
@@ -16,47 +18,73 @@
   // Origin guards). So innerHTML here is server-trusted, escaped output — the
   // same model htmx uses. Never swap in content from any other origin.
   function swap(selector, html) {
-    var el = document.querySelector(selector);
-    if (el) el.innerHTML = html;
+    var el = selector ? document.querySelector(selector) : null;
+    if (!el) return;
+    el.innerHTML = html;
+    process(el);
   }
 
-  function parseTrigger(spec) {
-    // e.g. "keyup changed delay:400ms, change" -> { events:[...], delay:400 }
+  function methodOf(el) {
+    if (el.hasAttribute("hx-post")) return ["POST", el.getAttribute("hx-post")];
+    if (el.hasAttribute("hx-delete")) return ["DELETE", el.getAttribute("hx-delete")];
+    if (el.hasAttribute("hx-put")) return ["PUT", el.getAttribute("hx-put")];
+    if (el.hasAttribute("hx-get")) return ["GET", el.getAttribute("hx-get")];
+    return null;
+  }
+
+  function parseTrigger(el, isForm) {
+    var spec = el.getAttribute("hx-trigger") || (isForm ? "submit" : "click");
     var delay = 0;
     var m = spec.match(/delay:(\d+)ms/);
     if (m) delay = parseInt(m[1], 10);
-    var events = spec.split(",").map(function (clause) {
-      return clause.trim().split(/\s+/)[0];
-    });
+    var events = spec.split(",").map(function (c) { return c.trim().split(/\s+/)[0]; });
     return { events: events, delay: delay };
   }
 
   function bind(el) {
-    var url = el.getAttribute("hx-post");
-    if (!url) return;
+    if (el.dataset.hxBound) return;
+    var route = methodOf(el);
+    if (!route) return;
+    el.dataset.hxBound = "1";
+    var method = route[0];
+    var url = route[1];
     var target = el.getAttribute("hx-target");
-    var trig = parseTrigger(el.getAttribute("hx-trigger") || "change");
-    var form = el.tagName === "FORM" ? el : el.closest("form");
+    var confirmMsg = el.getAttribute("hx-confirm");
+    var isForm = el.tagName === "FORM";
+    var form = isForm ? el : el.closest("form");
+    var trig = parseTrigger(el, isForm);
     var timer;
 
-    function fire() {
+    function fire(ev) {
+      if (ev) ev.preventDefault();
+      if (confirmMsg && !window.confirm(confirmMsg)) return;
       clearTimeout(timer);
       timer = setTimeout(function () {
-        fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: form ? serialize(form) : "",
-        })
+        var opts = { method: method, headers: {} };
+        if (method !== "GET") {
+          opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
+          opts.body = form ? serialize(form) : "";
+        }
+        fetch(url, opts)
           .then(function (r) { return r.text(); })
-          .then(function (t) { if (target) swap(target, t); })
+          .then(function (t) { swap(target, t); })
           .catch(function () { /* leave the last good fragment in place */ });
       }, trig.delay);
     }
 
-    trig.events.forEach(function (ev) { el.addEventListener(ev, fire); });
+    trig.events.forEach(function (ev) {
+      if (ev === "load") fire();
+      else el.addEventListener(ev, fire);
+    });
+  }
+
+  function process(root) {
+    var sel = "[hx-get],[hx-post],[hx-delete],[hx-put]";
+    if (root.matches && root.matches(sel)) bind(root);
+    root.querySelectorAll(sel).forEach(bind);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    document.querySelectorAll("[hx-post]").forEach(bind);
+    process(document.body);
   });
 })();

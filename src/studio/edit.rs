@@ -181,6 +181,24 @@ impl Session {
             .collect()
     }
 
+    /// Which open layer currently holds the capability with this id (in the
+    /// staged docs), if any. Used to target a delete (`ProfileConfig` has no
+    /// origin field, so studio looks the layer up rather than guessing).
+    pub fn capability_layer(&self, id: &str) -> Option<Layer> {
+        self.layers
+            .iter()
+            .find(|lf| has_entry(&lf.staged, "capabilities", "id", id))
+            .map(|lf| lf.layer)
+    }
+
+    /// Which open layer currently holds the profile with this name (staged).
+    pub fn profile_layer(&self, name: &str) -> Option<Layer> {
+        self.layers
+            .iter()
+            .find(|lf| has_entry(&lf.staged, "profiles", "name", name))
+            .map(|lf| lf.layer)
+    }
+
     /// Assemble the staged config in memory (origin-tagged per layer). `Ok`
     /// means every staged layer re-parses through the strict config parser.
     pub fn staged_config(&self) -> Result<Config> {
@@ -403,6 +421,14 @@ fn remove(aot: &mut ArrayOfTables, field: &str, val: &str) {
 fn find_index(aot: &ArrayOfTables, field: &str, val: &str) -> Option<usize> {
     aot.iter()
         .position(|t| t.get(field).and_then(Item::as_str) == Some(val))
+}
+
+/// Whether `doc[key]` is an array-of-tables containing an entry with `field == val`.
+fn has_entry(doc: &DocumentMut, key: &str, field: &str, val: &str) -> bool {
+    doc.get(key)
+        .and_then(Item::as_array_of_tables)
+        .map(|aot| find_index(aot, field, val).is_some())
+        .unwrap_or(false)
 }
 
 // --- typed → toml_edit table builders ----------------------------------------

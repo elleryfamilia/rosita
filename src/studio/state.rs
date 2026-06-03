@@ -9,11 +9,11 @@
 use std::path::PathBuf;
 
 use crate::adapters;
-use crate::capability::{palette, Layer};
+use crate::capability::{palette, Capability, Layer, Risk};
 use crate::config::Config;
 use crate::context::{Context, GitContext, Scope};
 use crate::dynamic::DynamicMode;
-use crate::profile::{self, Composition, Selection};
+use crate::profile::{self, CapabilityRef, Composition, ProfileConfig, Selection};
 use crate::render::{self, RenderRequest};
 use crate::studio::edit::Session;
 
@@ -307,8 +307,10 @@ pub fn parse_pairs(s: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Minimal `application/x-www-form-urlencoded` decode (`+`→space, `%XX`).
-fn percent_decode(s: &str) -> String {
+/// Minimal `application/x-www-form-urlencoded` decode (`+`→space, `%XX`). Also
+/// used to decode `{id}`/`{name}` path segments (which never contain a bare `+`,
+/// since the views percent-encode them).
+pub fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -341,6 +343,100 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+// --- form → typed model (Slice 2 write engine) -------------------------------
+
+fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    pairs
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+/// All non-empty values for a repeated field (checkboxes/multi-select).
+fn values_for(pairs: &[(String, String)], key: &str) -> Vec<String> {
+    pairs
+        .iter()
+        .filter(|(k, v)| k == key && !v.is_empty())
+        .map(|(_, v)| v.clone())
+        .collect()
+}
+
+/// Split a comma-separated field into trimmed, non-empty entries.
+fn comma_list(s: Option<&str>) -> Vec<String> {
+    s.unwrap_or("")
+        .split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+/// A trimmed, non-empty optional field.
+fn opt(s: Option<&str>) -> Option<String> {
+    s.map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+}
+
+/// Which writable layer a form's `scope`/`visibility` controls select.
+pub fn layer_from_form(pairs: &[(String, String)]) -> Layer {
+    let global = value_of(pairs, "scope") == Some("global");
+    let private = value_of(pairs, "visibility") == Some("private");
+    match (global, private) {
+        (true, true) => Layer::GlobalLocal,
+        (true, false) => Layer::Global,
+        (false, true) => Layer::RepoLocal,
+        (false, false) => Layer::Repo,
+    }
+}
+
+/// Build a [`Capability`] from a posted editor form. `origin` is left default —
+/// it is re-tagged by layer when the staged config is assembled.
+pub fn capability_from_form(pairs: &[(String, String)]) -> crate::Result<Capability> {
+    let id =
+        opt(value_of(pairs, "id")).ok_or_else(|| anyhow::anyhow!("capability id is required"))?;
+    let risk = match value_of(pairs, "risk") {
+        Some("caution") => Risk::Caution,
+        Some("dangerous") => Risk::Dangerous,
+        _ => Risk::Info,
+    };
+    Ok(Capability {
+        id,
+        description: opt(value_of(pairs, "description")),
+        tags: comma_list(value_of(pairs, "tags")),
+        risk,
+        when: Vec::new(), // `when` self-gates are hand-edited (not in the form yet)
+        requires: comma_list(value_of(pairs, "requires")),
+        params: toml::Value::Table(Default::default()),
+        guidance: value_of(pairs, "guidance").unwrap_or("").to_string(),
+        agents: comma_list(value_of(pairs, "agents")),
+        provider: opt(value_of(pairs, "provider")),
+        command: opt(value_of(pairs, "command")),
+        cache: opt(value_of(pairs, "cache")),
+        origin: Layer::default(),
+    })
+}
+
+/// Build a [`ProfileConfig`] from a posted composer form. Enforces the ≥1
+/// capability rule (§3) — a profile with no capabilities can't be saved.
+pub fn profile_from_form(pairs: &[(String, String)]) -> crate::Result<ProfileConfig> {
+    let name =
+        opt(value_of(pairs, "name")).ok_or_else(|| anyhow::anyhow!("profile name is required"))?;
+    let capabilities: Vec<CapabilityRef> = values_for(pairs, "capabilities")
+        .into_iter()
+        .map(CapabilityRef::Id)
+        .collect();
+    if capabilities.is_empty() {
+        anyhow::bail!("a profile needs at least one capability");
+    }
+    Ok(ProfileConfig {
+        name,
+        targets: values_for(pairs, "targets"),
+        capabilities,
+        template: opt(value_of(pairs, "template")),
+        guidance: opt(value_of(pairs, "guidance")),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,5 +463,47 @@ mod tests {
         sim.update_from_form("lang=&scope=");
         assert!(sim.lang.is_none());
         assert!(sim.scope.is_none());
+    }
+
+    #[test]
+    fn capability_from_form_parses_core_fields() {
+        let cap = capability_from_form(&parse_pairs(
+            "id=rc&description=Rust&tags=stack%2Cfast&risk=caution&guidance=Use+clippy",
+        ))
+        .unwrap();
+        assert_eq!(cap.id, "rc");
+        assert_eq!(cap.description.as_deref(), Some("Rust"));
+        assert_eq!(cap.tags, vec!["stack".to_string(), "fast".to_string()]);
+        assert_eq!(cap.risk, Risk::Caution);
+        assert_eq!(cap.guidance, "Use clippy");
+        // Missing id is rejected.
+        assert!(capability_from_form(&parse_pairs("guidance=x")).is_err());
+    }
+
+    #[test]
+    fn profile_from_form_requires_a_capability() {
+        let p = profile_from_form(&parse_pairs(
+            "name=rust&targets=rust&capabilities=rc&capabilities=terse",
+        ))
+        .unwrap();
+        assert_eq!(p.name, "rust");
+        assert_eq!(p.targets, vec!["rust".to_string()]);
+        assert_eq!(p.capabilities.len(), 2);
+        // Zero capabilities is rejected (§3).
+        assert!(profile_from_form(&parse_pairs("name=rust&targets=rust")).is_err());
+    }
+
+    #[test]
+    fn layer_from_form_maps_scope_and_visibility() {
+        assert_eq!(layer_from_form(&parse_pairs("scope=repo")), Layer::Repo);
+        assert_eq!(
+            layer_from_form(&parse_pairs("scope=repo&visibility=private")),
+            Layer::RepoLocal
+        );
+        assert_eq!(layer_from_form(&parse_pairs("scope=global")), Layer::Global);
+        assert_eq!(
+            layer_from_form(&parse_pairs("scope=global&visibility=private")),
+            Layer::GlobalLocal
+        );
     }
 }

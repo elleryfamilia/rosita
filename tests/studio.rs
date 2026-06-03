@@ -100,6 +100,33 @@ fn studio_binds_and_serves_secured_spine() {
         ),
     );
 
+    // 5. A write over the real socket: stage a capability (exercises POST-body
+    //    parsing + the Origin guard end-to-end), then apply it.
+    let body = "id=smoke&guidance=hello&scope=repo&visibility=public";
+    let create = http(
+        port,
+        &format!(
+            "POST /capabilities HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: rosita_studio={token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    let apply = http(
+        port,
+        &format!(
+            "POST /apply HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: rosita_studio={token}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ),
+    );
+    let written =
+        std::fs::read_to_string(_dir.path().join(".rosita/config.toml")).unwrap_or_default();
+
+    // A POST without Origin must be refused (CSRF guard) over the socket too.
+    let no_origin = http(
+        port,
+        &format!(
+            "POST /apply HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: rosita_studio={token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ),
+    );
+
     // Kill before asserting so a failure never leaks the server process.
     child.kill().ok();
     child.wait().ok();
@@ -133,6 +160,30 @@ fn studio_binds_and_serves_secured_spine() {
         bad_host.starts_with("HTTP/1.1 403"),
         "bad Host → 403; got:\n{}",
         head(&bad_host)
+    );
+
+    assert!(
+        create.starts_with("HTTP/1.1 200"),
+        "create → 200; got:\n{}",
+        head(&create)
+    );
+    assert!(
+        create.contains("staged capability"),
+        "create stages the capability; got:\n{create}"
+    );
+    assert!(
+        apply.starts_with("HTTP/1.1 200"),
+        "apply → 200; got:\n{}",
+        head(&apply)
+    );
+    assert!(
+        written.contains("id = \"smoke\""),
+        "apply wrote the capability to disk; got:\n{written}"
+    );
+    assert!(
+        no_origin.starts_with("HTTP/1.1 403"),
+        "POST without Origin → 403; got:\n{}",
+        head(&no_origin)
     );
 }
 
