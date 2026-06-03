@@ -162,6 +162,25 @@ impl Session {
         &self.ops
     }
 
+    /// The staged text of every open layer, `(layer, path, text)`, for in-memory
+    /// assembly via [`Config::from_layer_strs`].
+    pub fn staged_layer_texts(&self) -> Vec<(Layer, PathBuf, String)> {
+        self.layers
+            .iter()
+            .map(|lf| (lf.layer, lf.path.clone(), lf.staged.to_string()))
+            .collect()
+    }
+
+    /// Paths of layers whose on-disk bytes differ from what was loaded (the
+    /// external-edit poll). Empty ⇒ nothing changed underneath the session.
+    pub fn external_edits(&self) -> Vec<PathBuf> {
+        self.layers
+            .iter()
+            .filter(|lf| sha(&std::fs::read_to_string(&lf.path).unwrap_or_default()) != lf.sha)
+            .map(|lf| lf.path.clone())
+            .collect()
+    }
+
     /// Assemble the staged config in memory (origin-tagged per layer). `Ok`
     /// means every staged layer re-parses through the strict config parser.
     pub fn staged_config(&self) -> Result<Config> {

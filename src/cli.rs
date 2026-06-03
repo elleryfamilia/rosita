@@ -72,6 +72,19 @@ pub enum Command {
     Profiles(ProfilesArgs),
     /// List configured agents and how each delivers the overlay.
     Agents(AgentsArgs),
+    /// Launch the local studio web UI (ephemeral; serves until Ctrl-C).
+    Studio(StudioArgs),
+}
+
+/// `studio` options.
+#[derive(Debug, Args)]
+pub struct StudioArgs {
+    /// Port to bind on 127.0.0.1 (0 = let the OS choose a free port).
+    #[arg(long, default_value_t = 7777)]
+    pub port: u16,
+    /// Don't open a browser window automatically.
+    #[arg(long)]
+    pub no_open: bool,
 }
 
 /// `capabilities` options.
