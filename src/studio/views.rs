@@ -82,6 +82,7 @@ fn icon(name: &str) -> Markup {
         }
         "check" => r#"<path d="M20 6 9 17l-5-5"/>"#,
         "x" => r#"<path d="M18 6 6 18M6 6l12 12"/>"#,
+        "chevron-down" => r#"<path d="m6 9 6 6 6-6"/>"#,
         "power" => r#"<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>"#,
         "play" => r#"<path d="m6 3 14 9-14 9V3z"/>"#,
         "shield" => r#"<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>"#,
@@ -147,6 +148,23 @@ fn icon(name: &str) -> Markup {
     ))
 }
 
+/// The rosita brandmark: a small red rose (multi-color, so it ignores the
+/// monochrome icon treatment).
+fn brand_mark() -> Markup {
+    PreEscaped(
+        r##"<svg class="rose" viewBox="0 0 24 24" aria-hidden="true">
+  <path fill="#36a35b" d="M11.6 13h.8v7h-.8z"/>
+  <path fill="#36a35b" d="M12.2 16.4c1.5-.1 2.8-1 3.3-2.4-1.5.1-2.8 1-3.3 2.4z"/>
+  <path fill="#36a35b" d="M11.8 15c-1.4-.1-2.6-.9-3.1-2.2 1.4.1 2.6.9 3.1 2.2z"/>
+  <circle cx="12" cy="9" r="5.3" fill="#e23b54"/>
+  <path fill="none" stroke="#a82338" stroke-width="1.3" stroke-linecap="round" d="M12 5.1a3.9 3.9 0 1 0 3.7 5.1"/>
+  <path fill="none" stroke="#a82338" stroke-width="1.2" stroke-linecap="round" d="M12 6.8a2.2 2.2 0 1 0 2 3"/>
+  <circle cx="12" cy="9" r="0.95" fill="#a82338"/>
+</svg>"##
+            .to_string(),
+    )
+}
+
 /// The icon to show for a capability (its chosen icon, else a kind default).
 fn cap_icon_name(c: &CapView) -> &str {
     match &c.icon {
@@ -209,7 +227,7 @@ pub fn shell(main: Markup, staged: usize, active_tab: &str) -> String {
             }
             body {
                 header class="topbar" {
-                    div class="brand" { span class="brand-mark" { (icon("layers")) } span class="brand-name" { "rosita studio" } }
+                    div class="brand" { span class="brand-mark" { (brand_mark()) } span class="brand-name" { "rosita studio" } }
                     (tab_bar(active_tab))
                     div id="staged" class="staged-wrap" { (staged_indicator(staged)) }
                 }
@@ -572,20 +590,32 @@ fn close_btn() -> Markup {
     html! { button class="icon-btn" type="button" title="Close" aria-label="Close" hx-get="/close" hx-target="#modal" { (icon("x")) } }
 }
 
-/// The curated icon picker: a hidden radio per icon + a "none" option.
+/// The curated icon picker as a dropdown: a trigger showing the current icon
+/// that reveals a floating grid of radio options (collapsed by default).
 fn icon_picker(selected: Option<&str>) -> Markup {
     html! {
-        div class="icon-picker" {
-            label class="field-label" { "icon" }
-            div class="icon-grid" {
-                label class="icon-opt none-opt" title="No icon" {
-                    input type="radio" name="icon" value="" checked[selected.is_none()];
-                    span class="icon-cell" { (icon("x")) }
+        div class="field icon-field" {
+            span class="field-label" { "icon" }
+            details class="icon-dd" {
+                summary {
+                    span class="icon-dd-trigger" {
+                        span class="icon-cell-sel" { @match selected { Some(n) => (icon(n)), None => (icon("x")) } }
+                        span class="dd-label" { "Choose" }
+                        span class="dd-chev" { (icon("chevron-down")) }
+                    }
                 }
-                @for name in CAP_ICONS {
-                    label class="icon-opt" title=(name) {
-                        input type="radio" name="icon" value=(name) checked[selected == Some(*name)];
-                        span class="icon-cell" { (icon(name)) }
+                div class="icon-dd-panel" {
+                    div class="icon-grid" {
+                        label class="icon-opt none-opt" title="No icon" {
+                            input type="radio" name="icon" value="" checked[selected.is_none()];
+                            span class="icon-cell" { (icon("x")) }
+                        }
+                        @for name in CAP_ICONS {
+                            label class="icon-opt" title=(name) {
+                                input type="radio" name="icon" value=(name) checked[selected == Some(*name)];
+                                span class="icon-cell" { (icon(name)) }
+                            }
+                        }
                     }
                 }
             }

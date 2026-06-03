@@ -96,8 +96,26 @@
     });
   }
 
+  // Icon-picker dropdown: reflect the chosen icon in the trigger and close the
+  // popover on selection. Delegated, so it survives dialog swaps.
+  function wireIconPicker() {
+    document.addEventListener("change", function (ev) {
+      var input = ev.target;
+      if (!input.matches || !input.matches(".icon-dd input[type=radio]")) return;
+      var dd = input.closest(".icon-dd");
+      if (!dd) return;
+      // Mirror the chosen icon into the trigger by cloning the SVG node (no
+      // innerHTML — the source is our own static, server-rendered markup).
+      var svg = input.parentNode.querySelector(".icon-cell svg");
+      var sel = dd.querySelector(".icon-cell-sel");
+      if (svg && sel) sel.replaceChildren(svg.cloneNode(true));
+      dd.open = false;
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     process(document.body);
     wireTabs();
+    wireIconPicker();
   });
 })();
