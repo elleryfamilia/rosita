@@ -19,7 +19,7 @@ pub struct AuditEvent {
     pub timestamp: String,
     /// Agent id.
     pub agent: String,
-    /// Primary (highest-priority) matching profile.
+    /// The selected profile (or `none` when no profile applied).
     pub profile: String,
     /// Active capability ids, in render order.
     #[serde(default)]

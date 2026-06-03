@@ -20,9 +20,10 @@ use std::path::PathBuf;
 use anyhow::{bail, Context as _};
 
 use crate::adapters;
+use crate::binding::{self, Binding};
 use crate::config::Config;
 use crate::context::{self, Context};
-use crate::profile::{self, Composition};
+use crate::profile::{self, Composition, ProfileConfig, Selection};
 
 /// Per-invocation runtime settings derived from global args.
 pub struct Runtime {
@@ -58,14 +59,60 @@ impl Prepared {
     }
 }
 
-/// Load config, detect context, and compose capabilities for `rt`.
+/// How an ambiguous (2+ matching) profile selection is resolved. The default
+/// [`SkipChooser`] never prompts; `rosita run` injects an interactive one.
+pub trait ProfileChooser {
+    /// Pick among `candidates` for `ctx`. Implementations may prompt the user.
+    fn choose(&self, ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice>;
+}
+
+/// A chooser's answer to an ambiguous selection.
+pub enum Choice {
+    /// Use this profile (by name) and remember the choice.
+    Profile(String),
+    /// Apply no profile here and remember the opt-out.
+    None,
+    /// Don't decide now (e.g. non-interactive): no profile, nothing persisted.
+    Skip,
+}
+
+/// The default non-interactive chooser: warns and applies no profile when a
+/// project matches 2+ profiles. Used by every command except `run`.
+pub struct SkipChooser;
+
+impl ProfileChooser for SkipChooser {
+    fn choose(&self, _ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice> {
+        let names: Vec<&str> = candidates.iter().map(|p| p.name.as_str()).collect();
+        crate::warn_user!(
+            "{} profiles match this project ({}); none chosen — overlay is empty. \
+             Run `rosita run <agent>` to pick one (remembered afterwards).",
+            candidates.len(),
+            names.join(", ")
+        );
+        Ok(Choice::Skip)
+    }
+}
+
+/// Load config, detect context, select a profile, and compose its capabilities
+/// for `rt` (non-interactively — see [`prepare_with`] to supply a chooser).
 pub fn prepare(rt: &Runtime) -> crate::Result<Prepared> {
+    prepare_with(rt, &SkipChooser)
+}
+
+/// Like [`prepare`] but resolves an ambiguous selection via `chooser` (which may
+/// prompt and persist the choice as a [`Binding`]).
+pub fn prepare_with(rt: &Runtime, chooser: &dyn ProfileChooser) -> crate::Result<Prepared> {
     let repo_base = context::repo_base_for(&rt.cwd);
     let config = Config::load(&repo_base).context("loading configuration")?;
     let context = context::detect_context(&rt.cwd, &config).context("detecting context")?;
-    let composition = profile::compose(
+
+    let remembered = binding::read(&context);
+    let selection = profile::select(&context, &config.profiles, remembered.as_ref());
+    let resolved = resolve_selection(rt, &context, selection, chooser)?;
+
+    let composition = profile::compose_selection(
         &context,
-        &config.profiles,
+        &resolved,
         &config.capabilities,
         &config.capability_params,
     );
@@ -75,6 +122,40 @@ pub fn prepare(rt: &Runtime) -> crate::Result<Prepared> {
         context,
         composition,
     })
+}
+
+/// Resolve a [`Selection`] to a concrete one. `Ambiguous` is handed to the
+/// chooser; a real choice is persisted as a binding (unless dry-run).
+fn resolve_selection(
+    rt: &Runtime,
+    context: &Context,
+    selection: Selection,
+    chooser: &dyn ProfileChooser,
+) -> crate::Result<Selection> {
+    let Selection::Ambiguous(candidates) = selection else {
+        return Ok(selection);
+    };
+    match chooser.choose(context, &candidates)? {
+        Choice::Profile(name) => {
+            let chosen = candidates
+                .iter()
+                .find(|p| p.name == name)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("chooser returned unknown profile '{name}'"))?;
+            if !rt.dry_run {
+                binding::write(context, &Binding::Profile(name))
+                    .context("remembering profile choice")?;
+            }
+            Ok(Selection::Use(chosen))
+        }
+        Choice::None => {
+            if !rt.dry_run {
+                binding::write(context, &Binding::None).context("remembering profile opt-out")?;
+            }
+            Ok(Selection::None)
+        }
+        Choice::Skip => Ok(Selection::None),
+    }
 }
 
 /// Current time as an RFC3339 (`…Z`) string, injected into renders.
@@ -144,7 +225,10 @@ mod tests {
         // No global layer → fully hermetic.
         let cfg = Config::load_from(None, d.path()).expect("sample config must parse");
         assert_eq!(cfg.default_agent, "claude");
-        assert!(cfg.profiles.iter().any(|p| p.name == "infra"));
+        assert!(cfg.profiles.iter().any(|p| p.name == "rust"));
+        // The sample profile ties to a language target, not the retired rules.
+        let rust = cfg.profiles.iter().find(|p| p.name == "rust").unwrap();
+        assert_eq!(rust.targets, vec!["rust".to_string()]);
         // The public sample must not name a machine (host_classes moved to local).
         assert!(!SAMPLE_REPO_CONFIG.contains("example.com"));
     }

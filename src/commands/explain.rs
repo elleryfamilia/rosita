@@ -32,10 +32,12 @@ struct ExplainReport {
     package_managers: Vec<String>,
     config_sources: Vec<String>,
     context_hash: String,
-    /// Primary (highest-priority) matching profile — the display label.
+    /// Coarse selection tags the context resolved to (stacks + `machine`).
+    selection_targets: Vec<String>,
+    /// The selected profile — the display label (`none` if no profile applies).
     selected_profile: String,
-    /// All matching profiles that contributed, priority order.
-    matching_profiles: Vec<String>,
+    /// Profiles whose `targets` match here (selection candidates).
+    candidate_profiles: Vec<String>,
     /// Active capabilities, in render order, with provenance.
     capabilities: Vec<ActiveCapability>,
     considered: Vec<Considered>,
@@ -53,10 +55,9 @@ struct ActiveCapability {
 #[derive(Serialize)]
 struct Considered {
     name: String,
-    priority: i32,
+    targets: Vec<String>,
     matched: bool,
     selected: bool,
-    reasons: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -73,23 +74,25 @@ struct PlanFile {
 
 fn build_report(prep: &Prepared, agents: &[String]) -> crate::Result<ExplainReport> {
     let ctx = &prep.context;
-    let matching = &prep.composition.profiles;
+    let tags = ctx.selection_targets();
+    let selected = prep.composition.profile.clone();
+    let candidate_profiles: Vec<String> = prep
+        .config
+        .profiles
+        .iter()
+        .filter(|p| profile::profile_matches_targets(p, &tags))
+        .map(|p| p.name.clone())
+        .collect();
 
     let considered = prep
         .config
         .profiles
         .iter()
-        .map(|p| {
-            let reasons = profile::matches(ctx, p);
-            Considered {
-                name: p.name.clone(),
-                priority: p.priority,
-                matched: reasons.is_some(),
-                // Additive: every contributing profile is "selected"; a matched
-                // profile dropped by an exclusive winner is matched-not-selected.
-                selected: matching.contains(&p.name),
-                reasons: reasons.unwrap_or_default(),
-            }
+        .map(|p| Considered {
+            name: p.name.clone(),
+            targets: p.targets.clone(),
+            matched: profile::profile_matches_targets(p, &tags),
+            selected: selected.as_deref() == Some(p.name.as_str()),
         })
         .collect();
 
@@ -147,8 +150,9 @@ fn build_report(prep: &Prepared, agents: &[String]) -> crate::Result<ExplainRepo
             .map(|p| p.display().to_string())
             .collect(),
         context_hash: ctx.compute_hash(),
+        selection_targets: tags,
         selected_profile: prep.profile_label().to_string(),
-        matching_profiles: matching.clone(),
+        candidate_profiles,
         capabilities,
         considered,
         plan,
@@ -181,9 +185,14 @@ fn print_human(r: &ExplainReport) {
         }
     }
 
-    println!("\nProfile selection → {}", r.selected_profile);
-    if r.matching_profiles.len() > 1 {
-        println!("  composing: {}", r.matching_profiles.join(" + "));
+    println!("\nDetected targets: [{}]", r.selection_targets.join(", "));
+    println!("Profile selection → {}", r.selected_profile);
+    if r.candidate_profiles.len() > 1 {
+        println!(
+            "  {} profiles match (pick one): {}",
+            r.candidate_profiles.len(),
+            r.candidate_profiles.join(", ")
+        );
     }
 
     println!("\nActive capabilities");
@@ -201,6 +210,9 @@ fn print_human(r: &ExplainReport) {
     }
 
     println!("\nProfiles considered");
+    if r.considered.is_empty() {
+        println!("  (none configured)");
+    }
     for c in &r.considered {
         let mark = if c.selected {
             "→"
@@ -211,14 +223,10 @@ fn print_human(r: &ExplainReport) {
         };
         let status = if c.matched { "match" } else { "no match" };
         println!(
-            "  {mark} {:<14} (priority {:>3}) {status}",
-            c.name, c.priority
+            "  {mark} {:<14} targets [{}] {status}",
+            c.name,
+            c.targets.join(", ")
         );
-        if c.matched {
-            for reason in &c.reasons {
-                println!("        {reason}");
-            }
-        }
     }
 
     println!("\nWrite plan");

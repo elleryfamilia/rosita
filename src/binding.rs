@@ -1,0 +1,245 @@
+//! Per-project remembered profile choice — "the binding".
+//!
+//! When 2+ profiles match a project, rosita asks once which to use and remembers
+//! the answer so it never asks again. Where the answer lives depends on scope:
+//!
+//! - **Repo** → the repo's gitignored `.rosita/local.toml` `[binding]` table
+//!   (per-checkout; a teammate's checkout makes its own choice). Written with
+//!   `toml_edit` so the rest of the private layer is preserved.
+//! - **Machine** (no repo) → a global, path-keyed store `bindings.toml`, the way
+//!   [`crate::trust`] keys by repo path.
+//!
+//! `None` is an explicit, remembered choice — opting a project out of rosita
+//! entirely. The store is rosita-owned, so the global file is written with the
+//! plain `toml` serializer; only the hand-editable `local.toml` needs `toml_edit`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, Context as _, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::config;
+use crate::context::{Context, Scope};
+use crate::writer::atomic_write;
+
+/// A remembered profile choice for a project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Binding {
+    /// Use this profile by name.
+    Profile(String),
+    /// Explicitly apply no profile here (a remembered opt-out).
+    None,
+}
+
+/// The on-disk shape of a binding: the `[binding]` table in repo `local.toml`,
+/// and each per-path entry in the global store. `none = true` is an explicit
+/// opt-out; otherwise `profile` names the chosen profile. Neither set ⇒ no
+/// binding.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBinding {
+    /// The chosen profile name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Explicit opt-out ("no profile here").
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub none: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl RawBinding {
+    /// Interpret the raw fields as a [`Binding`] (opt-out wins over a profile).
+    pub fn to_binding(&self) -> Option<Binding> {
+        if self.none {
+            Some(Binding::None)
+        } else {
+            self.profile.clone().map(Binding::Profile)
+        }
+    }
+
+    fn from_binding(b: &Binding) -> Self {
+        match b {
+            Binding::Profile(p) => RawBinding {
+                profile: Some(p.clone()),
+                none: false,
+            },
+            Binding::None => RawBinding {
+                profile: None,
+                none: true,
+            },
+        }
+    }
+}
+
+// --- scope-aware front door --------------------------------------------------
+
+/// Read the remembered binding for `ctx`, from the repo `local.toml` (repo
+/// scope) or the global path-keyed store (machine scope).
+pub fn read(ctx: &Context) -> Option<Binding> {
+    match ctx.scope() {
+        Scope::Repo => read_repo(&ctx.repo_base),
+        Scope::Machine => read_global(&ctx.cwd),
+    }
+}
+
+/// Persist the binding for `ctx` to the scope-appropriate location.
+pub fn write(ctx: &Context, b: &Binding) -> Result<()> {
+    match ctx.scope() {
+        Scope::Repo => write_repo(&ctx.repo_base, b),
+        Scope::Machine => write_global(&ctx.cwd, b),
+    }
+}
+
+// --- repo scope: the `[binding]` table in `.rosita/local.toml` ---------------
+
+/// Lenient view over `local.toml` that extracts only `[binding]` (every other
+/// table — `host_classes`, `capability_params`, … — is ignored).
+#[derive(Debug, Default, Deserialize)]
+struct LocalBindingFile {
+    #[serde(default)]
+    binding: Option<RawBinding>,
+}
+
+/// Read the `[binding]` from a repo's private `local.toml`, if any.
+pub fn read_repo(repo_base: &Path) -> Option<Binding> {
+    let text = std::fs::read_to_string(config::repo_local_path(repo_base)).ok()?;
+    let parsed: LocalBindingFile = toml::from_str(&text).ok()?;
+    parsed.binding?.to_binding()
+}
+
+/// Write the `[binding]` into a repo's private `local.toml`, preserving the rest
+/// of the file's content, comments, and formatting.
+pub fn write_repo(repo_base: &Path, b: &Binding) -> Result<()> {
+    let path = config::repo_local_path(repo_base);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut doc: toml_edit::DocumentMut = existing
+        .parse()
+        .with_context(|| format!("parsing {} before writing binding", path.display()))?;
+
+    // Replace the whole `[binding]` table so switching profile↔none never leaves
+    // a stale key behind.
+    let mut table = toml_edit::Table::new();
+    match b {
+        Binding::Profile(p) => table["profile"] = toml_edit::value(p.as_str()),
+        Binding::None => table["none"] = toml_edit::value(true),
+    }
+    doc["binding"] = toml_edit::Item::Table(table);
+
+    atomic_write(&path, &doc.to_string())
+}
+
+// --- machine scope: the global path-keyed store ------------------------------
+
+/// The global bindings store: cwd path → remembered choice.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct BindingStore {
+    #[serde(default)]
+    bound: BTreeMap<String, RawBinding>,
+}
+
+/// Path to the global bindings store, if a global config dir resolves.
+pub fn store_path() -> Option<PathBuf> {
+    config::global_config_dir().map(|d| d.join("bindings.toml"))
+}
+
+fn key(cwd: &Path) -> String {
+    cwd.display().to_string()
+}
+
+fn load(store_path: &Path) -> BindingStore {
+    std::fs::read_to_string(store_path)
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save(store_path: &Path, store: &BindingStore) -> Result<()> {
+    let text = toml::to_string(store).context("serializing bindings store")?;
+    atomic_write(store_path, &text)
+}
+
+/// Read the global binding for `cwd`, if one is recorded.
+pub fn read_global(cwd: &Path) -> Option<Binding> {
+    read_global_at(&store_path()?, cwd)
+}
+
+/// Persist the global binding for `cwd`.
+pub fn write_global(cwd: &Path, b: &Binding) -> Result<()> {
+    let path = store_path().ok_or_else(|| anyhow!("no global config dir to store bindings in"))?;
+    write_global_at(&path, cwd, b)
+}
+
+/// [`read_global`] against an explicit store path (testable core).
+pub fn read_global_at(store_path: &Path, cwd: &Path) -> Option<Binding> {
+    load(store_path)
+        .bound
+        .get(&key(cwd))
+        .and_then(|r| r.to_binding())
+}
+
+/// [`write_global`] against an explicit store path (testable core).
+pub fn write_global_at(store_path: &Path, cwd: &Path, b: &Binding) -> Result<()> {
+    let mut store = load(store_path);
+    store.bound.insert(key(cwd), RawBinding::from_binding(b));
+    save(store_path, &store)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_binding_round_trips_and_preserves_content() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(config::repo_dir(repo.path())).unwrap();
+        // Hand-authored private layer with a comment and an unrelated table.
+        std::fs::write(
+            config::repo_local_path(repo.path()),
+            "# private notes\n[capability_params.ssh]\nuser = \"deploy\"\n",
+        )
+        .unwrap();
+
+        // No binding yet.
+        assert_eq!(read_repo(repo.path()), None);
+
+        // Write a profile binding; the unrelated content + comment survive.
+        write_repo(repo.path(), &Binding::Profile("rust — browser".into())).unwrap();
+        assert_eq!(
+            read_repo(repo.path()),
+            Some(Binding::Profile("rust — browser".into()))
+        );
+        let text = std::fs::read_to_string(config::repo_local_path(repo.path())).unwrap();
+        assert!(text.contains("# private notes"));
+        assert!(text.contains("user = \"deploy\""));
+
+        // Switching to an explicit opt-out replaces the table (no stale profile).
+        write_repo(repo.path(), &Binding::None).unwrap();
+        assert_eq!(read_repo(repo.path()), Some(Binding::None));
+        let text = std::fs::read_to_string(config::repo_local_path(repo.path())).unwrap();
+        assert!(!text.contains("rust — browser"));
+    }
+
+    #[test]
+    fn global_store_round_trips_and_is_per_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("bindings.toml");
+        let a = Path::new("/work/proj-a");
+        let b = Path::new("/work/proj-b");
+
+        assert_eq!(read_global_at(&store, a), None);
+        write_global_at(&store, a, &Binding::Profile("machine".into())).unwrap();
+        write_global_at(&store, b, &Binding::None).unwrap();
+
+        assert_eq!(
+            read_global_at(&store, a),
+            Some(Binding::Profile("machine".into()))
+        );
+        assert_eq!(read_global_at(&store, b), Some(Binding::None));
+        // Independent paths don't bleed into each other.
+        assert_eq!(read_global_at(&store, Path::new("/elsewhere")), None);
+    }
+}

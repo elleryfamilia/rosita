@@ -34,9 +34,11 @@ pub struct Config {
     pub env: EnvConfig,
     /// Codex-adapter knobs.
     pub codex: CodexConfig,
-    /// Profiles, composed additively against the detected context.
+    /// Your profiles (entirely user-authored; one is selected per context).
     pub profiles: Vec<ProfileConfig>,
-    /// Capability library (built-ins merged with `[[capabilities]]` by id).
+    /// Your capability library (the `[[capabilities]]` you authored, merged by
+    /// id across layers). The shipped [`palette`](crate::capability::palette) is
+    /// a separate read-only catalog and is **not** included here.
     pub capabilities: Vec<Capability>,
     /// Per-capability `params` overrides keyed by capability id, deep-merged
     /// across layers. The private (`local.toml`) place for sensitive values
@@ -140,6 +142,12 @@ struct RawConfig {
     agents: Vec<AgentDescriptor>,
     #[serde(default)]
     host_classes: BTreeMap<String, Vec<String>>,
+    /// The per-project `[binding]` (repo `local.toml`). Parsed here only so the
+    /// strict `deny_unknown_fields` layer accepts it; the binding is owned and
+    /// read by [`crate::binding`], not carried on the merged [`Config`].
+    #[serde(default)]
+    #[allow(dead_code)]
+    binding: Option<crate::binding::RawBinding>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -204,14 +212,14 @@ impl RawConfig {
                 slot.max_output_kib = c.max_output_kib;
             }
         }
-        // Repo profiles replace built-in/global profiles of the same name.
+        // Later-layer profiles replace earlier ones of the same name.
         for p in other.profiles {
             match self.profiles.iter_mut().find(|e| e.name == p.name) {
                 Some(existing) => *existing = p,
                 None => self.profiles.push(p),
             }
         }
-        // Repo capabilities replace built-in/global ones of the same id.
+        // Later-layer capabilities replace earlier ones of the same id.
         for cap in other.capabilities {
             match self.capabilities.iter_mut().find(|e| e.id == cap.id) {
                 Some(existing) => *existing = cap,
@@ -244,23 +252,12 @@ impl RawConfig {
         let env = self.env.unwrap_or_default();
         let codex = self.codex.unwrap_or_default();
 
-        // Built-in profiles form the base; user profiles override by name.
-        let mut profiles = crate::profile::builtin_profiles();
-        for p in self.profiles {
-            match profiles.iter_mut().find(|e| e.name == p.name) {
-                Some(existing) => *existing = p,
-                None => profiles.push(p),
-            }
-        }
-
-        // Built-in capabilities form the base; user ones override by id.
-        let mut capabilities = crate::capability::builtin_capabilities();
-        for cap in self.capabilities {
-            match capabilities.iter_mut().find(|e| e.id == cap.id) {
-                Some(existing) => *existing = cap,
-                None => capabilities.push(cap),
-            }
-        }
+        // No shipped profiles and no auto-injected capabilities: both are
+        // entirely user-authored (already merged by name/id across layers in
+        // `merge`). The shipped `capability::palette()` is a separate read-only
+        // catalog you pick from; it is never composed and never lands here.
+        let profiles = self.profiles;
+        let capabilities = self.capabilities;
 
         // Built-in agents form the base; user `[[agents]]` override by id.
         let mut agents = crate::adapters::builtin_agents();
@@ -442,20 +439,23 @@ mod tests {
         assert_eq!(c.codex.max_output_kib, 32);
         assert!(!c.codex.write_override);
         assert!(c.env.allowlist.contains(&"LANG".to_string()));
-        // Built-in profiles are always present.
-        assert!(c.profiles.iter().any(|p| p.name == "rust"));
-        assert!(c.profiles.iter().any(|p| p.name == "default"));
-        // Built-in capabilities are always present.
-        assert!(c.capabilities.iter().any(|cap| cap.id == "baseline"));
-        assert!(c
-            .capabilities
-            .iter()
-            .any(|cap| cap.id == "rust-conventions"));
+        // No shipped profiles and no auto-injected capabilities: a fresh install
+        // owns an empty library (the palette is a separate catalog).
+        assert!(c.profiles.is_empty());
+        assert!(c.capabilities.is_empty());
     }
 
     #[test]
-    fn user_capabilities_override_and_extend() {
-        let mut base = RawConfig::default();
+    fn user_capabilities_merge_across_layers() {
+        // A later layer replaces an earlier capability by id and adds new ones.
+        let mut base: RawConfig = toml::from_str(
+            r#"
+            [[capabilities]]
+            id = "rust-conventions"
+            guidance = "base rust rules"
+            "#,
+        )
+        .unwrap();
         let overlay: RawConfig = toml::from_str(
             r#"
             [[capabilities]]
@@ -473,7 +473,7 @@ mod tests {
         base.merge(overlay);
         let c = base.finalize(vec![]);
 
-        // Override replaced the built-in by id.
+        // Override replaced the earlier capability by id.
         let rustc = c
             .capabilities
             .iter()
@@ -482,8 +482,8 @@ mod tests {
         assert_eq!(rustc.guidance, "my rust rules");
         // New capability was added.
         assert!(c.capabilities.iter().any(|x| x.id == "ssh-tailnet"));
-        // Other built-ins survive.
-        assert!(c.capabilities.iter().any(|x| x.id == "baseline"));
+        // Only the two authored capabilities exist — nothing is auto-injected.
+        assert_eq!(c.capabilities.len(), 2);
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod tests {
 
             [[profiles]]
             name = "rust"
-            priority = 99
+            targets = ["rust"]
             guidance = "custom rust guidance"
             "#,
         )
@@ -517,10 +517,27 @@ mod tests {
         // An explicit allowlist in any layer REPLACES the built-in defaults
         // (full user control); built-in defaults apply only when unset.
         assert_eq!(c.env.allowlist, vec!["MY_FLAG".to_string()]);
-        // user profile replaced the built-in "rust" by name
+        // The user profile is carried through with its targets + guidance.
         let rust = c.profiles.iter().find(|p| p.name == "rust").unwrap();
-        assert_eq!(rust.priority, 99);
+        assert_eq!(rust.targets, vec!["rust".to_string()]);
         assert_eq!(rust.guidance.as_deref(), Some("custom rust guidance"));
+    }
+
+    #[test]
+    fn binding_table_in_local_toml_parses_and_is_ignored_by_config() {
+        // `[binding]` is the binding module's concern, but the strict parser
+        // must accept it in the private layer rather than reject it.
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
+        std::fs::write(
+            repo_local_path(repo.path()),
+            "[binding]\nprofile = \"rust — browser\"\n",
+        )
+        .unwrap();
+        let c = Config::load_from(None, repo.path()).expect("local.toml [binding] must parse");
+        // It contributes nothing to the merged config.
+        assert!(c.profiles.is_empty());
+        assert!(c.capabilities.is_empty());
     }
 
     #[test]

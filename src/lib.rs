@@ -9,8 +9,9 @@
 //! ## Module map
 //! - [`context`]    — detect cwd/git/languages/stack/commands/system/env.
 //! - [`config`]     — layered TOML config (global + repo) and the merged model.
-//! - [`capability`] — reusable guidance atoms composed by profiles.
-//! - [`profile`]    — rule-based profiles + additive capability composition.
+//! - [`capability`] — reusable guidance atoms (your library + the shipped palette).
+//! - [`profile`]    — targeted profiles + pick-one selection & composition.
+//! - [`binding`]    — the per-project remembered profile choice.
 //! - [`render`]   — template rendering (minijinja) + generated header.
 //! - [`providers`]— native environment discovery (host/tailnet/docker/…).
 //! - [`adapters`] — per-agent wiring (Claude / Codex / generic).
@@ -25,6 +26,7 @@
 
 pub mod adapters;
 pub mod audit;
+pub mod binding;
 pub mod capability;
 pub mod cli;
 pub mod commands;

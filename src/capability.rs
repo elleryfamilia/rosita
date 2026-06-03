@@ -164,14 +164,13 @@ impl Capability {
     }
 }
 
-/// The built-in capability library: always present as a base layer, overridable
-/// by id via `[[capabilities]]` in config.
-///
-/// The stack/infra/experimental atoms back the built-in profiles (which now
-/// reference them by id instead of carrying inline guidance). The remaining
-/// atoms (`terse-comms`, `conventional-commits`) are a reusable starter set for
-/// user profiles to compose — they are not pulled in by any built-in profile.
-pub fn builtin_capabilities() -> Vec<Capability> {
+/// The shipped capability **palette**: a read-only catalog you *pick from* when
+/// composing a profile. Palette items are **never auto-composed and never
+/// written into your config** — to use or customize one you duplicate it into a
+/// config layer and own the copy (studio's `DuplicatePaletteItem`). Composition
+/// resolves a profile's capability refs against your *own* library only, so a
+/// profile that names a palette id you haven't duplicated renders nothing for it.
+pub fn palette() -> Vec<Capability> {
     fn cap(id: &str, description: &str, guidance: &str) -> Capability {
         Capability {
             id: id.to_string(),
@@ -307,21 +306,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtins_are_unique_and_well_formed() {
-        let caps = builtin_capabilities();
+    fn palette_is_unique_and_well_formed() {
+        let caps = palette();
         let mut ids = std::collections::HashSet::new();
         for c in &caps {
             assert!(ids.insert(c.id.clone()), "duplicate capability id {}", c.id);
             assert!(!c.guidance.trim().is_empty(), "{} has empty guidance", c.id);
         }
-        // The atoms the built-in profiles reference must exist.
-        for needed in [
-            "baseline",
-            "rust-conventions",
-            "infra-caution",
-            "experimental-iteration",
-        ] {
-            assert!(ids.contains(needed), "missing built-in capability {needed}");
+        // A representative spread of palette atoms is present to pick from.
+        for needed in ["rust-conventions", "terse-comms", "conventional-commits"] {
+            assert!(ids.contains(needed), "missing palette capability {needed}");
+        }
+    }
+
+    #[test]
+    fn palette_items_are_built_in_origin() {
+        // Palette items default to the BuiltIn origin and are never trusted as
+        // your own authorship until duplicated into a config layer.
+        for c in palette() {
+            assert_eq!(c.origin, Layer::BuiltIn);
         }
     }
 
@@ -334,9 +337,9 @@ mod tests {
 
     #[test]
     fn agent_restriction() {
-        let mut c = builtin_capabilities()
+        let mut c = palette()
             .into_iter()
-            .find(|c| c.id == "baseline")
+            .find(|c| c.id == "rust-conventions")
             .unwrap();
         assert!(c.applies_to_agent("claude")); // empty = all
         c.agents = vec!["codex".into()];

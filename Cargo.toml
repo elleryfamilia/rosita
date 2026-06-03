@@ -24,6 +24,16 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+# Comment/format-preserving TOML editing for `rosita studio`'s write engine and
+# the per-project binding writer (the plain `toml` crate cannot round-trip).
+toml_edit = "0.22"
+# Unified diffs for studio's stage→diff→apply review (wired up in a later slice).
+similar = "2"
+# studio's localhost web UI (blocking server, server-rendered HTML, embedded
+# assets) — added now per the dep plan; wired up in later slices.
+tiny_http = "0.12"
+maud = "0.26"
+rust-embed = "8"
 minijinja = "2"
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

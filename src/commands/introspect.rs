@@ -12,7 +12,7 @@ use super::{prepare, Runtime};
 use crate::adapters::AgentDescriptor;
 use crate::capability::{Capability, Layer};
 use crate::cli::{AgentsArgs, CapabilitiesAction, CapabilitiesArgs, ProfilesArgs};
-use crate::profile::ProfileConfig;
+use crate::profile::{self, ProfileConfig};
 
 // --- capabilities ------------------------------------------------------------
 
@@ -222,53 +222,54 @@ fn print_capability_show(c: &Capability, via: Option<&str>) {
 /// Entry point for `rosita profiles`.
 pub fn profiles(rt: &Runtime, args: &ProfilesArgs) -> crate::Result<()> {
     let prep = prepare(rt)?;
-    let matching = &prep.composition.profiles;
+    let tags = prep.context.selection_targets();
+    let selected = prep.composition.profile.clone();
+    let is_selected = |p: &ProfileConfig| selected.as_deref() == Some(p.name.as_str());
+    let is_candidate = |p: &ProfileConfig| profile::profile_matches_targets(p, &tags);
 
     if args.json {
         let rows: Vec<_> = prep
             .config
             .profiles
             .iter()
-            .map(|p| profile_row(p, matching.contains(&p.name)))
+            .map(|p| profile_row(p, is_candidate(p), is_selected(p)))
             .collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(());
     }
 
+    let candidates: Vec<&str> = prep
+        .config
+        .profiles
+        .iter()
+        .filter(|p| is_candidate(p))
+        .map(|p| p.name.as_str())
+        .collect();
+
     println!(
-        "Profiles ({} configured; matching: {})",
+        "Profiles ({} configured; selected: {})",
         prep.config.profiles.len(),
-        if matching.is_empty() {
-            "none".into()
-        } else {
-            matching.join(", ")
-        }
+        selected.as_deref().unwrap_or("none")
     );
-    // Show in priority order (desc) for readability.
-    let mut profs: Vec<&ProfileConfig> = prep.config.profiles.iter().collect();
-    profs.sort_by(|a, b| b.priority.cmp(&a.priority));
-    for p in profs {
-        let mark = if matching.contains(&p.name) {
+    if candidates.len() > 1 {
+        println!(
+            "  {} match here (pick one): {}",
+            candidates.len(),
+            candidates.join(", ")
+        );
+    }
+    for p in &prep.config.profiles {
+        let mark = if is_selected(p) {
             "→"
+        } else if is_candidate(p) {
+            "·"
         } else {
             " "
         };
         let caps: Vec<&str> = p.capabilities.iter().map(|r| r.id()).collect();
-        let rules = if p.when.is_empty() {
-            "(always)".to_string()
-        } else {
-            format!("{} rule(s)", p.when.len())
-        };
-        let excl = if p.exclusive { " [exclusive]" } else { "" };
-        println!(
-            "  {mark} {:<14} (priority {:>3}){excl}  {rules}",
-            p.name, p.priority
-        );
+        println!("  {mark} {:<16} targets [{}]", p.name, p.targets.join(", "));
         if !caps.is_empty() {
             println!("        capabilities: {}", caps.join(", "));
-        }
-        if !p.exclude.is_empty() {
-            println!("        excludes: {}", p.exclude.join(", "));
         }
     }
     Ok(())
@@ -277,23 +278,21 @@ pub fn profiles(rt: &Runtime, args: &ProfilesArgs) -> crate::Result<()> {
 #[derive(Serialize)]
 struct ProfileRow {
     name: String,
-    priority: i32,
-    matched: bool,
-    exclusive: bool,
+    targets: Vec<String>,
+    /// Whether this profile's targets match the current context.
+    candidate: bool,
+    /// Whether this profile is the selected one for the current context.
+    selected: bool,
     capabilities: Vec<String>,
-    exclude: Vec<String>,
-    rule_count: usize,
 }
 
-fn profile_row(p: &ProfileConfig, matched: bool) -> ProfileRow {
+fn profile_row(p: &ProfileConfig, candidate: bool, selected: bool) -> ProfileRow {
     ProfileRow {
         name: p.name.clone(),
-        priority: p.priority,
-        matched,
-        exclusive: p.exclusive,
+        targets: p.targets.clone(),
+        candidate,
+        selected,
         capabilities: p.capabilities.iter().map(|r| r.id().to_string()).collect(),
-        exclude: p.exclude.clone(),
-        rule_count: p.when.len(),
     }
 }
 

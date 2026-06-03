@@ -346,7 +346,7 @@ mod tests {
 
     fn composition(profile: &str, caps: Vec<ResolvedCapability>) -> Composition {
         Composition {
-            profiles: vec![profile.into()],
+            profile: Some(profile.into()),
             capabilities: caps,
             reasons: vec![],
         }

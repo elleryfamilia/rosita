@@ -22,11 +22,13 @@ max_output_kib = 32
 
 # `host_classes` (hostname globs → class) and capability `params` values are
 # private — define them in .rosita/local.toml, not here. You can still *match*
-# on `host_class` in profile rules below; only the definitions are private.
+# on `host_class` in a capability's `when` rules; only the definitions are private.
 
-# Capabilities are reusable guidance atoms that profiles compose. Built-ins are
-# always present (e.g. baseline, rust-conventions, infra-caution, terse-comms,
-# conventional-commits); override one by id, or add your own. Fields:
+# Capabilities are reusable guidance atoms that profiles compose. They are
+# entirely YOURS — there are no always-on built-ins. rosita ships a read-only
+# *palette* you can copy from (`rosita capabilities`, or duplicate in studio),
+# but a profile only renders capabilities that physically live in your config.
+# Fields:
 #   id (required); description, tags, risk (info|caution|dangerous),
 #   when (self-gate rules), requires (other capability ids), params (table),
 #   agents (restrict to specific agent ids), guidance (templated markdown).
@@ -39,6 +41,14 @@ id = "house-style"
 description = "House style"
 tags = ["dev-workflow"]
 guidance = "Run the formatter and the linter before every commit."
+
+# Copy a palette atom into your config to own/customize it, then reference it
+# from a profile (a profile cannot reference a palette item it hasn't copied in).
+[[capabilities]]
+id = "rust-conventions"
+description = "Rust conventions"
+tags = ["stack"]
+guidance = "Rust project. Build with cargo, format with rustfmt, lint with clippy (`cargo clippy --all-targets`). Prefer `?`/`Result` over `unwrap()` in non-test code."
 
 # Dynamic capability example: embed live machine identity (built-in provider,
 # always trusted). Uncomment and reference from a profile to use.
@@ -58,27 +68,25 @@ guidance = "Run the formatter and the linter before every commit."
 # command = "uname -sm"
 # cache = "30s"
 
-# Profiles override the built-ins by name; add your own freely.
-# A profile matches when ALL `when` clauses match (AND). Selection is ADDITIVE:
-# every matching profile contributes; their capabilities are unioned (deduped,
-# priority-ordered), `requires` resolved, per-capability `when` filtered, and
-# `exclude` applied. Set `exclusive = true` to replace rather than add.
-# Fields: stack | language | package_manager | path | branch | repo | host_class | os | arch
-# Ops:    equals | starts_with | contains | matches
+# A project uses ONE profile, chosen by language/platform. Each profile is tied
+# to coarse `targets` (rust | node | nextjs | go | python | android | java |
+# machine). On `rosita run`/`render`: 0 targets match → no profile (empty
+# overlay); exactly 1 → auto-used; 2+ → you're asked once and the choice is
+# remembered per-project in the gitignored local.toml `[binding]`.
+# A profile renders its `capabilities` in order (deduped, `requires`-resolved,
+# per-capability `when`-filtered). It needs ≥1 capability to be useful.
 [[profiles]]
-name = "experimental"
-priority = 40
-when = [{ field = "branch", op = "starts_with", value = "experiment/" }]
+name = "rust"
+targets = ["rust"]
 # Compose reusable capabilities (preferred over inline guidance)…
-capabilities = ["experimental-iteration", "house-style"]
+capabilities = ["rust-conventions", "house-style"]
 
 [[profiles]]
-name = "infra"
-priority = 50
-when = [{ field = "path", op = "starts_with", value = "infra/" }]
+name = "machine"
+targets = ["machine"] # the "no repo" context (general devops/sysadmin work)
 # …or keep inline `guidance` (back-compat); it renders as a `<profile>:inline`
 # capability after the explicit ones.
-guidance = "Infrastructure code — prefer plans over direct mutation; never touch shared/remote state without explicit confirmation."
+guidance = "General machine context — confirm before destructive operations on this live box; it's not a sandbox."
 
 # Agents are built in (claude, codex, gemini, opencode, copilot, generic).
 # Override one by id, or add your own — no code change needed. Fields:

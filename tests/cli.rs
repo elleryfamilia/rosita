@@ -67,6 +67,25 @@ impl Fixture {
         self.write("src/main.rs", "fn main() { println!(\"hi\"); }\n");
     }
 
+    /// Author a minimal repo config: a `rust-conventions` capability plus a
+    /// `rust` profile that targets the rust stack and composes it. Nothing is
+    /// built in anymore, so tests that expect an active profile write one.
+    fn rust_profile(&self) {
+        self.write(
+            ".rosita/config.toml",
+            "[[capabilities]]\n\
+             id = \"rust-conventions\"\n\
+             description = \"Rust conventions\"\n\
+             tags = [\"stack\"]\n\
+             guidance = \"Rust project. Build with cargo, lint with clippy.\"\n\
+             \n\
+             [[profiles]]\n\
+             name = \"rust\"\n\
+             targets = [\"rust\"]\n\
+             capabilities = [\"rust-conventions\"]\n",
+        );
+    }
+
     /// Write a file into the isolated global config dir (the one `cmd()` points
     /// `ROSITA_CONFIG_DIR` at), e.g. a trusted global `config.toml`.
     fn write_global(&self, rel: &str, content: &str) {
@@ -96,6 +115,7 @@ fn detect_emits_json_with_rust_stack() {
 fn render_claude_creates_overlay_marker_and_gitignore() {
     let fx = Fixture::new();
     fx.rust_project();
+    fx.rust_profile();
     fx.git_init(); // gitignore management only applies inside a repo
 
     fx.cmd()
@@ -133,6 +153,7 @@ fn render_in_non_repo_writes_overlay_but_no_gitignore() {
     // the CLAUDE.local.md import are written, but no stray .gitignore is made.
     let fx = Fixture::new(); // deliberately NOT a git repo
     fx.rust_project();
+    fx.rust_profile();
 
     fx.cmd()
         .args(["render", "--agent", "claude"])
@@ -255,6 +276,7 @@ fn dry_run_writes_nothing() {
 fn explain_reports_selection_and_plan() {
     let fx = Fixture::new();
     fx.rust_project();
+    fx.rust_profile();
 
     fx.cmd()
         .arg("explain")
@@ -301,7 +323,7 @@ fn local_toml_supplies_private_params_to_capabilities() {
          \n\
          [[profiles]]\n\
          name = \"deploy\"\n\
-         priority = 70\n\
+         targets = [\"rust\"]\n\
          capabilities = [\"deploy\"]\n",
     );
     fx.write(
@@ -541,12 +563,28 @@ fn custom_agent_via_config_is_first_class() {
 }
 
 #[test]
-fn additive_composition_layers_stack_and_baseline() {
-    // A plain Rust repo matches both `rust` and the always-on `default`, so the
-    // overlay composes the Rust capability *and* the baseline — they layer
-    // instead of the single highest-priority profile winning.
+fn profile_composes_its_capability_set_with_no_baseline() {
+    // Pick-one: the selected profile renders exactly its own capabilities, each
+    // as its own section. There is no always-on baseline layered underneath.
     let fx = Fixture::new();
     fx.rust_project();
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\n\
+         id = \"rust-conventions\"\n\
+         description = \"Rust conventions\"\n\
+         guidance = \"Rust project. Lint with clippy.\"\n\
+         \n\
+         [[capabilities]]\n\
+         id = \"terse\"\n\
+         description = \"Terse communication\"\n\
+         guidance = \"Be terse; lead with the result.\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"rust\"\n\
+         targets = [\"rust\"]\n\
+         capabilities = [\"rust-conventions\", \"terse\"]\n",
+    );
 
     fx.cmd()
         .args(["render", "--agent", "claude"])
@@ -555,24 +593,26 @@ fn additive_composition_layers_stack_and_baseline() {
         .stdout(predicate::str::contains("profile rust"));
 
     let overlay = fx.read(".rosita/generated/claude.md");
-    // Each capability is its own section…
+    // Both of the profile's capabilities render, each its own section…
     assert!(overlay.contains("### Rust conventions"));
-    assert!(overlay.contains("### Baseline"));
-    // …and both bodies are present (rust + baseline guidance).
+    assert!(overlay.contains("### Terse communication"));
     assert!(overlay.contains("clippy"));
-    assert!(overlay.contains("minimal, focused"));
+    assert!(overlay.contains("lead with the result"));
+    // …and nothing is auto-injected: no baseline section appears.
+    assert!(!overlay.contains("### Baseline"));
 
-    // The audit log records the composed capability set.
+    // The audit log records exactly the composed capability set.
     let audit = fx.read(".rosita/logs/events.jsonl");
     assert!(audit.contains("rust-conventions"));
-    assert!(audit.contains("baseline"));
+    assert!(audit.contains("terse"));
+    assert!(!audit.contains("baseline"));
 }
 
 #[test]
 fn user_capability_via_config_is_composed() {
     let fx = Fixture::new();
     fx.rust_project();
-    // A reusable capability plus a profile that composes it — no code change.
+    // Reusable capabilities plus a profile that composes them — no code change.
     fx.write(
         ".rosita/config.toml",
         "[[capabilities]]\n\
@@ -581,10 +621,15 @@ fn user_capability_via_config_is_composed() {
          risk = \"caution\"\n\
          guidance = \"Always run the formatter before committing.\"\n\
          \n\
+         [[capabilities]]\n\
+         id = \"rust-conventions\"\n\
+         description = \"Rust conventions\"\n\
+         guidance = \"Rust project. Lint with clippy.\"\n\
+         \n\
          [[profiles]]\n\
          name = \"house\"\n\
-         priority = 60\n\
-         capabilities = [\"house-style\"]\n",
+         targets = [\"rust\"]\n\
+         capabilities = [\"house-style\", \"rust-conventions\"]\n",
     );
 
     fx.cmd()
@@ -648,7 +693,7 @@ fn dynamic_provider_capability_renders_live_output() {
          \n\
          [[profiles]]\n\
          name = \"dyn\"\n\
-         priority = 70\n\
+         targets = [\"rust\"]\n\
          capabilities = [\"machine\"]\n",
     );
 
@@ -674,7 +719,7 @@ fn global_layer_command_runs_without_allow() {
          \n\
          [[profiles]]\n\
          name = \"g\"\n\
-         priority = 80\n\
+         targets = [\"rust\"]\n\
          capabilities = [\"greet\"]\n",
     );
 
@@ -697,7 +742,7 @@ fn repo_command_capability_is_trust_gated() {
          \n\
          [[profiles]]\n\
          name = \"dyn\"\n\
-         priority = 70\n\
+         targets = [\"rust\"]\n\
          capabilities = [\"greet\"]\n";
     fx.write(".rosita/config.toml", cfg);
 
@@ -742,23 +787,42 @@ fn repo_command_capability_is_trust_gated() {
 fn explain_lists_active_capabilities() {
     let fx = Fixture::new();
     fx.rust_project();
+    fx.rust_profile();
 
     fx.cmd()
         .arg("explain")
         .assert()
         .success()
         .stdout(predicate::str::contains("Active capabilities"))
-        .stdout(predicate::str::contains("rust-conventions"))
-        .stdout(predicate::str::contains("baseline"));
+        .stdout(predicate::str::contains("rust-conventions"));
 }
 
 #[test]
 fn capabilities_list_marks_active_and_shows_one() {
     let fx = Fixture::new();
     fx.rust_project();
+    // Your library: two capabilities, with only rust-conventions composed by the
+    // selected rust profile (terse-comms is present but inactive here).
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\n\
+         id = \"rust-conventions\"\n\
+         description = \"Rust conventions\"\n\
+         guidance = \"Rust project. Lint with clippy.\"\n\
+         \n\
+         [[capabilities]]\n\
+         id = \"terse-comms\"\n\
+         description = \"Terse communication\"\n\
+         guidance = \"Be terse.\"\n\
+         \n\
+         [[profiles]]\n\
+         name = \"rust\"\n\
+         targets = [\"rust\"]\n\
+         capabilities = [\"rust-conventions\"]\n",
+    );
 
-    // `list` (default): the built-in library, with rust-conventions active on a
-    // rust repo and an unreferenced built-in (terse-comms) present but inactive.
+    // `list` (default): your library, with rust-conventions active on a rust
+    // repo and the unreferenced terse-comms present but inactive.
     fx.cmd()
         .arg("capabilities")
         .assert()
@@ -795,12 +859,13 @@ fn capabilities_list_marks_active_and_shows_one() {
 fn profiles_list_marks_matching() {
     let fx = Fixture::new();
     fx.rust_project();
+    fx.rust_profile();
     fx.cmd()
         .arg("profiles")
         .assert()
         .success()
         .stdout(predicate::str::contains("Profiles ("))
-        // rust matches (→) on a rust repo; nextjs does not.
+        // the rust profile is selected (→) on a rust repo.
         .stdout(predicate::str::contains("→ rust"))
         .stdout(predicate::str::contains("capabilities: rust-conventions"));
 }

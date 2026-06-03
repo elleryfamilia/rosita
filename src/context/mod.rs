@@ -82,6 +82,21 @@ pub struct SystemContext {
     pub host_class: Option<String>,
 }
 
+/// Where rosita is operating: inside a git repo, or on the bare machine.
+///
+/// **Derived, never stored** — and intentionally **not** part of the context
+/// hash: the `git: Option<…>` field already encodes repo-vs-machine, so adding a
+/// field would needlessly invalidate every existing overlay. Drives profile
+/// selection (the `machine` target) and where the per-project binding lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// Operating inside a git work tree.
+    Repo,
+    /// Operating outside any repo (general machine/devops context).
+    Machine,
+}
+
 /// Discovered build/test/lint/run commands.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ProjectCommands {
@@ -123,6 +138,25 @@ impl Context {
             },
             env: BTreeMap::new(),
         }
+    }
+
+    /// Repo vs machine, derived from whether a git work tree was detected.
+    pub fn scope(&self) -> Scope {
+        if self.git.is_some() {
+            Scope::Repo
+        } else {
+            Scope::Machine
+        }
+    }
+
+    /// The coarse language/platform tags a profile's `targets` are matched
+    /// against: the detected stacks, plus `machine` when not in a repo (§4/§5).
+    pub fn selection_targets(&self) -> Vec<String> {
+        let mut tags = self.stacks.clone();
+        if self.scope() == Scope::Machine {
+            tags.push("machine".to_string());
+        }
+        tags
     }
 
     /// cwd relative to the repo base, using forward slashes. Empty at the root.

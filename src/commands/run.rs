@@ -11,19 +11,76 @@
 //! agents with an `append_prompt_flag` (e.g. Claude's `--append-system-prompt`),
 //! a short "context is fresh" note injected directly into the launch.
 
+use std::io::{IsTerminal, Write as _};
 use std::process::Command;
 
 use anyhow::anyhow;
 
-use super::{now_rfc3339, prepare, Runtime};
+use super::{now_rfc3339, prepare_with, Choice, ProfileChooser, Runtime};
 use crate::adapters::{self, AgentDescriptor, ApplyOptions};
 use crate::cli::RunArgs;
+use crate::context::Context;
+use crate::profile::ProfileConfig;
 use crate::vlog;
+
+/// Interactive "which profile?" prompt for `rosita run` when 2+ profiles match
+/// and no choice is remembered yet. Falls back to no-profile (no prompt) when
+/// stdin/stdout isn't a terminal, so CI/piped runs never block.
+struct StdinChooser;
+
+impl ProfileChooser for StdinChooser {
+    fn choose(&self, ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice> {
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            crate::warn_user!(
+                "{} profiles match but this isn't an interactive terminal — applying none. \
+                 Re-run `rosita run` interactively (or use `rosita studio`) to pick.",
+                candidates.len()
+            );
+            return Ok(Choice::Skip);
+        }
+
+        let langs = if ctx.stacks.is_empty() {
+            "this".to_string()
+        } else {
+            ctx.stacks.join("/")
+        };
+        println!(
+            "rosita › this {langs} project matches {} profiles:",
+            candidates.len()
+        );
+        for (i, p) in candidates.iter().enumerate() {
+            println!("   {}) {}", i + 1, p.name);
+        }
+        let none_choice = candidates.len() + 1;
+        println!("   {none_choice}) none (don't apply rosita here)");
+
+        loop {
+            print!(" ❯ ");
+            std::io::stdout().flush().ok();
+            let mut line = String::new();
+            if std::io::stdin().read_line(&mut line)? == 0 {
+                return Ok(Choice::Skip); // EOF — don't decide.
+            }
+            match line.trim().parse::<usize>() {
+                Ok(n) if (1..=candidates.len()).contains(&n) => {
+                    let name = candidates[n - 1].name.clone();
+                    println!("rosita › bound \"{name}\" → remembered for this project; launching…");
+                    return Ok(Choice::Profile(name));
+                }
+                Ok(n) if n == none_choice => {
+                    println!("rosita › remembered: no rosita profile here.");
+                    return Ok(Choice::None);
+                }
+                _ => println!("  please enter a number between 1 and {none_choice}."),
+            }
+        }
+    }
+}
 
 /// Entry point for `rosita run`.
 pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     let agent = args.agent.as_str();
-    let prep = prepare(rt)?;
+    let prep = prepare_with(rt, &StdinChooser)?;
     let descriptor = adapters::descriptor(&prep.config, agent)
         .ok_or_else(|| anyhow!("unknown agent '{agent}'"))?
         .clone();
