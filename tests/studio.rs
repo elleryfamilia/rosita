@@ -102,7 +102,7 @@ fn studio_binds_and_serves_secured_spine() {
 
     // 5. A write over the real socket: stage a capability (exercises POST-body
     //    parsing + the Origin guard end-to-end), then apply it.
-    let body = "id=smoke&guidance=hello&scope=repo&visibility=public";
+    let body = "name=smoke&kind=markdown&guidance=hello&scope=repo&visibility=public";
     let create = http(
         port,
         &format!(

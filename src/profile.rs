@@ -451,6 +451,7 @@ mod tests {
             agents: vec![],
             provider: None,
             command: None,
+            allow_exec: true,
             cache: None,
             origin: crate::capability::Layer::default(),
         }

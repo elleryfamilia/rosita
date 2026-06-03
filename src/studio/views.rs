@@ -13,14 +13,15 @@
 use std::path::Path;
 
 use maud::{html, Markup, PreEscaped, DOCTYPE};
+use pulldown_cmark::{html as md_html, Event, Options, Parser};
 
 use crate::capability::{Capability, Layer, Risk};
 use crate::context::Scope;
 use crate::profile::ProfileConfig;
 use crate::studio::edit::FileDiff;
 use crate::studio::state::{
-    AtomDot, AtomState, BindingState, CapView, LibraryView, OnboardingStage, PreviewOutcome,
-    ProfileView, Simulated,
+    is_advanced_capability, AtomDot, AtomState, BindingState, CapView, LibraryView,
+    OnboardingStage, PreviewOutcome, ProfileView, Simulated,
 };
 
 /// Coarse language/platform options offered in the simulator and as profile targets.
@@ -87,6 +88,37 @@ fn risk_class(r: Risk) -> &'static str {
         Risk::Caution => "risk-caution",
         Risk::Dangerous => "risk-dangerous",
     }
+}
+
+// --- markdown ----------------------------------------------------------------
+
+/// Render the overlay markdown to HTML for the review pane. Raw HTML in the
+/// source is **escaped** (studio can open an untrusted cloned repo whose
+/// guidance we must not execute), and the generated `<!-- … -->` header
+/// comments are stripped for a clean read.
+fn render_markdown(md: &str) -> Markup {
+    let body = strip_leading_comments(md);
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let parser = Parser::new_ext(body, opts).map(|ev| match ev {
+        Event::Html(s) | Event::InlineHtml(s) => Event::Text(s),
+        other => other,
+    });
+    let mut out = String::new();
+    md_html::push_html(&mut out, parser);
+    PreEscaped(out)
+}
+
+/// Drop leading generated `<!-- … -->` comment blocks (the rosita overlay
+/// header) so the rendered view starts at the real content.
+fn strip_leading_comments(md: &str) -> &str {
+    let mut t = md.trim_start();
+    while let Some(rest) = t.strip_prefix("<!--") {
+        match rest.find("-->") {
+            Some(end) => t = rest[end + 3..].trim_start(),
+            None => break,
+        }
+    }
+    t
 }
 
 // --- page shell --------------------------------------------------------------
@@ -412,71 +444,81 @@ fn layer_scope(layer: Layer) -> (&'static str, bool) {
     }
 }
 
+/// The capability's location control: a hidden, preserved `scope` (repo vs
+/// global) plus a shared/private (`config.toml` vs `local.toml`) choice. New
+/// caps are repo-scoped; editing keeps a cap's existing scope.
 fn lives_in(layer: Layer) -> Markup {
     let (scope, private) = layer_scope(layer);
     html! {
         fieldset class="lives-in" {
-            legend { "Lives in" }
+            legend { "Where it lives" }
+            input type="hidden" name="scope" value=(scope);
             div class="radio-row" {
-                label class="radio" { input type="radio" name="scope" value="repo" checked[scope == "repo"]; span { "repo" } }
-                label class="radio" { input type="radio" name="scope" value="global" checked[scope == "global"]; span { "global" } }
+                label class="radio" { input type="radio" name="visibility" value="public" checked[!private]; span { "shared" span class="radio-sub" { "config.toml — committed" } } }
+                label class="radio" { input type="radio" name="visibility" value="private" checked[private]; span { "private" span class="radio-sub" { "local.toml — gitignored" } } }
             }
-            div class="radio-row" {
-                label class="radio" { input type="radio" name="visibility" value="public" checked[!private]; span { "public" } }
-                label class="radio" { input type="radio" name="visibility" value="private" checked[private]; span { "private (local.toml)" } }
+            @if scope == "global" {
+                p class="hint small" { "Global capability — applies across all your repos." }
             }
         }
     }
 }
 
-/// The capability editor. `cap` populates an edit; `None` is a new capability.
-/// A palette item (`owned == false`) renders read-only with a duplicate action.
+/// The capability editor — content-first. `cap` populates an edit; `None` is a
+/// new capability. A palette item (`owned == false`) is read-only with a
+/// duplicate action; a cap too rich for the simple form (a built-in provider,
+/// or a script with a custom template) is read-only with an "edit in TOML" note.
 pub fn capability_form(cap: Option<&Capability>, layer: Layer, owned: bool) -> String {
     let is_new = cap.is_none();
     let id = cap.map(|c| c.id.as_str()).unwrap_or("");
-    let read_only = !is_new && !owned;
+    let read_only_palette = !is_new && !owned;
+    let advanced = cap.map(is_advanced_capability).unwrap_or(false);
     html! {
-        @if read_only {
+        @if read_only_palette {
             div class="form" {
-                div class="form-head" {
-                    h3 { "Palette capability" }
-                    span class="pill" { "read-only" }
-                }
-                p class="hint" { "Palette items are templates. Duplicate “" (id) "” into your config to own and edit it." }
+                div class="form-head" { h3 { "Palette capability" } span class="pill" { "read-only" } }
+                p class="hint" { "Palette items are starting points. Duplicate “" (id) "” into your config to own and edit it." }
                 button class="btn btn-primary" hx-post=(format!("/capabilities/{}/duplicate", enc(id))) hx-target="#center" { (icon("copy")) "Duplicate into my config" }
             }
+        } @else if advanced {
+            div class="form" {
+                div class="form-head" { h3 { "Advanced capability" } span class="pill" { "edit in TOML" } }
+                p class="hint" { "“" (id) "” uses features the quick editor can't show without dropping one side — a built-in provider, or a script with a custom guidance template. Edit it directly in your config file to change it." }
+            }
         } @else {
-            form class="form" hx-post="/capabilities" hx-target="#center" {
+            @let is_script = cap.map(|c| c.command.is_some()).unwrap_or(false);
+            @let allow_exec = cap.map(|c| c.allow_exec).unwrap_or(true);
+            form class="form cap-form" hx-post="/capabilities" hx-target="#center" {
                 div class="form-head" {
                     h3 { (if is_new { "New capability" } else { "Edit capability" }) }
-                    span class="pill" { "one reusable atom of guidance" }
+                    span class="pill" { "guidance for your agent" }
                 }
-                label class="field" { span class="field-label" { "id" }
-                    @if is_new {
-                        input type="text" name="id" value="" placeholder="rust-conventions" required;
-                    } @else {
-                        input type="text" name="id" value=(id) readonly;
+                @if !is_new { input type="hidden" name="id" value=(id); }
+                label class="field" { span class="field-label" { "name" }
+                    input type="text" name="name" value=(cap.and_then(|c| c.description.as_deref()).unwrap_or(id)) placeholder="Rust conventions" required;
+                    @if is_new { span class="field-hint" { "becomes the heading; the id is derived from it" } }
+                }
+
+                div class="seg" {
+                    input type="radio" name="kind" id="kind-md" value="markdown" checked[!is_script];
+                    label class="seg-opt" for="kind-md" { "Markdown" }
+                    input type="radio" name="kind" id="kind-sc" value="script" checked[is_script];
+                    label class="seg-opt" for="kind-sc" { "Script" }
+                }
+
+                div class="kind-md" {
+                    label class="field" { span class="field-label" { "guidance" span class="field-hint" { "markdown" } }
+                        textarea name="guidance" rows="10" placeholder="# Rust conventions&#10;Build with cargo; lint with clippy." { (cap.map(|c| c.guidance.as_str()).unwrap_or("")) }
                     }
                 }
-                label class="field" { span class="field-label" { "description" } input type="text" name="description" value=(cap.and_then(|c| c.description.as_deref()).unwrap_or("")) placeholder="Rust conventions"; }
-                label class="field" { span class="field-label" { "tags" span class="field-hint" { "comma-separated" } } input type="text" name="tags" value=(cap.map(|c| c.tags.join(", ")).unwrap_or_default()) placeholder="stack, safety"; }
-                fieldset class="risk" {
-                    legend { "Risk" }
-                    @let risk = cap.map(|c| c.risk).unwrap_or(Risk::Info);
-                    div class="radio-row" {
-                        label class="radio risk-info" { input type="radio" name="risk" value="info" checked[risk == Risk::Info]; span { "info" } }
-                        label class="radio risk-caution" { input type="radio" name="risk" value="caution" checked[risk == Risk::Caution]; span { "caution" } }
-                        label class="radio risk-dangerous" { input type="radio" name="risk" value="dangerous" checked[risk == Risk::Dangerous]; span { "dangerous" } }
+                div class="kind-sc" {
+                    label class="field" { span class="field-label" { "command" span class="field-hint" { "its output is embedded as the guidance" } }
+                        textarea name="command" rows="5" placeholder="echo 'last deploy: green'" { (cap.and_then(|c| c.command.as_deref()).unwrap_or("")) }
                     }
+                    label class="check exec-check" { input type="checkbox" name="allow_exec" checked[allow_exec]; span { "Allow execution" } }
+                    p class="hint small" { "Scripts run only when the repo is trusted (" code { "rosita allow" } ") " strong { "and" } " execution is allowed here. Review trust in the diff before applying." }
                 }
-                label class="field" { span class="field-label" { "provider" span class="field-hint" { "dynamic; built-in probe" } } input type="text" name="provider" value=(cap.and_then(|c| c.provider.as_deref()).unwrap_or("")) placeholder="host | docker | …"; }
-                label class="field" { span class="field-label" { "command" span class="field-hint" { "dynamic; trust-gated in a repo" } } input type="text" name="command" value=(cap.and_then(|c| c.command.as_deref()).unwrap_or("")); }
-                label class="field" { span class="field-label" { "cache TTL" } input type="text" name="cache" value=(cap.and_then(|c| c.cache.as_deref()).unwrap_or("")) placeholder="60s"; }
-                label class="field" { span class="field-label" { "requires" span class="field-hint" { "comma-separated capability ids" } } input type="text" name="requires" value=(cap.map(|c| c.requires.join(", ")).unwrap_or_default()); }
-                label class="field" { span class="field-label" { "agents" span class="field-hint" { "comma-separated; empty = all" } } input type="text" name="agents" value=(cap.map(|c| c.agents.join(", ")).unwrap_or_default()); }
-                label class="field" { span class="field-label" { "guidance" span class="field-hint" { "markdown / minijinja" } }
-                    textarea name="guidance" rows="7" { (cap.map(|c| c.guidance.as_str()).unwrap_or("")) }
-                }
+
                 (lives_in(layer))
                 div class="form-buttons" {
                     button type="button" class="btn btn-ghost" hx-get="/welcome" hx-target="#center" { "Discard" }
@@ -658,7 +700,14 @@ pub fn preview_pane(p: &PreviewOutcome) -> Markup {
             }
             (provenance(p))
             @if let Some(note) = &p.note { p class="note" { (note) } }
-            pre class="overlay-body" { (p.overlay) }
+            div class="overlay-toggle" {
+                input type="radio" name="ov" id="ov-rendered" checked;
+                label class="seg-opt" for="ov-rendered" { "Rendered" }
+                input type="radio" name="ov" id="ov-raw";
+                label class="seg-opt" for="ov-raw" { "Raw" }
+            }
+            div class="overlay-rendered markdown-body" { (render_markdown(&p.overlay)) }
+            pre class="overlay-body overlay-raw" { (p.overlay) }
             p class="updates" { (icon("refresh")) "Reflects staged state — updates when you stage or change the context (ReadOnly: probes not executed)." }
         }
     }

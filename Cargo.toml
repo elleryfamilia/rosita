@@ -33,6 +33,8 @@ similar = "2"
 # assets) — added now per the dep plan; wired up in later slices.
 tiny_http = "0.12"
 maud = "0.26"
+# Render the live-overlay markdown for studio's review pane (HTML escaped).
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 rust-embed = "8"
 minijinja = "2"
 sha2 = "0.10"

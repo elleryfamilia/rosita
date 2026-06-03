@@ -112,6 +112,12 @@ pub struct Capability {
     /// Trust-gated when authored in a repo layer (see [`crate::trust`]).
     #[serde(default)]
     pub command: Option<String>,
+    /// Whether a `command`-backed capability is allowed to execute. Defaults to
+    /// `true` (existing configs keep running); set `false` to disable a script
+    /// without deleting it. Layered *on top of* repo trust — a command runs only
+    /// when the repo is trusted AND this is `true`. Only serialized when `false`.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub allow_exec: bool,
     /// Cache TTL for dynamic output (e.g. `60s`, `5m`); default 60s.
     #[serde(default)]
     pub cache: Option<String>,
@@ -124,6 +130,17 @@ pub struct Capability {
 /// Default `params`: an empty TOML table (so `{{ params.x }}` is just empty).
 fn empty_params() -> toml::Value {
     toml::Value::Table(toml::map::Map::new())
+}
+
+/// Serde default for [`Capability::allow_exec`] (execution on unless disabled).
+fn default_true() -> bool {
+    true
+}
+
+/// `skip_serializing_if` for [`Capability::allow_exec`] — only persist the
+/// off-switch (`allow_exec = false`), never the default.
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 impl Capability {
@@ -153,6 +170,7 @@ impl Capability {
             agents: Vec::new(),
             provider: None,
             command: None,
+            allow_exec: true,
             cache: None,
             origin: Layer::default(),
         }
@@ -184,6 +202,7 @@ pub fn palette() -> Vec<Capability> {
             agents: Vec::new(),
             provider: None,
             command: None,
+            allow_exec: true,
             cache: None,
             origin: Layer::default(),
         }

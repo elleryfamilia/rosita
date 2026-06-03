@@ -494,15 +494,6 @@ fn values_for(pairs: &[(String, String)], key: &str) -> Vec<String> {
         .collect()
 }
 
-/// Split a comma-separated field into trimmed, non-empty entries.
-fn comma_list(s: Option<&str>) -> Vec<String> {
-    s.unwrap_or("")
-        .split(',')
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty())
-        .collect()
-}
-
 /// A trimmed, non-empty optional field.
 fn opt(s: Option<&str>) -> Option<String> {
     s.map(str::trim)
@@ -522,29 +513,98 @@ pub fn layer_from_form(pairs: &[(String, String)]) -> Layer {
     }
 }
 
-/// Build a [`Capability`] from a posted editor form. `origin` is left default —
-/// it is re-tagged by layer when the staged config is assembled.
-pub fn capability_from_form(pairs: &[(String, String)]) -> crate::Result<Capability> {
-    let id =
-        opt(value_of(pairs, "id")).ok_or_else(|| anyhow::anyhow!("capability id is required"))?;
-    let risk = match value_of(pairs, "risk") {
-        Some("caution") => Risk::Caution,
-        Some("dangerous") => Risk::Dangerous,
-        _ => Risk::Info,
+/// The capability id an editor submission targets: the readonly `id` field when
+/// editing, otherwise the slug of the `name` field (a new capability).
+pub fn editor_cap_id(pairs: &[(String, String)]) -> Option<String> {
+    if let Some(id) = opt(value_of(pairs, "id")) {
+        return Some(id);
+    }
+    opt(value_of(pairs, "name")).map(|n| slug(&n))
+}
+
+/// Slugify a display name into a stable capability id (lowercase, alphanumeric
+/// runs joined by single hyphens). Used to derive a new capability's id.
+pub fn slug(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut pending_dash = false;
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_dash && !out.is_empty() {
+                out.push('-');
+            }
+            pending_dash = false;
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            pending_dash = true;
+        }
+    }
+    out
+}
+
+/// Whether a capability is too rich for studio's content-first editor and must
+/// be hand-edited as TOML: a built-in `provider`, or a `command` *and* a custom
+/// guidance template (the simple "markdown OR script" form can't represent it
+/// without clobbering one side).
+pub fn is_advanced_capability(c: &Capability) -> bool {
+    c.provider.is_some() || (c.command.is_some() && !c.guidance.trim().is_empty())
+}
+
+/// Build a [`Capability`] from the content-first editor form. `base` is the
+/// existing capability when editing — fields the simple form doesn't expose
+/// (tags, risk, requires, agents, cache, provider, when, params) are preserved
+/// from it, so editing never silently drops them. `origin` is left default; it
+/// is re-tagged by layer when the staged config is assembled.
+pub fn capability_from_form(
+    base: Option<&Capability>,
+    pairs: &[(String, String)],
+) -> crate::Result<Capability> {
+    let name = opt(value_of(pairs, "name"));
+    // id: fixed when editing; derived from the name when new.
+    let id = match base {
+        Some(c) => c.id.clone(),
+        None => {
+            let n = name
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("a name is required"))?;
+            let s = slug(n);
+            if s.is_empty() {
+                anyhow::bail!("name must contain letters or digits");
+            }
+            s
+        }
+    };
+    // "markdown" → static guidance; "script" → a command whose output is embedded.
+    let (guidance, command, allow_exec) = if value_of(pairs, "kind") == Some("script") {
+        let cmd = opt(value_of(pairs, "command"))
+            .ok_or_else(|| anyhow::anyhow!("a script capability needs a command"))?;
+        (
+            String::new(),
+            Some(cmd),
+            value_of(pairs, "allow_exec").is_some(),
+        )
+    } else {
+        (
+            value_of(pairs, "guidance").unwrap_or("").to_string(),
+            None,
+            true,
+        )
     };
     Ok(Capability {
         id,
-        description: opt(value_of(pairs, "description")),
-        tags: comma_list(value_of(pairs, "tags")),
-        risk,
-        when: Vec::new(), // `when` self-gates are hand-edited (not in the form yet)
-        requires: comma_list(value_of(pairs, "requires")),
-        params: toml::Value::Table(Default::default()),
-        guidance: value_of(pairs, "guidance").unwrap_or("").to_string(),
-        agents: comma_list(value_of(pairs, "agents")),
-        provider: opt(value_of(pairs, "provider")),
-        command: opt(value_of(pairs, "command")),
-        cache: opt(value_of(pairs, "cache")),
+        description: name.or_else(|| base.and_then(|c| c.description.clone())),
+        tags: base.map(|c| c.tags.clone()).unwrap_or_default(),
+        risk: base.map(|c| c.risk).unwrap_or_default(),
+        when: base.map(|c| c.when.clone()).unwrap_or_default(),
+        requires: base.map(|c| c.requires.clone()).unwrap_or_default(),
+        params: base
+            .map(|c| c.params.clone())
+            .unwrap_or_else(|| toml::Value::Table(Default::default())),
+        guidance,
+        agents: base.map(|c| c.agents.clone()).unwrap_or_default(),
+        provider: base.and_then(|c| c.provider.clone()),
+        command,
+        allow_exec,
+        cache: base.and_then(|c| c.cache.clone()),
         origin: Layer::default(),
     })
 }
@@ -599,18 +659,74 @@ mod tests {
     }
 
     #[test]
-    fn capability_from_form_parses_core_fields() {
-        let cap = capability_from_form(&parse_pairs(
-            "id=rc&description=Rust&tags=stack%2Cfast&risk=caution&guidance=Use+clippy",
-        ))
+    fn slug_derives_a_stable_id() {
+        assert_eq!(slug("Rust conventions"), "rust-conventions");
+        assert_eq!(slug("  Deploy — prod!! "), "deploy-prod");
+        assert_eq!(slug("CacheKeys"), "cachekeys");
+        assert_eq!(slug("***"), "");
+    }
+
+    #[test]
+    fn capability_from_form_markdown_new() {
+        let cap = capability_from_form(
+            None,
+            &parse_pairs("name=Rust+conventions&kind=markdown&guidance=Use+clippy"),
+        )
         .unwrap();
-        assert_eq!(cap.id, "rc");
-        assert_eq!(cap.description.as_deref(), Some("Rust"));
-        assert_eq!(cap.tags, vec!["stack".to_string(), "fast".to_string()]);
-        assert_eq!(cap.risk, Risk::Caution);
+        assert_eq!(cap.id, "rust-conventions"); // id derived from the name
+        assert_eq!(cap.description.as_deref(), Some("Rust conventions"));
         assert_eq!(cap.guidance, "Use clippy");
-        // Missing id is rejected.
-        assert!(capability_from_form(&parse_pairs("guidance=x")).is_err());
+        assert!(cap.command.is_none());
+        assert!(cap.allow_exec); // moot for static, defaults on
+                                 // A new capability needs a name.
+        assert!(capability_from_form(None, &parse_pairs("kind=markdown&guidance=x")).is_err());
+    }
+
+    #[test]
+    fn capability_from_form_script_exec_toggle() {
+        // Checkbox present → execution allowed.
+        let on = capability_from_form(
+            None,
+            &parse_pairs("name=Deploy&kind=script&command=echo+hi&allow_exec=on"),
+        )
+        .unwrap();
+        assert_eq!(on.command.as_deref(), Some("echo hi"));
+        assert!(on.guidance.is_empty());
+        assert!(on.allow_exec);
+        // Checkbox absent → execution disabled (the off-switch).
+        let off = capability_from_form(
+            None,
+            &parse_pairs("name=Deploy&kind=script&command=echo+hi"),
+        )
+        .unwrap();
+        assert!(!off.allow_exec);
+        // A script needs a command.
+        assert!(capability_from_form(None, &parse_pairs("name=X&kind=script")).is_err());
+    }
+
+    #[test]
+    fn capability_from_form_edit_preserves_hidden_fields() {
+        // A base capability carrying fields the simple editor never shows.
+        let mut base = crate::capability::palette()
+            .into_iter()
+            .find(|c| c.id == "rust-conventions")
+            .unwrap();
+        base.tags = vec!["stack".into()];
+        base.risk = Risk::Caution;
+        base.requires = vec!["baseline".into()];
+        base.agents = vec!["claude".into()];
+        // Editing just the content must not drop tags/risk/requires/agents.
+        let edited = capability_from_form(
+            Some(&base),
+            &parse_pairs("name=Rust+conventions&kind=markdown&guidance=Updated+body"),
+        )
+        .unwrap();
+        assert_eq!(edited.id, "rust-conventions"); // id stays fixed on edit
+        assert_eq!(edited.guidance, "Updated body");
+        assert_eq!(edited.tags, vec!["stack".to_string()]);
+        assert_eq!(edited.risk, Risk::Caution);
+        assert_eq!(edited.requires, vec!["baseline".to_string()]);
+        assert_eq!(edited.agents, vec!["claude".to_string()]);
     }
 
     #[test]

@@ -223,7 +223,15 @@ fn handle_library(state: &Arc<Mutex<StudioState>>) -> Resp {
 
 fn handle_cap_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let pairs = state::parse_pairs(&req.body);
-    let cap = match state::capability_from_form(&pairs) {
+    // Load the existing capability (if editing) so the simple editor's merge
+    // preserves fields it doesn't expose (tags/risk/requires/agents/cache/…).
+    let snap = state.lock().unwrap().snapshot();
+    let base = match state::staged_config(&snap) {
+        Ok(cfg) => state::editor_cap_id(&pairs)
+            .and_then(|id| cfg.capabilities.into_iter().find(|c| c.id == id)),
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let cap = match state::capability_from_form(base.as_ref(), &pairs) {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
@@ -815,7 +823,7 @@ mod tests {
                 "/capabilities",
                 "",
                 &[HOST, COOKIE, ORIGIN],
-                "id=rc&description=Rust&guidance=Use+clippy&risk=info&scope=repo&visibility=public",
+                "name=rc&kind=markdown&guidance=Use+clippy&scope=repo&visibility=public",
             ),
         ));
         assert!(saved.contains("staged capability"));

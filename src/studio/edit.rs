@@ -471,6 +471,10 @@ fn cap_table(c: &Capability) -> Result<Table> {
     if let Some(cmd) = &c.command {
         t["command"] = value(cmd.as_str());
     }
+    // Only persist the off-switch; `allow_exec = true` is the default.
+    if !c.allow_exec {
+        t["allow_exec"] = value(false);
+    }
     if let Some(cache) = &c.cache {
         t["cache"] = value(cache.as_str());
     }
@@ -572,6 +576,7 @@ mod tests {
             agents: vec![],
             provider: None,
             command: None,
+            allow_exec: true,
             cache: None,
             origin: Layer::default(),
         }

@@ -62,6 +62,15 @@ pub fn resolve(
 
     // An explicit command wins over a provider when both are set.
     if let Some(command) = &cap.command {
+        // Per-capability off-switch, layered on top of repo trust.
+        if !cap.allow_exec {
+            return Some(Resolution {
+                output: None,
+                skipped: Some(
+                    "execution disabled for this capability (allow_exec = false)".to_string(),
+                ),
+            });
+        }
         if !command_trusted(cap, repo_base) {
             return Some(Resolution {
                 output: None,
