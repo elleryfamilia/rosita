@@ -135,7 +135,9 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("POST", "/apply") => handle_apply(state),
         ("POST", "/trust/allow") => handle_trust(state, true),
         ("POST", "/trust/deny") => handle_trust(state, false),
-        ("GET", "/capabilities/new") => Resp::html(views::cap_dialog(None, Layer::Repo, true)),
+        ("GET", "/capabilities/new") => {
+            Resp::html(views::cap_dialog(None, Layer::Repo, true, None))
+        }
         ("POST", "/capabilities") => handle_cap_save(state, req),
         ("GET", "/profiles/new") => handle_profile_new(state),
         ("POST", "/profiles") => handle_profile_save(state, req),
@@ -163,7 +165,13 @@ fn id_and_action<'a>(path: &'a str, prefix: &str) -> (String, &'a str) {
 fn handle_cap_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let (id, action) = id_and_action(&req.path, "/capabilities/");
     match (req.method.as_str(), action) {
-        ("GET", "edit") | ("GET", "view") => handle_cap_edit(state, &id),
+        ("GET", "edit") | ("GET", "view") => {
+            // A `?profile=` carries the profile to return to when editing a cap
+            // from inside its detail (so Save re-renders that profile, not the
+            // Capabilities tab).
+            let profile = field(&req.query, "profile");
+            handle_cap_edit(state, &id, &profile)
+        }
         ("DELETE", "") => handle_cap_delete(state, &id),
         ("POST", "duplicate") => handle_cap_duplicate(state, &id),
         _ => Resp::not_found(),
@@ -339,18 +347,40 @@ fn library_now(state: &Arc<Mutex<StudioState>>) -> crate::Result<LibraryView> {
 
 fn handle_cap_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let pairs = state::parse_pairs(&req.body);
-    // Load the existing capability (if editing) so the simple editor's merge
-    // preserves fields it doesn't expose (tags/risk/requires/agents/cache/…).
+    // `?as=copy` → save as a new capability (don't overwrite the original);
+    // `return_profile` (hidden) → the user is editing from a profile's detail.
+    let as_copy = field(&req.query, "as") == "copy";
+    let return_profile = field(&req.body, "return_profile");
+
     let snap = state.lock().unwrap().snapshot();
-    let base = match state::staged_config(&snap) {
-        Ok(cfg) => state::editor_cap_id(&pairs)
-            .and_then(|id| cfg.capabilities.into_iter().find(|c| c.id == id)),
-        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
-    };
-    let cap = match state::capability_from_form(base.as_ref(), &pairs) {
+    let cfg = match state::staged_config(&snap) {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
+    // The existing capability (if editing) so the simple editor's merge preserves
+    // fields it doesn't expose (tags/risk/requires/agents/cache/…).
+    let base = state::editor_cap_id(&pairs)
+        .and_then(|id| cfg.capabilities.iter().find(|c| c.id == id).cloned());
+    let mut cap = match state::capability_from_form(base.as_ref(), &pairs) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    if as_copy {
+        // Duplicate under a new name: a fresh id derived from the title, distinct
+        // from the original and from every existing capability.
+        let new_id = state::slug(&field(&req.body, "name"));
+        if new_id.is_empty() {
+            return Resp::html(views::error_fragment(
+                "give the copy a name with letters or digits",
+            ));
+        }
+        if cfg.capabilities.iter().any(|c| c.id == new_id) {
+            return Resp::html(views::error_fragment(&format!(
+                "“{new_id}” already exists — choose a new name for the copy"
+            )));
+        }
+        cap.id = new_id;
+    }
     let layer = state::layer_from_form(&pairs);
     let id = cap.id.clone();
     // EditCapability upserts by id (creates if absent), so save covers new+edit.
@@ -363,25 +393,42 @@ fn handle_cap_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
             id: id.clone(),
             cap: Box::new(cap),
         });
-    match res.and_then(|()| library_now(state)) {
-        Ok(lib) => Resp::html(views::cap_result(
-            &lib,
-            &format!("staged capability “{id}”"),
-        )),
+    if let Err(e) = res {
+        return Resp::html(views::error_fragment(&e.to_string()));
+    }
+    let flash = if as_copy {
+        format!("saved copy “{id}”")
+    } else {
+        format!("staged capability “{id}”")
+    };
+    // Edited from a profile → re-render that profile's detail (so an in-place
+    // save shows the updated guidance) and close the modal. Otherwise re-render
+    // the Capabilities tab.
+    if !return_profile.is_empty() {
+        let mut resp = profiles_tab_resp(state, Some(&return_profile), Some(&flash), true);
+        if resp.status == 200 {
+            resp.body
+                .extend_from_slice(views::modal_close_loader().as_bytes());
+        }
+        return resp;
+    }
+    match library_now(state) {
+        Ok(lib) => Resp::html(views::cap_result(&lib, &flash)),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
 }
 
-fn handle_cap_edit(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+fn handle_cap_edit(state: &Arc<Mutex<StudioState>>, id: &str, return_profile: &str) -> Resp {
+    let rp = (!return_profile.is_empty()).then_some(return_profile);
     let snap = state.lock().unwrap().snapshot();
     let cfg = match state::staged_config(&snap) {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
     if let Some(c) = cfg.capabilities.iter().find(|c| c.id == id) {
-        Resp::html(views::cap_dialog(Some(c), c.origin, true))
+        Resp::html(views::cap_dialog(Some(c), c.origin, true, rp))
     } else if let Some(c) = palette().into_iter().find(|c| c.id == id) {
-        Resp::html(views::cap_dialog(Some(&c), Layer::Repo, false))
+        Resp::html(views::cap_dialog(Some(&c), Layer::Repo, false, rp))
     } else {
         Resp::html(views::error_fragment(&format!("unknown capability '{id}'")))
     }
@@ -1218,10 +1265,26 @@ mod tests {
             &req("GET", "/capabilities/mine/edit", "", &[HOST, COOKIE], ""),
         ));
         assert!(owned.contains("Edit capability"));
-        assert!(owned.contains("Stage change"));
-        // Owned caps (incl. seeded starters) expose a Delete action in the dialog.
+        // Editing offers Save (in place) + Save as a copy + Delete.
+        assert!(owned.contains("Save"));
+        assert!(owned.contains("Save as a copy"));
         assert!(owned.contains("Delete"));
         assert!(owned.contains("/capabilities/mine"));
+
+        // Opened from a profile's detail, the form carries a return_profile so
+        // Save re-renders that profile rather than the Capabilities tab.
+        let from_profile = body_of(route(
+            &st,
+            &req(
+                "GET",
+                "/capabilities/mine/edit",
+                "profile=rust",
+                &[HOST, COOKIE],
+                "",
+            ),
+        ));
+        assert!(from_profile.contains("name=\"return_profile\""));
+        assert!(from_profile.contains("value=\"rust\""));
 
         // Palette cap → read-only dialog with a duplicate action.
         let palette = body_of(route(
@@ -1236,5 +1299,76 @@ mod tests {
         ));
         assert!(palette.contains("Palette capability"));
         assert!(palette.contains("Duplicate"));
+    }
+
+    #[test]
+    fn save_as_copy_creates_a_new_capability_under_a_new_name() {
+        let cfg =
+            "[[capabilities]]\nid = \"rc\"\ndescription = \"Rust conv\"\nguidance = \"Old.\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // Save as a copy with a new title → a new id; the original is untouched.
+        let body = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities",
+                "as=copy",
+                &[HOST, COOKIE, ORIGIN],
+                "id=rc&name=Rust+strict&kind=markdown&guidance=New+body&scope=repo&visibility=public",
+            ),
+        ));
+        assert!(body.contains("saved copy"));
+
+        // Apply and confirm the copy landed under a new id with the original
+        // capability left intact.
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(config::repo_config_path(d.path())).unwrap();
+        assert!(on_disk.contains("id = \"rust-strict\"")); // the copy's derived id
+        assert!(on_disk.contains("New body"));
+        assert!(on_disk.contains("id = \"rc\"") && on_disk.contains("Old.")); // original kept
+
+        // Copying onto an existing id is rejected.
+        let err = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities",
+                "as=copy",
+                &[HOST, COOKIE, ORIGIN],
+                "id=rc&name=rc&kind=markdown&guidance=x&scope=repo",
+            ),
+        ));
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn editing_a_cap_from_a_profile_returns_the_profile_detail() {
+        let cfg = "[[capabilities]]\n\
+             id = \"rc\"\nguidance = \"Old guidance.\"\n\
+             \n[[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\ncapabilities = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // Saving with return_profile set re-renders the profile's detail (the
+        // updated guidance shows in a cap card) rather than the Capabilities tab.
+        let body = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "id=rc&return_profile=rust&name=rc&kind=markdown&guidance=Fresh+guidance&scope=repo",
+            ),
+        ));
+        assert!(body.contains("profile rust")); // the profile detail, not the caps tab
+        assert!(body.contains("cap-detail"));
+        assert!(body.contains("Fresh guidance"));
+        assert!(body.contains("/close")); // modal-close loader appended
     }
 }

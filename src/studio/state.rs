@@ -136,6 +136,9 @@ pub struct PreviewCap {
     pub dynamic: bool,
     /// A dynamic command was refused for lack of trust (markdown is the note).
     pub skipped: bool,
+    /// True when this id is an editable library capability (not a synthetic
+    /// inline section) — gates the card's "Edit capability" affordance.
+    pub editable: bool,
 }
 
 /// One capability row for the library view.
@@ -290,18 +293,18 @@ pub fn render_profile_config(
     let caps: Vec<PreviewCap> = out
         .capabilities
         .iter()
-        .map(|c| PreviewCap {
-            icon: cfg
-                .capabilities
-                .iter()
-                .find(|x| x.id == c.id)
-                .and_then(|x| x.icon.clone()),
-            id: c.id.clone(),
-            title: c.title.clone(),
-            risk: c.risk,
-            markdown: c.body.clone(),
-            dynamic: c.dynamic,
-            skipped: c.skipped,
+        .map(|c| {
+            let owned = cfg.capabilities.iter().find(|x| x.id == c.id);
+            PreviewCap {
+                icon: owned.and_then(|x| x.icon.clone()),
+                editable: owned.is_some(),
+                id: c.id.clone(),
+                title: c.title.clone(),
+                risk: c.risk,
+                markdown: c.body.clone(),
+                dynamic: c.dynamic,
+                skipped: c.skipped,
+            }
         })
         .collect();
     Ok(PreviewOutcome {

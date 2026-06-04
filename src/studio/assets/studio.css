@@ -195,24 +195,30 @@ body {
 .seg-opt { padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; background: var(--panel-2); border-right: 1px solid var(--border-strong); }
 .seg-opt:last-of-type { border-right: none; }
 
-/* per-capability expandable cards */
-.cap-cards { display: flex; flex-direction: column; gap: 8px; }
-.cap-detail { border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: var(--r); background: var(--panel-2); overflow: hidden; }
+/* the selected profile's composed guidance, framed as one document */
+.detail-doc { border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--panel); overflow: hidden; }
+
+/* each capability is a quiet collapsible section within the document; its
+   summary is just a label — the expanded markdown is the prominent content */
+.cap-detail { border-top: 1px solid var(--border); border-left: 2px solid transparent; }
+.cap-detail:first-child { border-top: none; }
 .cap-detail.risk-caution { border-left-color: var(--caution); }
 .cap-detail.risk-dangerous { border-left-color: var(--danger); }
-.cap-detail[open] { border-color: var(--accent-line); }
-.cap-detail-head { display: flex; align-items: center; gap: 11px; padding: 11px 13px; cursor: pointer; list-style: none; }
+.cap-detail-head { display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer; list-style: none; }
 .cap-detail-head::-webkit-details-marker { display: none; }
-.cap-detail-head:hover { background: var(--elevated); }
-.cap-detail .cap-glyph { color: var(--accent); display: inline-flex; }
-.cap-detail .cap-glyph .icon { width: 19px; height: 19px; }
-.cap-detail-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.cap-detail-title { font-weight: 600; font-size: 13.5px; }
-.cap-detail-id { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.cap-detail-head:hover { background: var(--panel-2); }
+.cap-detail[open] > .cap-detail-head { background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.cap-detail .cap-glyph { color: var(--faint); display: inline-flex; }
+.cap-detail .cap-glyph .icon { width: 15px; height: 15px; }
+.cap-detail-title { font-weight: 600; font-size: 12px; color: var(--muted); }
+.cap-detail-id { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.cap-detail-spacer { flex: 1; }
 .cap-chev { color: var(--faint); display: inline-flex; transition: transform .15s; }
-.cap-chev .icon { width: 16px; height: 16px; }
+.cap-chev .icon { width: 15px; height: 15px; }
 .cap-detail[open] .cap-chev { transform: rotate(180deg); }
-.cap-detail-body.markdown-body { border: none; border-top: 1px solid var(--border); border-radius: 0; }
+.cap-detail-body { background: var(--panel); }
+.cap-detail-body .markdown-body { border: none; border-radius: 0; background: transparent; padding: 14px 18px 8px; overflow: visible; }
+.cap-detail-foot { display: flex; justify-content: flex-end; padding: 2px 14px 12px; }
 
 /* rendered markdown */
 .markdown-body { flex: 1; min-height: 0; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; font-size: 13px; line-height: 1.6; }

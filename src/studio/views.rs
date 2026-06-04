@@ -283,6 +283,12 @@ fn modal_close() -> Markup {
     html! { div hx-get="/close" hx-trigger="load" hx-target="#modal" {} }
 }
 
+/// The modal-close loader as a standalone string (appended to a profile-detail
+/// re-render when a capability was edited from inside a profile).
+pub fn modal_close_loader() -> String {
+    modal_close().into_string()
+}
+
 // --- Profiles tab ------------------------------------------------------------
 
 /// The selected profile's rendered preview, bundled for the detail view.
@@ -421,7 +427,7 @@ pub fn profile_detail(d: &ProfileDetail) -> Markup {
                     p class="muted" { "This profile composes no guidance for " (p.agent.as_str()) " in this context." }
                 }
             } @else {
-                div class="cap-cards" { @for c in &p.caps { (preview_cap_card(c)) } }
+                div class="detail-doc" { @for c in &p.caps { (preview_cap_card(c, name)) } }
             }
         }
     }
@@ -431,9 +437,10 @@ pub fn profile_detail_fragment(d: &ProfileDetail) -> String {
     profile_detail(d).into_string()
 }
 
-/// One expandable capability card in the detail: a summary row that reveals the
-/// capability's rendered-markdown guidance when opened.
-fn preview_cap_card(c: &PreviewCap) -> Markup {
+/// One collapsible capability section inside the profile "document": a compact
+/// summary row that, when opened, reveals the capability's rendered-markdown
+/// guidance (the prominent content) plus an "Edit capability" action.
+fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
     let glyph = c
         .icon
         .as_deref()
@@ -442,15 +449,23 @@ fn preview_cap_card(c: &PreviewCap) -> Markup {
         details class=(format!("cap-detail {}", risk_class(c.risk))) {
             summary class="cap-detail-head" {
                 span class="cap-glyph" { (icon(glyph)) }
-                span class="cap-detail-main" {
-                    span class="cap-detail-title" { (c.title) }
-                    span class="cap-detail-id" { (c.id) }
-                }
+                span class="cap-detail-title" { (c.title) }
+                span class="cap-detail-id" { (c.id) }
+                span class="cap-detail-spacer" {}
                 @if c.skipped { span class="tag off-tag" { (icon("shield")) "trust" } }
                 @else if c.dynamic { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
                 span class="cap-chev" { (icon("chevron-down")) }
             }
-            div class="cap-detail-body markdown-body" { (render_markdown(&c.markdown)) }
+            div class="cap-detail-body" {
+                div class="markdown-body" { (render_markdown(&c.markdown)) }
+                @if c.editable {
+                    div class="cap-detail-foot" {
+                        button class="btn btn-ghost btn-sm"
+                            hx-get=(format!("/capabilities/{}/edit?profile={}", enc(&c.id), enc(profile)))
+                            hx-target="#modal" { (icon("pencil")) "Edit capability" }
+                    }
+                }
+            }
         }
     }
 }
@@ -613,7 +628,12 @@ fn cap_card(c: &CapView) -> Markup {
 /// The capability dialog content (swapped into `#modal`). A palette item is
 /// read-only with a duplicate action; an advanced cap is read-only with an
 /// "edit in TOML" note; otherwise the content-first editor.
-pub fn cap_dialog(cap: Option<&Capability>, layer: Layer, owned: bool) -> String {
+pub fn cap_dialog(
+    cap: Option<&Capability>,
+    layer: Layer,
+    owned: bool,
+    return_profile: Option<&str>,
+) -> String {
     let is_new = cap.is_none();
     let id = cap.map(|c| c.id.as_str()).unwrap_or("");
     let read_only_palette = !is_new && !owned;
@@ -649,6 +669,7 @@ pub fn cap_dialog(cap: Option<&Capability>, layer: Layer, owned: bool) -> String
                     }
                     div class="modal-body" {
                         @if !is_new { input type="hidden" name="id" value=(id); }
+                        @if let Some(rp) = return_profile { input type="hidden" name="return_profile" value=(rp); }
                         div class="title-row" {
                             (icon_picker(cap.and_then(|c| c.icon.as_deref())))
                             label class="field grow" { span class="field-label" { "title" }
@@ -682,6 +703,9 @@ pub fn cap_dialog(cap: Option<&Capability>, layer: Layer, owned: bool) -> String
                             p class="hint small" { "Runs only when the repo is trusted (" code { "rosita allow" } ") and execution is allowed. Review trust in the diff before applying." }
                         }
                         (lives_in(layer))
+                        @if !is_new {
+                            p class="hint small" { "Save updates this capability in every profile that uses it. Use " strong { "Save as a copy" } " to make a separate version under a new name." }
+                        }
                     }
                     div class="modal-foot" {
                         @if !is_new {
@@ -692,7 +716,10 @@ pub fn cap_dialog(cap: Option<&Capability>, layer: Layer, owned: bool) -> String
                             }
                         }
                         button type="button" class="btn btn-ghost" hx-get="/close" hx-target="#modal" { "Cancel" }
-                        button type="submit" class="btn btn-primary" { (icon("check")) "Stage change" }
+                        @if !is_new {
+                            button type="button" class="btn" hx-post="/capabilities?as=copy" hx-target="#main" { (icon("copy")) "Save as a copy" }
+                        }
+                        button type="submit" class="btn btn-primary" { (icon("check")) "Save" }
                     }
                 }
             }
