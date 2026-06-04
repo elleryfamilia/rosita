@@ -243,8 +243,8 @@ fn tab_bar(active: &str) -> Markup {
     let cls = |name: &str| if name == active { "tab active" } else { "tab" };
     html! {
         nav class="tabs" {
-            button class=(cls("profiles")) data-tab="profiles" hx-get="/tab/profiles" hx-target="#main" { (icon("layers")) "Profiles" }
             button class=(cls("capabilities")) data-tab="capabilities" hx-get="/tab/capabilities" hx-target="#main" { (icon("box")) "Capabilities" }
+            button class=(cls("profiles")) data-tab="profiles" hx-get="/tab/profiles" hx-target="#main" { (icon("layers")) "Profiles" }
         }
     }
 }
@@ -288,8 +288,15 @@ fn modal_close() -> Markup {
 /// The Profiles tab: a dashboard of profile cards (left) + the preview pane
 /// (right). `previewing` marks the card whose preview is shown.
 pub fn profiles_tab(lib: &LibraryView, previewing: Option<&str>, flash: Option<&str>) -> Markup {
+    // Two-column (dashboard + preview) only once a profile is selected; until
+    // then the dashboard runs full-width — no empty "select a profile" panel.
+    let cls = if previewing.is_some() {
+        "tab-profiles"
+    } else {
+        "tab-profiles solo"
+    };
     html! {
-        div class="tab-profiles" {
+        div class=(cls) {
             section class="dashboard" {
                 div class="dash-head" {
                     h1 { "Profiles" }
@@ -308,7 +315,9 @@ pub fn profiles_tab(lib: &LibraryView, previewing: Option<&str>, flash: Option<&
                     }
                 }
             }
-            aside class="preview-col" id="preview" { (profile_preview_empty()) }
+            @if previewing.is_some() {
+                aside class="preview-col" id="preview" {}
+            }
         }
     }
 }
@@ -378,15 +387,6 @@ fn profile_card(p: &ProfileView, previewing: bool) -> Markup {
     }
 }
 
-fn profile_preview_empty() -> Markup {
-    html! {
-        div class="preview-empty" {
-            (icon("eye"))
-            p { "Select a profile to preview the AGENTS.md it produces." }
-        }
-    }
-}
-
 /// The rendered-markdown preview for a selected profile, with an agent picker
 /// (shown only when more than one agent is configured).
 pub fn profile_preview_pane(p: &PreviewOutcome, agents: &[String], profile_name: &str) -> Markup {
@@ -438,8 +438,9 @@ pub fn profile_preview_fragment(
 
 // --- Capabilities tab --------------------------------------------------------
 
-/// The Capabilities tab: a grid of capability cards (open a dialog on click),
-/// then the read-only starter palette.
+/// The Capabilities tab: a grid of capability cards (open a dialog on click).
+/// Starters are seeded into the config on first open, so they appear here as
+/// ordinary, editable/deletable cards — there is no separate read-only palette.
 pub fn capabilities_tab(lib: &LibraryView, flash: Option<&str>) -> Markup {
     html! {
         div class="tab-capabilities" {
@@ -451,18 +452,11 @@ pub fn capabilities_tab(lib: &LibraryView, flash: Option<&str>) -> Markup {
             @if lib.yours.is_empty() {
                 div class="empty-card" {
                     p { "No capabilities yet." }
-                    p class="muted" { "Write one, or duplicate a starter from the palette below." }
-                    button class="btn btn-primary" hx-get="/capabilities/new" hx-target="#modal" { (icon("plus")) "New capability" }
+                    p class="muted" { "A capability is a reusable chunk of guidance (or a script) that profiles compose." }
+                    button class="btn btn-primary" hx-get="/capabilities/new" hx-target="#modal" { (icon("plus")) "Write your first capability" }
                 }
             } @else {
-                div class="cap-grid" { @for c in &lib.yours { (cap_card(c, true)) } }
-            }
-            @if !lib.palette.is_empty() {
-                details class="palette" {
-                    summary { (icon("box")) "Starter palette" span class="count" { (lib.palette.len()) } }
-                    p class="palette-hint" { "Read-only templates — open one to duplicate it into your library." }
-                    div class="cap-grid" { @for c in &lib.palette { (cap_card(c, false)) } }
-                }
+                div class="cap-grid" { @for c in &lib.yours { (cap_card(c)) } }
             }
         }
     }
@@ -472,17 +466,12 @@ pub fn capabilities_tab_fragment(lib: &LibraryView, flash: Option<&str>) -> Stri
     capabilities_tab(lib, flash).into_string()
 }
 
-fn cap_card(c: &CapView, owned: bool) -> Markup {
+fn cap_card(c: &CapView) -> Markup {
     let id = c.id.as_str();
     let e = enc(id);
-    let route = if owned {
-        format!("/capabilities/{e}/edit")
-    } else {
-        format!("/capabilities/{e}/view")
-    };
     let cls = format!("cap-card {}", risk_class(c.risk));
     html! {
-        div class=(cls) hx-get=(route) hx-target="#modal" role="button" tabindex="0" {
+        div class=(cls) hx-get=(format!("/capabilities/{e}/edit")) hx-target="#modal" role="button" tabindex="0" {
             span class="cap-glyph" { (icon(cap_icon_name(c))) }
             div class="cap-main" {
                 span class="cap-title" { (c.title) }
@@ -492,8 +481,7 @@ fn cap_card(c: &CapView, owned: bool) -> Markup {
                 @if let Some(lang) = &c.script_lang { span class="tag script-tag" { (icon("terminal")) (lang) } }
                 @else if c.kind == "command" { span class="tag script-tag" { (icon("terminal")) "script" } }
                 @else if c.kind == "provider" { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
-                @if !owned { span class="tag palette-tag" { "palette" } }
-                @else if c.private { span class="tag" { (icon("lock")) "private" } }
+                @if c.private { span class="tag" { (icon("lock")) "private" } }
                 @else { span class="tag" { "shared" } }
             }
         }
@@ -576,6 +564,13 @@ pub fn cap_dialog(cap: Option<&Capability>, layer: Layer, owned: bool) -> String
                         (lives_in(layer))
                     }
                     div class="modal-foot" {
+                        @if !is_new {
+                            button type="button" class="btn btn-danger delete-left"
+                                hx-delete=(format!("/capabilities/{}", enc(id))) hx-target="#main"
+                                hx-confirm=(format!("Delete capability “{id}”? This stages its removal.")) {
+                                (icon("trash")) "Delete"
+                            }
+                        }
                         button type="button" class="btn btn-ghost" hx-get="/close" hx-target="#modal" { "Cancel" }
                         button type="submit" class="btn btn-primary" { (icon("check")) "Stage change" }
                     }
@@ -679,7 +674,7 @@ pub fn profile_editor(
                 fieldset class="cap-picker" {
                     legend { "Capabilities" span class="field-hint" { "tick the ones to compose" } }
                     div class="pick-list" {
-                        @for c in lib.yours.iter().chain(lib.palette.iter()) {
+                        @for c in &lib.yours {
                             label class="pick" {
                                 input type="checkbox" name="capabilities" value=(c.id.as_str()) checked[chosen(c.id.as_str())];
                                 span class="pick-glyph" { (icon(cap_icon_name(c))) }

@@ -201,9 +201,9 @@ fn handle_shell(state: &Arc<Mutex<StudioState>>) -> Resp {
     let (snap, staged) = snap_and_staged(state);
     match state::library_view(&snap) {
         Ok(lib) => Resp::html(views::shell(
-            views::profiles_tab(&lib, None, None),
+            views::capabilities_tab(&lib, None),
             staged,
-            "profiles",
+            "capabilities",
         )),
         Err(e) => Resp::html(views::error_page(&e.to_string())),
     }
@@ -677,7 +677,11 @@ pub fn serve(rt: &Runtime, args: &StudioArgs) -> crate::Result<()> {
     let config = Config::load(&repo_base).context("loading configuration")?;
     let base_context = context::detect_context(&rt.cwd, &config).context("detecting context")?;
     let global_dir = config::global_config_dir();
-    let session = Session::open(&repo_base, global_dir.as_deref())?;
+    let mut session = Session::open(&repo_base, global_dir.as_deref())?;
+    // First open of a repo with no authored capabilities: seed the starter set
+    // into config.toml so they appear as ordinary, editable/deletable entries.
+    let seeded = state::seed_starters_if_empty(&mut session)
+        .context("seeding starter capabilities into config.toml")?;
     let token = make_token()?;
 
     let server = tiny_http::Server::http(("127.0.0.1", args.port))
@@ -701,6 +705,9 @@ pub fn serve(rt: &Runtime, args: &StudioArgs) -> crate::Result<()> {
         port,
     }));
 
+    if seeded > 0 {
+        println!("rosita studio → seeded {seeded} starter capabilities into .rosita/config.toml (edit or delete them in the Capabilities tab)");
+    }
     let url = format!("http://127.0.0.1:{port}{BOOTSTRAP_PATH}?token={token}");
     println!("rosita studio → open  {url}");
     println!("(serving on 127.0.0.1:{port}; Ctrl-C to stop)");
@@ -1114,6 +1121,9 @@ mod tests {
         ));
         assert!(owned.contains("Edit capability"));
         assert!(owned.contains("Stage change"));
+        // Owned caps (incl. seeded starters) expose a Delete action in the dialog.
+        assert!(owned.contains("Delete"));
+        assert!(owned.contains("/capabilities/mine"));
 
         // Palette cap → read-only dialog with a duplicate action.
         let palette = body_of(route(

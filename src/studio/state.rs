@@ -15,7 +15,7 @@ use crate::context::{Context, GitContext, Scope};
 use crate::dynamic::DynamicMode;
 use crate::profile::{self, CapabilityRef, ProfileConfig, Selection};
 use crate::render::{self, RenderRequest};
-use crate::studio::edit::Session;
+use crate::studio::edit::{Session, StagedOp};
 
 /// The simulated context the preview is rendered for. Each field overrides the
 /// real detected context; `None`/empty means "use what was detected".
@@ -411,6 +411,27 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
         palette,
         profiles,
     })
+}
+
+/// Studio's "first open" affordance: when a repo has no authored capabilities,
+/// write the shipped starter set into its public `config.toml` as normal, owned
+/// entries (stage + apply through the comment-preserving engine). From then on
+/// the starters are just capabilities — fully editable and deletable — so studio
+/// never needs a separate read-only palette. A no-op (returns 0) the moment any
+/// capability already exists in any layer.
+pub fn seed_starters_if_empty(session: &mut Session) -> crate::Result<usize> {
+    if !session.staged_config()?.capabilities.is_empty() {
+        return Ok(0);
+    }
+    let starters = palette();
+    for cap in &starters {
+        session.stage(StagedOp::CreateCapability {
+            layer: Layer::Repo,
+            cap: Box::new(cap.clone()),
+        })?;
+    }
+    session.apply()?;
+    Ok(starters.len())
 }
 
 fn kind_of(has_command: bool, has_provider: bool) -> &'static str {
@@ -813,6 +834,43 @@ mod tests {
         assert_eq!(p.capabilities.len(), 2);
         // Zero capabilities is rejected (§3).
         assert!(profile_from_form(&parse_pairs("name=rust&targets=rust")).is_err());
+    }
+
+    #[test]
+    fn seed_starters_populates_empty_repo_then_noops() {
+        use crate::studio::edit::Session;
+        let d = tempfile::tempdir().unwrap();
+
+        // Empty repo (no .rosita dir): first open seeds the shipped palette into
+        // config.toml as normal entries.
+        let mut s = Session::open(d.path(), None).unwrap();
+        let n = seed_starters_if_empty(&mut s).unwrap();
+        assert!(n >= 5, "expected the shipped starter set to be seeded");
+        let on_disk = std::fs::read_to_string(crate::config::repo_config_path(d.path())).unwrap();
+        assert!(on_disk.contains("id = \"baseline\""));
+        assert!(on_disk.contains("id = \"rust-conventions\""));
+
+        // A fresh session over the now-populated repo seeds nothing more.
+        let mut s2 = Session::open(d.path(), None).unwrap();
+        assert_eq!(seed_starters_if_empty(&mut s2).unwrap(), 0);
+    }
+
+    #[test]
+    fn seed_starters_skips_a_repo_that_already_has_one() {
+        use crate::studio::edit::Session;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(crate::config::repo_dir(d.path())).unwrap();
+        std::fs::write(
+            crate::config::repo_config_path(d.path()),
+            "[[capabilities]]\nid = \"mine\"\nguidance = \"hand-authored\"\n",
+        )
+        .unwrap();
+        let mut s = Session::open(d.path(), None).unwrap();
+        assert_eq!(seed_starters_if_empty(&mut s).unwrap(), 0);
+        // The user's hand-authored config is untouched.
+        let on_disk = std::fs::read_to_string(crate::config::repo_config_path(d.path())).unwrap();
+        assert!(on_disk.contains("id = \"mine\""));
+        assert!(!on_disk.contains("id = \"baseline\""));
     }
 
     #[test]
