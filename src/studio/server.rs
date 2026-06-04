@@ -234,10 +234,11 @@ fn handle_tab(state: &Arc<Mutex<StudioState>>, tab: &str) -> Resp {
     }
 }
 
-/// Render the full Profiles tab (rail + detail) with a default selection: the
-/// `selected` profile if given, else the bound one, else the first. `flash`
-/// shows a banner; `with_staged` appends the staged-indicator refresh loader
-/// (used after a mutation re-renders `#main`).
+/// Render the full Profiles tab (rail + detail). A detail pane shows only when
+/// `selected` names an existing profile; otherwise the rail renders with a
+/// "pick a profile" prompt (no profile is auto-selected). `flash` shows a
+/// banner; `with_staged` appends the staged-indicator refresh loader (used after
+/// a mutation re-renders `#main`).
 fn profiles_tab_resp(
     state: &Arc<Mutex<StudioState>>,
     selected: Option<&str>,
@@ -249,19 +250,13 @@ fn profiles_tab_resp(
         Ok(l) => l,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
-    let agents = agent_ids(&snap);
-    // Effective selection: the requested profile (if it exists), else the bound
-    // one, else the first — so the detail pane is never gratuitously empty.
+    // No auto-selection: show a detail pane only when a profile was explicitly
+    // requested (and still exists). On a bare tab open — or after delete/apply —
+    // the rail renders with a "pick a profile" prompt instead of defaulting to
+    // the bound or first profile.
     let effective: Option<String> = selected
         .filter(|n| lib.profiles.iter().any(|p| p.name == *n))
-        .map(str::to_string)
-        .or_else(|| {
-            lib.profiles
-                .iter()
-                .find(|p| p.selected)
-                .map(|p| p.name.clone())
-        })
-        .or_else(|| lib.profiles.first().map(|p| p.name.clone()));
+        .map(str::to_string);
     let detail = effective.map(|name| {
         let disabled = lib
             .profiles
@@ -279,7 +274,6 @@ fn profiles_tab_resp(
             Some(views::ProfileDetail {
                 name,
                 outcome,
-                agents: &agents,
                 disabled: *disabled,
             }),
             flash,
@@ -297,7 +291,6 @@ fn profiles_tab_resp(
 /// composed for `agent` (empty ⇒ the configured default).
 fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
     let snap = state.lock().unwrap().snapshot();
-    let agents = agent_ids(&snap);
     let disabled = state::staged_config(&snap)
         .ok()
         .and_then(|cfg| {
@@ -311,7 +304,6 @@ fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &st
         Ok(outcome) => Resp::html(views::profile_detail_fragment(&views::ProfileDetail {
             name,
             outcome: &outcome,
-            agents: &agents,
             disabled,
         })),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
@@ -486,7 +478,7 @@ fn handle_profile_new(state: &Arc<Mutex<StudioState>>) -> Resp {
     };
     let draft = state::draft_profile_from_form(&[]);
     let preview = profile_preview_or_empty(&snap, &draft, "");
-    Resp::html(views::profile_editor(&draft, true, &lib, &preview))
+    Resp::html(views::profile_editor(&draft, true, &lib, &preview, None))
 }
 
 fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
@@ -502,7 +494,7 @@ fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
     match cfg.profiles.iter().find(|p| p.name == name) {
         Some(p) => {
             let preview = profile_preview_or_empty(&snap, p, "");
-            Resp::html(views::profile_editor(p, false, &lib, &preview))
+            Resp::html(views::profile_editor(p, false, &lib, &preview, None))
         }
         None => Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
     }
@@ -547,8 +539,11 @@ fn handle_profile_disable(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let pairs = state::parse_pairs(&req.body);
     let profile = match state::profile_from_form(&pairs) {
+        // A profile needs a name (and ≥1 capability). On failure, stay in the
+        // editor with the draft preserved and the reason shown inline — never
+        // replace the whole form with a bare error.
         Ok(p) => p,
-        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+        Err(e) => return profile_editor_with_error(state, &pairs, &e.to_string()),
     };
     let name = profile.name.clone();
     let res = state.lock().unwrap().session.stage(StagedOp::EditProfile {
@@ -565,6 +560,31 @@ fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
+}
+
+/// Re-render the profile editor with the in-progress draft preserved and an
+/// inline error (missing name / no capabilities), so a failed save keeps the
+/// user in the form rather than dropping them onto a bare error banner.
+fn profile_editor_with_error(
+    state: &Arc<Mutex<StudioState>>,
+    pairs: &[(String, String)],
+    error: &str,
+) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let lib = match state::library_view(&snap) {
+        Ok(l) => l,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let draft = state::draft_profile_from_form(pairs);
+    let is_new = pairs.iter().any(|(k, v)| k == "new" && v == "1");
+    let preview = profile_preview_or_empty(&snap, &draft, "");
+    Resp::html(views::profile_editor(
+        &draft,
+        is_new,
+        &lib,
+        &preview,
+        Some(error),
+    ))
 }
 
 /// Live preview for the editor (POST /profiles/preview) — composes the unsaved
@@ -620,7 +640,7 @@ fn handle_profile_draft(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let preview = profile_preview_or_empty(&snap, &draft, "");
     Resp::html(format!(
         "{}{}",
-        views::profile_editor(&draft, is_new, &lib, &preview),
+        views::profile_editor(&draft, is_new, &lib, &preview, None),
         views::staged_indicator_loader(),
     ))
 }
@@ -663,13 +683,6 @@ fn profile_preview_or_empty(
         caps: Vec::new(),
         note: Some(format!("preview error: {e}")),
     })
-}
-
-/// The configured agent ids (for the preview agent picker).
-fn agent_ids(snap: &state::Snapshot) -> Vec<String> {
-    state::staged_config(snap)
-        .map(|cfg| cfg.agents.iter().map(|a| a.id.clone()).collect())
-        .unwrap_or_default()
 }
 
 fn handle_diff(state: &Arc<Mutex<StudioState>>) -> Resp {
@@ -1081,7 +1094,7 @@ mod tests {
             &st,
             &req("GET", "/profiles/rust/select", "", &[HOST, COOKIE], ""),
         ));
-        assert!(body.contains("profile rust")); // provenance + binding chip
+        assert!(body.contains("<h1>rust</h1>")); // the detail names the profile
         assert!(body.contains("cap-detail")); // expandable cards
         assert!(body.contains("Rust conv") && body.contains("Use clippy here."));
         assert!(body.contains("Terse") && body.contains("Be terse."));
@@ -1235,6 +1248,59 @@ mod tests {
     }
 
     #[test]
+    fn profile_save_requires_a_name() {
+        let cfg = "[[capabilities]]\nid = \"rc\"\nguidance = \"x\"\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // A capability but no name → rejected; the editor comes back with the
+        // reason inline (not a bare error banner), and nothing is staged.
+        let err = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/profiles",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "new=1&targets=rust&capabilities=rc&scope=repo",
+            ),
+        ));
+        assert!(err.contains("name is required")); // inline error
+        assert!(err.contains("banner error")); // shown in the editor, not a fragment
+        assert!(err.contains("New profile")); // re-rendered in new-profile mode
+        assert!(err.contains("name=\"name\"")); // with the editable name field
+
+        // Nothing was staged by the failed save.
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff.contains("No staged changes"));
+    }
+
+    #[test]
+    fn profiles_tab_does_not_auto_select() {
+        // A rust profile that *would* be the bound candidate in this repo.
+        let cfg = "[[capabilities]]\nid = \"rc\"\nguidance = \"x\"\n\
+             \n[[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\ncapabilities = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        let body = body_of(route(
+            &st,
+            &req("GET", "/tab/profiles", "", &[HOST, COOKIE], ""),
+        ));
+        // The rail lists the profile, but the main pane shows the pick prompt —
+        // no profile is auto-selected, so no detail/cards render.
+        assert!(body.contains("Select a profile to see what it composes."));
+        assert!(!body.contains("cap-detail"));
+        assert!(!body.contains("<h1>rust</h1>"));
+        // Explicitly selecting one still renders its detail.
+        let detail = body_of(route(
+            &st,
+            &req("GET", "/profiles/rust/select", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(detail.contains("<h1>rust</h1>") && detail.contains("cap-detail"));
+    }
+
+    #[test]
     fn diff_surfaces_leak_warning_and_trust_banner() {
         // A repo command cap whose guidance carries a machine-specific literal.
         let cfg = "[[capabilities]]\n\
@@ -1366,7 +1432,7 @@ mod tests {
                 "id=rc&return_profile=rust&name=rc&kind=markdown&guidance=Fresh+guidance&scope=repo",
             ),
         ));
-        assert!(body.contains("profile rust")); // the profile detail, not the caps tab
+        assert!(body.contains("<h1>rust</h1>")); // the profile detail, not the caps tab
         assert!(body.contains("cap-detail"));
         assert!(body.contains("Fresh guidance"));
         assert!(body.contains("/close")); // modal-close loader appended

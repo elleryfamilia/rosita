@@ -295,7 +295,6 @@ pub fn modal_close_loader() -> String {
 pub struct ProfileDetail<'a> {
     pub name: &'a str,
     pub outcome: &'a PreviewOutcome,
-    pub agents: &'a [String],
     pub disabled: bool,
 }
 
@@ -378,8 +377,8 @@ fn profile_rail_item(p: &ProfileView, active: bool) -> Markup {
 }
 
 /// The selected profile's detail (fills `#profile-main`): a header with the
-/// binding chip, agent picker, and actions; a provenance breadcrumb; then one
-/// expandable card per composed capability.
+/// profile name + actions, a provenance breadcrumb, then one expandable card
+/// per composed capability.
 pub fn profile_detail(d: &ProfileDetail) -> Markup {
     let p = d.outcome;
     let name = d.name;
@@ -390,18 +389,10 @@ pub fn profile_detail(d: &ProfileDetail) -> Markup {
             div class="detail-head" {
                 div class="detail-title" {
                     h1 { (name) }
-                    @if d.disabled { span class="tag off-tag" { "disabled" } } @else { (binding_chip(&p.binding)) }
+                    @if d.disabled { span class="tag off-tag" { "disabled" } }
                 }
                 div class="detail-actions" {
-                    @if d.agents.len() > 1 {
-                        form class="agent-form" hx-post=(format!("/profiles/{e}/preview")) hx-target="#profile-main" hx-trigger="change" {
-                            select name="agent" {
-                                @for a in d.agents { option value=(a.as_str()) selected[a == &p.agent] { (a.as_str()) } }
-                            }
-                        }
-                    } @else {
-                        span class="chip" { (p.agent.as_str()) }
-                    }
+                    @if !p.agent.is_empty() { span class="chip chip-agent" title="rendered for this agent" { (p.agent.as_str()) } }
                     button class="toggle" title=(if d.disabled { "Enable profile" } else { "Disable profile" }) aria-label="Toggle profile"
                         hx-post=(format!("/profiles/{e}/disable")) hx-target="#main" {
                         span class=(if d.disabled { "switch off" } else { "switch on" }) {}
@@ -415,8 +406,6 @@ pub fn profile_detail(d: &ProfileDetail) -> Markup {
             }
             div class="provenance" {
                 span class="prov-node" { (p.context_summary.as_str()) }
-                span class="prov-arrow" { (icon("arrow-right")) }
-                span class="prov-node" { "profile " (name) }
                 span class="prov-arrow" { (icon("arrow-right")) }
                 span class="prov-node" { (n) " " (if n == 1 { "capability" } else { "capabilities" }) }
             }
@@ -791,6 +780,7 @@ pub fn profile_editor(
     is_new: bool,
     lib: &LibraryView,
     preview: &PreviewOutcome,
+    error: Option<&str>,
 ) -> String {
     let name = draft.name.as_str();
     let selected: Vec<&str> = draft.capabilities.iter().map(|r| r.id()).collect();
@@ -803,7 +793,10 @@ pub fn profile_editor(
                     button type="button" class="icon-btn" title="Back" hx-get="/tab/profiles" hx-target="#main" { (icon("arrow-right")) }
                     h1 { (if is_new { "New profile" } else { "Edit profile" }) }
                 }
-                label class="field" { span class="field-label" { "name" }
+                @if let Some(err) = error {
+                    div class="banner error" { span class="banner-icon" { (icon("alert")) } div class="banner-body" { (err) } }
+                }
+                label class="field" { span class="field-label" { "name" span class="field-hint" { "required" } }
                     @if is_new {
                         input type="text" name="name" value=(name) placeholder="rust — web" required;
                     } @else {
@@ -1013,14 +1006,17 @@ pub fn fs_status_fragment(changed: &[std::path::PathBuf]) -> String {
 
 // --- shared bits -------------------------------------------------------------
 
+/// A status chip for whether the previewed profile would be auto-selected in the
+/// context it's rendered for. Names nothing (the surrounding view already names
+/// the profile), so it reads as a state, not a label.
 fn binding_chip(b: &BindingState) -> Markup {
     match b {
-        BindingState::Bound(name) => {
-            html! { span class="chip chip-bound" title="binds in this context" { (icon("arrow-right")) span class="chip-name" { "profile " (name) } } }
+        BindingState::Bound(_) => {
+            html! { span class="chip chip-bound" title="binds in this context" { (icon("arrow-right")) "binds here" } }
         }
-        BindingState::None => html! { span class="chip chip-none" { "profile none" } },
+        BindingState::None => html! { span class="chip chip-none" { "not selected here" } },
         BindingState::Ambiguous(n) => {
-            html! { span class="chip chip-ambiguous" { (icon("alert")) (n) " profiles match" } }
+            html! { span class="chip chip-ambiguous" { (icon("alert")) (n) " match" } }
         }
     }
 }

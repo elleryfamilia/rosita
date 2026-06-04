@@ -181,8 +181,9 @@ body {
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border-strong); }
 .chip .icon { width: 13px; height: 13px; }
 .chip-bound { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.chip-bound .chip-name { font-family: var(--mono); }
 .chip-none { color: var(--faint); }
+/* Static, non-interactive label for the agent a profile detail is rendered for. */
+.chip-agent { color: var(--muted); font-family: var(--mono); font-weight: 500; }
 .chip-ambiguous { color: var(--caution); border-color: rgba(224, 168, 90, .4); background: rgba(224, 168, 90, .1); }
 
 .provenance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 6px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); }
