@@ -113,10 +113,29 @@ pub struct PreviewOutcome {
     /// How many capabilities actually render for `agent` (after agent gating) —
     /// the provenance breadcrumb's count, truthful to what's in the overlay.
     pub cap_count: usize,
-    /// The rendered overlay markdown (header + body).
+    /// The rendered overlay markdown (header + body). Drives the profile
+    /// editor's live preview.
     pub overlay: String,
+    /// Per-capability rendered guidance — the Profiles-tab detail's expandable
+    /// cards. One entry per capability that contributes a section to the overlay.
+    pub caps: Vec<PreviewCap>,
     /// A human note when there's no single profile (empty / ambiguous).
     pub note: Option<String>,
+}
+
+/// One capability's rendered guidance for the Profiles-tab detail cards.
+pub struct PreviewCap {
+    pub id: String,
+    pub title: String,
+    pub risk: Risk,
+    /// The capability's curated icon, if any (else the card uses a default).
+    pub icon: Option<String>,
+    /// Rendered guidance markdown (or the trust-skip note).
+    pub markdown: String,
+    /// Resolved a dynamic provider/command.
+    pub dynamic: bool,
+    /// A dynamic command was refused for lack of trust (markdown is the note).
+    pub skipped: bool,
 }
 
 /// One capability row for the library view.
@@ -266,6 +285,25 @@ pub fn render_profile_config(
         .iter()
         .filter(|rc| rc.capability.applies_to_agent(&agent_id))
         .count();
+    // Per-capability cards: the rendered sections, with each cap's icon looked
+    // up from the staged library (inline/synthetic caps fall back to a default).
+    let caps: Vec<PreviewCap> = out
+        .capabilities
+        .iter()
+        .map(|c| PreviewCap {
+            icon: cfg
+                .capabilities
+                .iter()
+                .find(|x| x.id == c.id)
+                .and_then(|x| x.icon.clone()),
+            id: c.id.clone(),
+            title: c.title.clone(),
+            risk: c.risk,
+            markdown: c.body.clone(),
+            dynamic: c.dynamic,
+            skipped: c.skipped,
+        })
+        .collect();
     Ok(PreviewOutcome {
         agent: agent_id,
         profile_label: profile.name.clone(),
@@ -277,6 +315,7 @@ pub fn render_profile_config(
         context_summary: context_summary(&ctx),
         cap_count,
         overlay: out.content,
+        caps,
         note: profile
             .disabled
             .then(|| "This profile is disabled — it won't be selected in real runs.".to_string()),

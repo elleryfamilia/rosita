@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use minijinja::{Environment, UndefinedBehavior, Value};
 use serde::Serialize;
 
-use crate::capability::Capability;
+use crate::capability::{Capability, Risk};
 use crate::config::{self, Config};
 use crate::context::Context;
 use crate::dynamic::{self, DynamicMode};
@@ -85,6 +85,31 @@ pub struct RenderOutput {
     /// output is excluded from the context hash, so the cache TTL — not the
     /// hash — governs churn).
     pub has_dynamic: bool,
+    /// The composed capabilities, each rendered to its own markdown section.
+    /// `profile_guidance` is exactly these joined; exposed structured so callers
+    /// (studio) can show per-capability preview cards without re-rendering.
+    pub capabilities: Vec<RenderedCapability>,
+}
+
+/// One composed capability rendered to markdown — the structured form of a
+/// `### <title>` overlay section. Only the capabilities that actually produce a
+/// section appear here (agent-gated and empty ones are omitted, exactly as in
+/// the overlay body).
+#[derive(Debug, Clone)]
+pub struct RenderedCapability {
+    /// Capability id (`<profile>:inline` for a synthetic inline capability).
+    pub id: String,
+    /// Section title (the inline profile name, else the capability's title).
+    pub title: String,
+    /// Risk, for the section's annotation / the card's spine.
+    pub risk: Risk,
+    /// Rendered guidance markdown, or the trust-skip note.
+    pub body: String,
+    /// True when this capability resolved a dynamic provider/command.
+    pub dynamic: bool,
+    /// True when a dynamic command was refused for lack of trust (`body` is the
+    /// `> [rosita] …` skip note rather than rendered guidance).
+    pub skipped: bool,
 }
 
 /// The serializable model exposed to the base overlay template.
@@ -138,7 +163,7 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
     let now = DateTime::parse_from_rfc3339(&req.generated_at)
         .map(|t| t.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
-    let (profile_guidance, has_dynamic) = render_capabilities(
+    let rendered_caps = render_capability_list(
         &renderer,
         req.context,
         req.composition,
@@ -146,6 +171,8 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
         req.dynamic,
         now,
     )?;
+    let has_dynamic = rendered_caps.iter().any(|c| c.dynamic);
+    let profile_guidance = join_capability_sections(&rendered_caps);
 
     // 3. Context hash.
     let context_hash = req.context.compute_hash();
@@ -183,29 +210,29 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
         template_source: base.source,
         profile_guidance,
         has_dynamic,
+        capabilities: rendered_caps,
     })
 }
 
-/// Render each composed capability (in order) into a single guidance body, and
-/// report whether any rendered capability was dynamic.
+/// Render each composed capability (in order) into a structured
+/// [`RenderedCapability`]. The overlay body is [`join_capability_sections`] of
+/// this list; studio also consumes it for per-capability preview cards.
 ///
 /// Capabilities restricted to other agents are skipped (the active agent varies
-/// per render). Each capability becomes a `### <title>` section, annotated with
-/// its risk when not `Info`. A synthetic `<profile>:inline` capability can still
-/// be overridden by a `profiles/<name>.md.j2` template file (repo, then global).
-/// A **dynamic** capability resolves its provider/command output (trust-gated,
-/// cache-backed) with `provider.output`/`provider.data` in scope; an untrusted
-/// command renders a skip note instead.
-fn render_capabilities(
+/// per render), as are ones that render empty. A synthetic `<profile>:inline`
+/// capability can still be overridden by a `profiles/<name>.md.j2` template file
+/// (repo, then global). A **dynamic** capability resolves its provider/command
+/// output (trust-gated, cache-backed) with `provider.output`/`provider.data` in
+/// scope; an untrusted command renders a skip note instead.
+fn render_capability_list(
     renderer: &MinijinjaRenderer,
     ctx: &Context,
     composition: &Composition,
     agent: &str,
     mode: DynamicMode,
     now: DateTime<Utc>,
-) -> crate::Result<(String, bool)> {
-    let mut sections: Vec<String> = Vec::new();
-    let mut has_dynamic = false;
+) -> crate::Result<Vec<RenderedCapability>> {
+    let mut out: Vec<RenderedCapability> = Vec::new();
 
     for rc in &composition.capabilities {
         let cap = &rc.capability;
@@ -234,13 +261,13 @@ fn render_capabilities(
         };
 
         let dyn_res = dynamic::resolve(cap, ctx, &ctx.repo_base, mode, now);
-        if dyn_res.is_some() {
-            has_dynamic = true;
-        }
+        let dynamic = dyn_res.is_some();
+        let mut skipped = false;
 
         let body: String = match &dyn_res {
             // Dynamic, but the command was refused for lack of trust.
             Some(res) if res.skipped.is_some() => {
+                skipped = true;
                 format!("> [rosita] {}", res.skipped.as_ref().unwrap())
             }
             // Dynamic with resolved (or absent) output.
@@ -286,14 +313,33 @@ fn render_capabilities(
         } else {
             cap.title().to_string()
         };
-        let heading = match cap.risk.annotation() {
-            Some(ann) => format!("### {title} — {ann}"),
-            None => format!("### {title}"),
-        };
-        sections.push(format!("{heading}\n\n{body}"));
+        out.push(RenderedCapability {
+            id: cap.id.clone(),
+            title,
+            risk: cap.risk,
+            body,
+            dynamic,
+            skipped,
+        });
     }
 
-    Ok((sections.join("\n\n"), has_dynamic))
+    Ok(out)
+}
+
+/// Join rendered capabilities into the overlay's guidance body: each becomes a
+/// `### <title>` section (risk-annotated when not `Info`), separated by a blank
+/// line. This is exactly the `profile_guidance` the base template embeds.
+fn join_capability_sections(caps: &[RenderedCapability]) -> String {
+    caps.iter()
+        .map(|c| {
+            let heading = match c.risk.annotation() {
+                Some(ann) => format!("### {} — {ann}", c.title),
+                None => format!("### {}", c.title),
+            };
+            format!("{heading}\n\n{}", c.body)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn read_profile_template(repo_base: &Path, profile: &str) -> Option<String> {
@@ -395,6 +441,46 @@ mod tests {
         // ...with its guidance template rendered against the context.
         assert!(out.content.contains("Use cargo for **rust**."));
         assert!(out.context_hash.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn exposes_structured_per_capability_output() {
+        let ctx = sample_context();
+        let cfg = Config::defaults();
+        let mut risky = named_cap("infra-caution", "Be careful.");
+        risky.risk = Risk::Caution;
+        let comp = composition(
+            "infra",
+            vec![
+                resolved(risky, "infra", false),
+                resolved(named_cap("baseline", "Keep it minimal."), "default", false),
+            ],
+        );
+        let out = render(&RenderRequest {
+            agent: "claude",
+            template_name: "claude",
+            context: &ctx,
+            composition: &comp,
+            config: &cfg,
+            generated_at: "2026-05-29T00:00:00Z".into(),
+            dynamic: DynamicMode::ReadOnly,
+        })
+        .unwrap();
+
+        // One structured entry per rendered capability, in composition order.
+        let ids: Vec<&str> = out.capabilities.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["infra-caution", "baseline"]);
+        assert_eq!(out.capabilities[0].risk, Risk::Caution);
+        assert_eq!(out.capabilities[0].body, "Be careful.");
+        assert!(!out.capabilities[0].dynamic && !out.capabilities[0].skipped);
+        // The structured list joins back to the overlay's guidance body exactly.
+        assert_eq!(
+            out.profile_guidance,
+            join_capability_sections(&out.capabilities)
+        );
+        assert!(out
+            .profile_guidance
+            .contains("### infra-caution — ⚠️ caution"));
     }
 
     #[test]

@@ -146,15 +146,19 @@
     document.addEventListener("keydown", onKey, true);
   }
 
-  // Tab active-state (chrome only; the swap itself is hx-driven). Delegated so it
-  // survives fragment swaps. Clicking a [data-tab] marks it active among its peers.
-  function wireTabs() {
+  // Active-state for the top tabs and the profile rail (chrome only; the swap
+  // itself is hx-driven). Delegated so it survives fragment swaps: clicking a
+  // [data-tab] or [data-profile] marks it active among its same-attribute peers.
+  function wireActiveGroups() {
     document.addEventListener("click", function (ev) {
-      var tab = ev.target.closest ? ev.target.closest("[data-tab]") : null;
-      if (!tab) return;
-      var peers = tab.parentNode.querySelectorAll("[data-tab]");
+      var el = ev.target.closest
+        ? ev.target.closest("[data-tab],[data-profile]")
+        : null;
+      if (!el) return;
+      var attr = el.hasAttribute("data-tab") ? "data-tab" : "data-profile";
+      var peers = el.parentNode.querySelectorAll("[" + attr + "]");
       for (var i = 0; i < peers.length; i++) peers[i].classList.remove("active");
-      tab.classList.add("active");
+      el.classList.add("active");
     });
   }
 
@@ -177,7 +181,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     process(document.body);
-    wireTabs();
+    wireActiveGroups();
     wireIconPicker();
   });
 })();

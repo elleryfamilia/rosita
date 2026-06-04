@@ -1,10 +1,10 @@
-//! `maud` server-rendered HTML for rosita studio: a tabbed shell (Profiles /
-//! Capabilities), the profile dashboard + live preview pane, the capability
-//! list + modal dialog, the full-width profile editor, and the diff/review.
+//! `maud` server-rendered HTML for rosita studio: a tabbed shell (Capabilities /
+//! Profiles), the profile rail + per-capability detail, the capability list +
+//! modal dialog, the full-width profile editor, and the diff/review.
 //!
 //! Targets the tiny embedded htmx-shim. Swap targets:
-//! - `#main` — the active tab's content (dashboard, caps list, editor, diff).
-//! - `#preview` — the rendered-markdown preview inside the Profiles tab.
+//! - `#main` — the active tab's content (caps list, profile rail, editor, diff).
+//! - `#profile-main` — the selected profile's detail (a rail click swaps it in).
 //! - `#modal` — the capability dialog (CSS shows it when non-empty; `/close`
 //!   swaps it empty).
 //! - `#staged` — the top-bar staged-changes indicator (mutations re-pull it).
@@ -18,7 +18,7 @@ use crate::capability::{Capability, Layer, Risk};
 use crate::profile::ProfileConfig;
 use crate::studio::edit::FileDiff;
 use crate::studio::state::{
-    AtomDot, AtomState, BindingState, CapView, LibraryView, PreviewOutcome, ProfileView,
+    AtomDot, AtomState, BindingState, CapView, LibraryView, PreviewCap, PreviewOutcome, ProfileView,
 };
 
 /// Language/platform targets a profile can declare.
@@ -285,155 +285,194 @@ fn modal_close() -> Markup {
 
 // --- Profiles tab ------------------------------------------------------------
 
-/// The Profiles tab: a dashboard of profile cards (left) + the preview pane
-/// (right). `previewing` marks the card whose preview is shown.
-pub fn profiles_tab(lib: &LibraryView, previewing: Option<&str>, flash: Option<&str>) -> Markup {
-    // Two-column (dashboard + preview) only once a profile is selected; until
-    // then the dashboard runs full-width — no empty "select a profile" panel.
-    let cls = if previewing.is_some() {
-        "tab-profiles"
-    } else {
-        "tab-profiles solo"
-    };
+/// The selected profile's rendered preview, bundled for the detail view.
+pub struct ProfileDetail<'a> {
+    pub name: &'a str,
+    pub outcome: &'a PreviewOutcome,
+    pub agents: &'a [String],
+    pub disabled: bool,
+}
+
+/// The Profiles tab: a vertical profile rail (left) + the selected profile's
+/// detail (right). `selected` is the profile whose detail fills the main area
+/// (the server default-selects the bound/first profile so it's never empty).
+pub fn profiles_tab(
+    lib: &LibraryView,
+    selected: Option<ProfileDetail>,
+    flash: Option<&str>,
+) -> Markup {
+    let sel_name = selected.as_ref().map(|d| d.name);
     html! {
-        div class=(cls) {
-            section class="dashboard" {
-                div class="dash-head" {
+        div class="tab-profiles" {
+            aside class="profile-rail" {
+                div class="rail-head" {
                     h1 { "Profiles" }
-                    button class="btn btn-primary" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "New profile" }
+                    button class="btn btn-primary btn-sm" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "New" }
                 }
                 @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
                 @if lib.profiles.is_empty() {
-                    div class="empty-card" {
-                        p { "No profiles yet." }
-                        p class="muted" { "A profile bundles capabilities and binds them to a kind of repo." }
-                        button class="btn btn-primary" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "Create your first profile" }
-                    }
+                    p class="rail-empty muted" { "No profiles yet." }
                 } @else {
-                    div class="profile-grid" {
-                        @for p in &lib.profiles { (profile_card(p, previewing == Some(p.name.as_str()))) }
+                    nav class="rail-list" {
+                        @for p in &lib.profiles { (profile_rail_item(p, sel_name == Some(p.name.as_str()))) }
                     }
                 }
             }
-            @if previewing.is_some() {
-                aside class="preview-col" id="preview" {}
+            section class="profile-main" id="profile-main" {
+                @match &selected {
+                    Some(detail) => (profile_detail(detail)),
+                    None => {
+                        @if lib.profiles.is_empty() { (profiles_empty_main()) }
+                        @else { (profile_pick_prompt()) }
+                    }
+                }
             }
         }
     }
 }
 
-pub fn profiles_tab_fragment(
-    lib: &LibraryView,
-    previewing: Option<&str>,
-    flash: Option<&str>,
-) -> String {
-    let preview_loader = previewing.map(|name| {
-        html! { div hx-get=(format!("/profiles/{}/preview", enc(name))) hx-trigger="load" hx-target="#preview" {} }
-    });
-    html! {
-        (profiles_tab(lib, previewing, flash))
-        @if let Some(l) = preview_loader { (l) }
-    }
-    .into_string()
-}
-
-fn profile_card(p: &ProfileView, previewing: bool) -> Markup {
+/// One row in the profile rail: name + status + targets + capability dots.
+/// Selecting it swaps the detail into `#profile-main`.
+fn profile_rail_item(p: &ProfileView, active: bool) -> Markup {
     let name = p.name.as_str();
     let e = enc(name);
-    let mut cls = String::from("profile-card");
+    let mut cls = String::from("rail-item");
+    if active {
+        cls.push_str(" active");
+    }
     if p.disabled {
         cls.push_str(" disabled");
-    }
-    if previewing {
-        cls.push_str(" previewing");
     }
     if p.selected {
         cls.push_str(" bound");
     }
     html! {
-        div class=(cls) {
-            div class="card-body" hx-get=(format!("/profiles/{e}/select")) hx-target="#main" {
-                div class="card-top" {
-                    span class="profile-name" { (name) }
-                    @if p.selected { span class="tag bound-tag" { (icon("arrow-right")) "bound" } }
-                    @if p.disabled { span class="tag off-tag" { "disabled" } }
-                }
-                @if p.targets.is_empty() {
-                    div class="targets" { span class="target-chip muted" { "no targets" } }
-                } @else {
-                    div class="targets" { @for t in &p.targets { span class="target-chip" { (t) } } }
-                }
-                div class="card-foot" {
-                    @if p.atoms.is_empty() {
-                        span class="muted small" { "no capabilities" }
-                    } @else {
-                        div class="atoms" { @for a in &p.atoms { (atom_dot(a)) } }
-                        span class="muted small" { (p.atoms.len()) " " (if p.atoms.len() == 1 { "capability" } else { "capabilities" }) }
-                    }
-                }
+        div class=(cls) role="button" tabindex="0" data-profile=(name)
+            hx-get=(format!("/profiles/{e}/select")) hx-target="#profile-main" {
+            span class="rail-top" {
+                span class="rail-name" { (name) }
+                @if p.selected { span class="tag bound-tag" { (icon("arrow-right")) "bound" } }
+                @else if p.disabled { span class="tag off-tag" { "off" } }
             }
-            div class="card-actions" {
-                button class="toggle" title=(if p.disabled { "Enable profile" } else { "Disable profile" }) aria-label="Toggle profile"
-                    hx-post=(format!("/profiles/{e}/disable")) hx-target="#main" {
-                    span class=(if p.disabled { "switch off" } else { "switch on" }) {}
+            @if p.targets.is_empty() {
+                span class="rail-targets" { span class="target-chip muted" { "no targets" } }
+            } @else {
+                span class="rail-targets" { @for t in &p.targets { span class="target-chip" { (t) } } }
+            }
+            span class="rail-foot" {
+                @if p.atoms.is_empty() {
+                    span class="muted small" { "no capabilities" }
+                } @else {
+                    span class="atoms" { @for a in &p.atoms { (atom_dot(a)) } }
+                    span class="muted small" { (p.atoms.len()) }
                 }
-                button class="icon-btn" title="Edit" aria-label=(format!("Edit {name}"))
-                    hx-get=(format!("/profiles/{e}/edit")) hx-target="#main" { (icon("pencil")) }
-                button class="icon-btn danger" title="Delete" aria-label=(format!("Delete {name}"))
-                    hx-delete=(format!("/profiles/{e}")) hx-target="#main"
-                    hx-confirm=(format!("Stage deletion of profile \"{name}\"?")) { (icon("trash")) }
             }
         }
     }
 }
 
-/// The rendered-markdown preview for a selected profile, with an agent picker
-/// (shown only when more than one agent is configured).
-pub fn profile_preview_pane(p: &PreviewOutcome, agents: &[String], profile_name: &str) -> Markup {
-    let e = enc(profile_name);
+/// The selected profile's detail (fills `#profile-main`): a header with the
+/// binding chip, agent picker, and actions; a provenance breadcrumb; then one
+/// expandable card per composed capability.
+pub fn profile_detail(d: &ProfileDetail) -> Markup {
+    let p = d.outcome;
+    let name = d.name;
+    let e = enc(name);
+    let n = p.caps.len();
     html! {
-        div class="preview-pane" {
-            div class="preview-head" {
-                span class="preview-title" { (icon("eye")) "Preview" }
-                div class="preview-meta" {
-                    (binding_chip(&p.binding))
-                    @if agents.len() > 1 {
-                        form class="agent-form" hx-post=(format!("/profiles/{e}/preview")) hx-target="#preview" hx-trigger="change" {
+        div class="detail" {
+            div class="detail-head" {
+                div class="detail-title" {
+                    h1 { (name) }
+                    @if d.disabled { span class="tag off-tag" { "disabled" } } @else { (binding_chip(&p.binding)) }
+                }
+                div class="detail-actions" {
+                    @if d.agents.len() > 1 {
+                        form class="agent-form" hx-post=(format!("/profiles/{e}/preview")) hx-target="#profile-main" hx-trigger="change" {
                             select name="agent" {
-                                @for a in agents { option value=(a.as_str()) selected[a == &p.agent] { (a.as_str()) } }
+                                @for a in d.agents { option value=(a.as_str()) selected[a == &p.agent] { (a.as_str()) } }
                             }
                         }
                     } @else {
                         span class="chip" { (p.agent.as_str()) }
                     }
+                    button class="toggle" title=(if d.disabled { "Enable profile" } else { "Disable profile" }) aria-label="Toggle profile"
+                        hx-post=(format!("/profiles/{e}/disable")) hx-target="#main" {
+                        span class=(if d.disabled { "switch off" } else { "switch on" }) {}
+                    }
+                    button class="icon-btn" title="Edit" aria-label=(format!("Edit {name}"))
+                        hx-get=(format!("/profiles/{e}/edit")) hx-target="#main" { (icon("pencil")) }
+                    button class="icon-btn danger" title="Delete" aria-label=(format!("Delete {name}"))
+                        hx-delete=(format!("/profiles/{e}")) hx-target="#main"
+                        hx-confirm=(format!("Stage deletion of profile \"{name}\"?")) { (icon("trash")) }
                 }
             }
             div class="provenance" {
                 span class="prov-node" { (p.context_summary.as_str()) }
                 span class="prov-arrow" { (icon("arrow-right")) }
-                span class="prov-node" { (p.profile_label.as_str()) }
+                span class="prov-node" { "profile " (name) }
                 span class="prov-arrow" { (icon("arrow-right")) }
-                span class="prov-node" { (p.cap_count) " " (if p.cap_count == 1 { "capability" } else { "capabilities" }) }
+                span class="prov-node" { (n) " " (if n == 1 { "capability" } else { "capabilities" }) }
             }
             @if let Some(note) = &p.note { p class="note" { (note) } }
-            div class="overlay-toggle" {
-                input type="radio" name="ov" id="ov-rendered" checked;
-                label class="seg-opt" for="ov-rendered" { "Rendered" }
-                input type="radio" name="ov" id="ov-raw";
-                label class="seg-opt" for="ov-raw" { "Raw" }
+            @if p.caps.is_empty() {
+                div class="detail-blank" {
+                    (icon("eye"))
+                    p class="muted" { "This profile composes no guidance for " (p.agent.as_str()) " in this context." }
+                }
+            } @else {
+                div class="cap-cards" { @for c in &p.caps { (preview_cap_card(c)) } }
             }
-            div class="overlay-rendered markdown-body" { (render_markdown(&p.overlay)) }
-            pre class="overlay-body overlay-raw" { (p.overlay) }
         }
     }
 }
 
-pub fn profile_preview_fragment(
-    p: &PreviewOutcome,
-    agents: &[String],
-    profile_name: &str,
-) -> String {
-    profile_preview_pane(p, agents, profile_name).into_string()
+pub fn profile_detail_fragment(d: &ProfileDetail) -> String {
+    profile_detail(d).into_string()
+}
+
+/// One expandable capability card in the detail: a summary row that reveals the
+/// capability's rendered-markdown guidance when opened.
+fn preview_cap_card(c: &PreviewCap) -> Markup {
+    let glyph = c
+        .icon
+        .as_deref()
+        .unwrap_or(if c.dynamic { "bolt" } else { "box" });
+    html! {
+        details class=(format!("cap-detail {}", risk_class(c.risk))) {
+            summary class="cap-detail-head" {
+                span class="cap-glyph" { (icon(glyph)) }
+                span class="cap-detail-main" {
+                    span class="cap-detail-title" { (c.title) }
+                    span class="cap-detail-id" { (c.id) }
+                }
+                @if c.skipped { span class="tag off-tag" { (icon("shield")) "trust" } }
+                @else if c.dynamic { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
+                span class="cap-chev" { (icon("chevron-down")) }
+            }
+            div class="cap-detail-body markdown-body" { (render_markdown(&c.markdown)) }
+        }
+    }
+}
+
+fn profiles_empty_main() -> Markup {
+    html! {
+        div class="detail-blank" {
+            (icon("layers"))
+            p { "No profiles yet." }
+            p class="muted" { "A profile bundles capabilities and binds them to a kind of repo." }
+            button class="btn btn-primary" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "Create your first profile" }
+        }
+    }
+}
+
+fn profile_pick_prompt() -> Markup {
+    html! {
+        div class="detail-blank" {
+            (icon("arrow-right"))
+            p class="muted" { "Select a profile to see what it composes." }
+        }
+    }
 }
 
 // --- Capabilities tab --------------------------------------------------------
@@ -921,15 +960,6 @@ pub fn cap_result(lib: &LibraryView, flash: &str) -> String {
     html! {
         (capabilities_tab(lib, Some(flash)))
         (modal_close())
-        (staged_refresh())
-    }
-    .into_string()
-}
-
-/// A profile mutation: re-render the Profiles tab into `#main` + refresh staged.
-pub fn profile_result(lib: &LibraryView, flash: &str) -> String {
-    html! {
-        (profiles_tab(lib, None, Some(flash)))
         (staged_refresh())
     }
     .into_string()

@@ -216,13 +216,111 @@ fn snap_and_staged(state: &Arc<Mutex<StudioState>>) -> (state::Snapshot, usize) 
 }
 
 fn handle_tab(state: &Arc<Mutex<StudioState>>, tab: &str) -> Resp {
+    if tab == "profiles" {
+        return profiles_tab_resp(state, None, None, false);
+    }
     let snap = state.lock().unwrap().snapshot();
     match state::library_view(&snap) {
-        Ok(lib) => Resp::html(match tab {
-            "capabilities" => views::capabilities_tab_fragment(&lib, None),
-            _ => views::profiles_tab_fragment(&lib, None, None),
-        }),
+        Ok(lib) => Resp::html(views::capabilities_tab_fragment(&lib, None)),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+/// Render the full Profiles tab (rail + detail) with a default selection: the
+/// `selected` profile if given, else the bound one, else the first. `flash`
+/// shows a banner; `with_staged` appends the staged-indicator refresh loader
+/// (used after a mutation re-renders `#main`).
+fn profiles_tab_resp(
+    state: &Arc<Mutex<StudioState>>,
+    selected: Option<&str>,
+    flash: Option<&str>,
+    with_staged: bool,
+) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let lib = match state::library_view(&snap) {
+        Ok(l) => l,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let agents = agent_ids(&snap);
+    // Effective selection: the requested profile (if it exists), else the bound
+    // one, else the first — so the detail pane is never gratuitously empty.
+    let effective: Option<String> = selected
+        .filter(|n| lib.profiles.iter().any(|p| p.name == *n))
+        .map(str::to_string)
+        .or_else(|| {
+            lib.profiles
+                .iter()
+                .find(|p| p.selected)
+                .map(|p| p.name.clone())
+        })
+        .or_else(|| lib.profiles.first().map(|p| p.name.clone()));
+    let detail = effective.map(|name| {
+        let disabled = lib
+            .profiles
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.disabled)
+            .unwrap_or(false);
+        let outcome = state::render_profile(&snap, &name, "")
+            .unwrap_or_else(|e| empty_preview(&name, format!("preview error: {e}")));
+        (name, outcome, disabled)
+    });
+    let markup = match &detail {
+        Some((name, outcome, disabled)) => views::profiles_tab(
+            &lib,
+            Some(views::ProfileDetail {
+                name,
+                outcome,
+                agents: &agents,
+                disabled: *disabled,
+            }),
+            flash,
+        ),
+        None => views::profiles_tab(&lib, None, flash),
+    };
+    let mut html = markup.into_string();
+    if with_staged {
+        html.push_str(&views::staged_indicator_loader());
+    }
+    Resp::html(html)
+}
+
+/// Render just the selected profile's detail (swapped into `#profile-main`),
+/// composed for `agent` (empty ⇒ the configured default).
+fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let agents = agent_ids(&snap);
+    let disabled = state::staged_config(&snap)
+        .ok()
+        .and_then(|cfg| {
+            cfg.profiles
+                .iter()
+                .find(|p| p.name == name)
+                .map(|p| p.disabled)
+        })
+        .unwrap_or(false);
+    match state::render_profile(&snap, name, agent) {
+        Ok(outcome) => Resp::html(views::profile_detail_fragment(&views::ProfileDetail {
+            name,
+            outcome: &outcome,
+            agents: &agents,
+            disabled,
+        })),
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
+    }
+}
+
+/// An empty preview outcome (used when a profile can't be composed/rendered).
+fn empty_preview(name: &str, note: String) -> PreviewOutcome {
+    PreviewOutcome {
+        agent: String::new(),
+        profile_label: name.to_string(),
+        binding: BindingState::None,
+        context_summary: String::new(),
+        cap_count: 0,
+        overlay: String::new(),
+        caps: Vec::new(),
+        note: Some(note),
     }
 }
 
@@ -364,20 +462,11 @@ fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 }
 
 fn handle_profile_select(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
-    let snap = state.lock().unwrap().snapshot();
-    match state::library_view(&snap) {
-        Ok(lib) => Resp::html(views::profiles_tab_fragment(&lib, Some(name), None)),
-        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
-    }
+    handle_profile_detail(state, name, "")
 }
 
 fn handle_profile_preview(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
-    let snap = state.lock().unwrap().snapshot();
-    let agents = agent_ids(&snap);
-    match state::render_profile(&snap, name, agent) {
-        Ok(p) => Resp::html(views::profile_preview_fragment(&p, &agents, name)),
-        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
-    }
+    handle_profile_detail(state, name, agent)
 }
 
 fn handle_profile_disable(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
@@ -402,11 +491,8 @@ fn handle_profile_disable(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
             None => return Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
         }
     };
-    match res.and_then(|()| library_now(state)) {
-        Ok(lib) => Resp::html(views::profile_result(
-            &lib,
-            &format!("toggled profile “{name}”"),
-        )),
+    match res {
+        Ok(()) => profiles_tab_resp(state, Some(name), Some(&format!("toggled “{name}”")), true),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
 }
@@ -423,11 +509,13 @@ fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         name: name.clone(),
         profile: Box::new(profile),
     });
-    match res.and_then(|()| library_now(state)) {
-        Ok(lib) => Resp::html(views::profile_result(
-            &lib,
-            &format!("staged profile “{name}”"),
-        )),
+    match res {
+        Ok(()) => profiles_tab_resp(
+            state,
+            Some(&name),
+            Some(&format!("staged profile “{name}”")),
+            true,
+        ),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
 }
@@ -501,11 +589,13 @@ fn handle_profile_delete(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
             None => return Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
         }
     };
-    match res.and_then(|()| library_now(state)) {
-        Ok(lib) => Resp::html(views::profile_result(
-            &lib,
-            &format!("staged deletion of “{name}”"),
-        )),
+    match res {
+        Ok(()) => profiles_tab_resp(
+            state,
+            None,
+            Some(&format!("staged deletion of “{name}”")),
+            true,
+        ),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
 }
@@ -523,6 +613,7 @@ fn profile_preview_or_empty(
         context_summary: String::new(),
         cap_count: 0,
         overlay: String::new(),
+        caps: Vec::new(),
         note: Some(format!("preview error: {e}")),
     })
 }
@@ -576,13 +667,12 @@ fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
     // holding the lock across its (brief, small-file) I/O is correct here.
     let result = state.lock().unwrap().session.apply();
     match result {
-        Ok(written) => match library_now(state) {
-            Ok(lib) => Resp::html(views::profile_result(
-                &lib,
-                &format!("applied {} file change(s)", written.len()),
-            )),
-            Err(e) => Resp::html(views::error_fragment(&e.to_string())),
-        },
+        Ok(written) => profiles_tab_resp(
+            state,
+            None,
+            Some(&format!("applied {} file change(s)", written.len())),
+            true,
+        ),
         Err(e) => Resp::html(views::error_fragment(&format!("apply failed: {e}"))),
     }
 }
@@ -920,28 +1010,36 @@ mod tests {
     }
 
     #[test]
-    fn profile_preview_renders_composed_overlay() {
+    fn profile_detail_shows_per_capability_cards() {
         let cfg = "[[capabilities]]\n\
              id = \"rc\"\n\
              description = \"Rust conv\"\n\
              guidance = \"Use clippy here.\"\n\
              \n\
+             [[capabilities]]\n\
+             id = \"tc\"\n\
+             description = \"Terse\"\n\
+             guidance = \"Be terse.\"\n\
+             \n\
              [[profiles]]\n\
              name = \"rust\"\n\
              targets = [\"rust\"]\n\
-             capabilities = [\"rc\"]\n";
+             capabilities = [\"rc\", \"tc\"]\n";
         let d = rust_repo();
         let st = state_for(d.path(), Some(cfg));
 
-        // The Profiles-tab preview composes + renders the named profile.
-        let r = route(
+        // Selecting a profile renders the detail: one expandable card per
+        // composed capability, each carrying its rendered guidance.
+        let body = body_of(route(
             &st,
-            &req("GET", "/profiles/rust/preview", "", &[HOST, COOKIE], ""),
-        );
-        assert_eq!(r.status, 200);
-        let body = String::from_utf8(r.body).unwrap();
-        assert!(body.contains("profile rust")); // binding chip
-        assert!(body.contains("Use clippy here.")); // composed guidance
+            &req("GET", "/profiles/rust/select", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(body.contains("profile rust")); // provenance + binding chip
+        assert!(body.contains("cap-detail")); // expandable cards
+        assert!(body.contains("Rust conv") && body.contains("Use clippy here."));
+        assert!(body.contains("Terse") && body.contains("Be terse."));
+        // The rendered/raw toggle is gone in the new design.
+        assert!(!body.contains("overlay-toggle") && !body.contains("ov-raw"));
 
         // The agent-change POST is CSRF-guarded (no Origin → rejected).
         let r = route(
