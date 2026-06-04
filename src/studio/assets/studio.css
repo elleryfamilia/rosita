@@ -1,15 +1,15 @@
 /* rosita studio — refined dark, tabbed (Profiles / Capabilities).
    One accent (blue); risk as a semantic spine; a 4px grid and a real type scale.
-   Fonts are self-hosted (no external calls): Sail for the wordmark, Newsreader
-   for body/UI. Both © their authors under the SIL Open Font License 1.1
+   Fonts are self-hosted (no external calls): Sail for the wordmark, Inter for
+   body/UI. Both © their authors under the SIL Open Font License 1.1
    (https://scripts.sil.org/OFL); redistributed here in binary woff2 form. */
 
 @font-face {
-  font-family: "Newsreader";
+  font-family: "Inter";
   font-style: normal;
-  font-weight: 200 800;
+  font-weight: 100 900;
   font-display: swap;
-  src: url(/assets/fonts/newsreader.woff2) format("woff2");
+  src: url(/assets/fonts/inter.woff2) format("woff2");
 }
 @font-face {
   font-family: "Sail";
@@ -41,8 +41,8 @@
   --ok: #7fd6a0;
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --sans: "Newsreader", Georgia, "Times New Roman", serif;
-  --brand: "Sail", "Newsreader", cursive;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand: "Sail", cursive;
 
   --r-sm: 6px;
   --r: 8px;
@@ -53,7 +53,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  font: 400 13.5px/1.55 var(--sans);
+  font: 400 13px/1.5 var(--sans);
   background: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;

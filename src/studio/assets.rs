@@ -40,7 +40,7 @@ mod tests {
         assert!(ct.starts_with("text/javascript"));
         assert!(!js.is_empty());
         // Self-hosted fonts are embedded and served as font/woff2.
-        for f in ["newsreader", "sail"] {
+        for f in ["inter", "sail"] {
             let (font, ct) = get(&format!("/assets/fonts/{f}.woff2"))
                 .unwrap_or_else(|| panic!("{f}.woff2 must be embedded"));
             assert_eq!(ct, "font/woff2");
