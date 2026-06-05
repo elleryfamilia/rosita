@@ -1,12 +1,14 @@
-# .rosita/local.toml — PRIVATE, machine-/repo-specific overrides.
+# ~/.config/rosita/local.toml — PRIVATE, machine-specific overrides.
 #
 # This file is gitignored and layered AFTER config.toml (it wins). Put sensitive
 # specifics here so the shareable config.toml stays free of them:
 #   - real hostnames and host_classes globs
 #   - capability `params` values (hosts, users, paths, tokens-by-reference)
 #
-# Everything valid in config.toml is valid here. Nothing below is active until
-# you uncomment it.
+# (A repo's own .rosita/local.toml is the same private layer for that repo — it
+# also holds the per-project [binding].) Capabilities and profiles, however, are
+# global-only and belong in config.toml. Nothing below is active until you
+# uncomment it.
 
 # Map your real hostnames (globs) to a class. Profiles in config.toml can then
 # match on `host_class` without the public config ever naming a machine.

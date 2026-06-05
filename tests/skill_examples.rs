@@ -54,3 +54,24 @@ fn skill_reference_toml_examples_are_valid_config() {
     assert!(cfg.profiles.iter().any(|p| p.name == "rust"));
     assert!(cfg.capabilities.iter().any(|c| c.id == "host"));
 }
+
+#[test]
+fn shipped_example_config_is_a_valid_global_config() {
+    // `examples/config.toml` (+ the private `local.toml`) is the annotated
+    // global config we point people at — it must stay valid as one.
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
+    let config =
+        std::fs::read_to_string(format!("{dir}/config.toml")).expect("examples/config.toml");
+    let local = std::fs::read_to_string(format!("{dir}/local.toml")).expect("examples/local.toml");
+
+    let cfg = Config::from_layer_strs(vec![
+        (Layer::Global, PathBuf::from("/g/config.toml"), config),
+        (Layer::GlobalLocal, PathBuf::from("/g/local.toml"), local),
+    ])
+    .expect("examples must form a valid global config");
+
+    assert!(cfg.profiles.iter().any(|p| p.name == "rust"));
+    assert!(cfg.profiles.iter().any(|p| p.name == "machine"));
+    assert!(cfg.capabilities.iter().any(|c| c.id == "rust-conventions"));
+    assert!(cfg.capabilities.iter().any(|c| c.id == "work-strict"));
+}
