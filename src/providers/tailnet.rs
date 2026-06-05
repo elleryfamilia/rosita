@@ -175,7 +175,10 @@ garbage line without ip
     #[test]
     fn candidates_try_path_first_then_existing_fallbacks() {
         // Nothing on disk → only the bare PATH name is tried.
-        assert_eq!(tailscale_candidates(|_| false), vec!["tailscale".to_string()]);
+        assert_eq!(
+            tailscale_candidates(|_| false),
+            vec!["tailscale".to_string()]
+        );
 
         // macOS app present → appended after the PATH name (PATH still first).
         assert_eq!(

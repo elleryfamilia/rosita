@@ -408,6 +408,14 @@ pub fn profile_detail(d: &ProfileDetail) -> Markup {
                 span class="prov-node" { (p.context_summary.as_str()) }
                 span class="prov-arrow" { (icon("arrow-right")) }
                 span class="prov-node" { (n) " " (if n == 1 { "capability" } else { "capabilities" }) }
+                @if p.caps.iter().any(|c| c.dynamic) {
+                    span class="prov-spacer" {}
+                    button type="button" class="btn btn-ghost btn-sm run-all"
+                        title="Run every script/provider in this profile and show the live output it adds"
+                        hx-post=(format!("/profiles/{e}/run")) hx-target="#profile-main" {
+                        (icon("play")) "Run all scripts"
+                    }
+                }
             }
             @if let Some(note) = &p.note { p class="note" { (note) } }
             @if p.caps.is_empty() {
@@ -434,19 +442,34 @@ fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
         .icon
         .as_deref()
         .unwrap_or(if c.dynamic { "bolt" } else { "box" });
+    // A dynamic cap that has produced real output (ran, or was cached) opens by
+    // default so the live context it adds is visible at a glance.
+    let has_output = c.dynamic && !c.pending && !c.skipped;
     html! {
-        details class=(format!("cap-detail {}", risk_class(c.risk))) {
+        details class=(format!("cap-detail {}", risk_class(c.risk))) open[has_output] {
             summary class="cap-detail-head" {
                 span class="cap-glyph" { (icon(glyph)) }
                 span class="cap-detail-title" { (c.title) }
                 span class="cap-detail-id" { (c.id) }
                 span class="cap-detail-spacer" {}
+                @if c.dynamic {
+                    button type="button" class="btn btn-ghost btn-xs cap-run"
+                        title="Run this script now and show its output"
+                        hx-post=(format!("/capabilities/{}/run?profile={}", enc(&c.id), enc(profile)))
+                        hx-target="#profile-main" {
+                        (icon("play")) (if c.pending { "Run" } else { "Re-run" })
+                    }
+                }
                 @if c.skipped { span class="tag off-tag" { (icon("shield")) "trust" } }
                 @else if c.dynamic { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
                 span class="cap-chev" { (icon("chevron-down")) }
             }
             div class="cap-detail-body" {
-                div class="markdown-body" { (render_markdown(&c.markdown)) }
+                @if has_output {
+                    pre class="cap-output" { (c.markdown) }
+                } @else {
+                    div class="markdown-body" { (render_markdown(&c.markdown)) }
+                }
                 @if c.editable {
                     div class="cap-detail-foot" {
                         button class="btn btn-ghost btn-sm"

@@ -360,6 +360,26 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .code-hl .t-b { color: #e0af68; }
 .code-hl .t-n { color: #ff9e64; }
 .code-hl .t-o { color: var(--muted); }
+
+/* Roomier capability editor — script editing needs space. */
+.modal:has(.cap-form) { width: min(900px, 95vw); }
+.code-edit-wrap textarea.code-edit { min-height: 17em; }
+
+/* Live output of a dynamic cap (script/provider) — verbatim, monospace, scrollable. */
+.cap-output {
+  margin: 14px 18px 8px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--fg);
+  white-space: pre; overflow: auto; max-height: 24em;
+}
+
+/* "Run" affordances on dynamic cards + the profile-level "Run all". */
+.btn-xs { padding: 2px 8px; font-size: 11px; gap: 4px; }
+.cap-run .icon, .run-all .icon { width: 12px; height: 12px; }
+.prov-spacer { flex: 1; }
+.run-all { color: var(--accent); margin: -2px 0; }
+.cap-detail-head .cap-run { color: var(--muted); opacity: .85; }
+.cap-detail-head:hover .cap-run { opacity: 1; }
 .script-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .exec-check { align-self: flex-start; }
 

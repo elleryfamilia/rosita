@@ -23,6 +23,7 @@ use crate::cli::StudioArgs;
 use crate::commands::Runtime;
 use crate::config::{self, Config};
 use crate::context;
+use crate::dynamic::DynamicMode;
 use crate::studio::assets;
 use crate::studio::edit::{Session, StagedOp};
 use crate::studio::state::{
@@ -174,6 +175,7 @@ fn handle_cap_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         }
         ("DELETE", "") => handle_cap_delete(state, &id),
         ("POST", "duplicate") => handle_cap_duplicate(state, &id),
+        ("POST", "run") => handle_cap_run(state, &id, &field(&req.query, "profile")),
         _ => Resp::not_found(),
     }
 }
@@ -189,6 +191,7 @@ fn handle_profile_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
             handle_profile_preview(state, &name, &agent)
         }
         ("POST", "disable") => handle_profile_disable(state, &name),
+        ("POST", "run") => handle_profile_run(state, &name),
         ("DELETE", "") => handle_profile_delete(state, &name),
         _ => Resp::not_found(),
     }
@@ -264,7 +267,7 @@ fn profiles_tab_resp(
             .find(|p| p.name == name)
             .map(|p| p.disabled)
             .unwrap_or(false);
-        let outcome = state::render_profile(&snap, &name, "")
+        let outcome = state::render_profile(&snap, &name, "", DynamicMode::ReadOnly)
             .unwrap_or_else(|e| empty_preview(&name, format!("preview error: {e}")));
         (name, outcome, disabled)
     });
@@ -288,8 +291,14 @@ fn profiles_tab_resp(
 }
 
 /// Render just the selected profile's detail (swapped into `#profile-main`),
-/// composed for `agent` (empty ⇒ the configured default).
-fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
+/// composed for `agent` (empty ⇒ the configured default). `mode` is ReadOnly for
+/// the normal preview, or Live when re-rendering after a "Run".
+fn handle_profile_detail(
+    state: &Arc<Mutex<StudioState>>,
+    name: &str,
+    agent: &str,
+    mode: DynamicMode,
+) -> Resp {
     let snap = state.lock().unwrap().snapshot();
     let disabled = state::staged_config(&snap)
         .ok()
@@ -300,7 +309,7 @@ fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &st
                 .map(|p| p.disabled)
         })
         .unwrap_or(false);
-    match state::render_profile(&snap, name, agent) {
+    match state::render_profile(&snap, name, agent, mode) {
         Ok(outcome) => Resp::html(views::profile_detail_fragment(&views::ProfileDetail {
             name,
             outcome: &outcome,
@@ -308,6 +317,26 @@ fn handle_profile_detail(state: &Arc<Mutex<StudioState>>, name: &str, agent: &st
         })),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
+}
+
+/// Run all of a profile's dynamic caps now (Live), then re-render its detail so
+/// every script/provider shows real output. Scripts run trust-gated and their
+/// (redacted) output is cached, so the read-only preview keeps showing it.
+fn handle_profile_run(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
+    handle_profile_detail(state, name, "", DynamicMode::Live)
+}
+
+/// Run one dynamic cap now (Live) so its output caches, then re-render the
+/// profile detail (ReadOnly) — only the run cap shows fresh output; the rest keep
+/// their placeholder until they're run too. `profile` scopes the render context.
+fn handle_cap_run(state: &Arc<Mutex<StudioState>>, id: &str, profile: &str) -> Resp {
+    {
+        let snap = state.lock().unwrap().snapshot();
+        if let Err(e) = state::run_capability(&snap, profile, id) {
+            return Resp::html(views::error_fragment(&e.to_string()));
+        }
+    }
+    handle_profile_detail(state, profile, "", DynamicMode::ReadOnly)
 }
 
 /// An empty preview outcome (used when a profile can't be composed/rendered).
@@ -501,11 +530,11 @@ fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 }
 
 fn handle_profile_select(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
-    handle_profile_detail(state, name, "")
+    handle_profile_detail(state, name, "", DynamicMode::ReadOnly)
 }
 
 fn handle_profile_preview(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
-    handle_profile_detail(state, name, agent)
+    handle_profile_detail(state, name, agent, DynamicMode::ReadOnly)
 }
 
 fn handle_profile_disable(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
@@ -593,7 +622,7 @@ fn handle_editor_preview(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let pairs = state::parse_pairs(&req.body);
     let draft = state::draft_profile_from_form(&pairs);
     let snap = state.lock().unwrap().snapshot();
-    match state::render_profile_config(&snap, &draft, "") {
+    match state::render_profile_config(&snap, &draft, "", DynamicMode::ReadOnly) {
         Ok(p) => Resp::html(views::editor_preview_fragment(&p)),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
@@ -673,15 +702,17 @@ fn profile_preview_or_empty(
     profile: &crate::profile::ProfileConfig,
     agent: &str,
 ) -> PreviewOutcome {
-    state::render_profile_config(snap, profile, agent).unwrap_or_else(|e| PreviewOutcome {
-        agent: agent.to_string(),
-        profile_label: profile.name.clone(),
-        binding: BindingState::None,
-        context_summary: String::new(),
-        cap_count: 0,
-        overlay: String::new(),
-        caps: Vec::new(),
-        note: Some(format!("preview error: {e}")),
+    state::render_profile_config(snap, profile, agent, DynamicMode::ReadOnly).unwrap_or_else(|e| {
+        PreviewOutcome {
+            agent: agent.to_string(),
+            profile_label: profile.name.clone(),
+            binding: BindingState::None,
+            context_summary: String::new(),
+            cap_count: 0,
+            overlay: String::new(),
+            caps: Vec::new(),
+            note: Some(format!("preview error: {e}")),
+        }
     })
 }
 
@@ -1403,6 +1434,63 @@ mod tests {
         ));
         assert!(body.contains("cap-detail")); // the card is present
         assert!(body.contains("runs at render")); // with the placeholder body
+        assert!(body.contains("Run")); // and a Run affordance
+    }
+
+    #[test]
+    fn run_all_executes_dynamic_caps_live() {
+        // The `host` provider is always trusted, so a Live run produces output.
+        let cfg = "[[capabilities]]\nid = \"host\"\ndescription = \"Host\"\nprovider = \"host\"\n\
+             \n[[profiles]]\nname = \"m\"\ntargets = [\"rust\"]\ncapabilities = [\"host\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // Read-only preview: placeholder, no real output.
+        let before = body_of(route(
+            &st,
+            &req("GET", "/profiles/m/select", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(before.contains("runs at render"));
+
+        // Run all → live render executes the provider and shows verbatim output.
+        let after = body_of(route(
+            &st,
+            &req("POST", "/profiles/m/run", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        assert!(!after.contains("runs at render"));
+        assert!(after.contains("cap-output")); // rendered as preformatted output
+
+        // Run is state-changing → CSRF-guarded (no Origin → rejected).
+        assert_eq!(
+            route(
+                &st,
+                &req("POST", "/profiles/m/run", "", &[HOST, COOKIE], "")
+            )
+            .status,
+            403
+        );
+    }
+
+    #[test]
+    fn per_card_run_executes_one_capability() {
+        let cfg = "[[capabilities]]\nid = \"host\"\ndescription = \"Host\"\nprovider = \"host\"\n\
+             \n[[profiles]]\nname = \"m\"\ntargets = [\"rust\"]\ncapabilities = [\"host\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        // Running one cap caches its output; the re-rendered detail shows it.
+        let after = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/capabilities/host/run",
+                "profile=m",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(!after.contains("runs at render"));
+        assert!(after.contains("cap-output"));
     }
 
     #[test]

@@ -139,6 +139,9 @@ pub struct PreviewCap {
     /// True when this id is an editable library capability (not a synthetic
     /// inline section) — gates the card's "Edit capability" affordance.
     pub editable: bool,
+    /// A dynamic cap that hasn't produced output in this (read-only) preview —
+    /// the body is a "runs at render" placeholder, and a "Run" affordance shows.
+    pub pending: bool,
 }
 
 /// One capability row for the library view.
@@ -236,12 +239,14 @@ pub fn select_for(cfg: &Config, ctx: &Context) -> Selection {
     profile::select(ctx, &cfg.profiles, binding.as_ref())
 }
 
-/// Render a specific profile (by name) composed for `agent`, in ReadOnly mode.
-/// Drives the Profiles-tab preview pane.
+/// Render a specific profile (by name) composed for `agent`. `mode` is
+/// [`DynamicMode::ReadOnly`] for the normal preview (dynamic caps don't execute)
+/// or [`DynamicMode::Live`] to run scripts/providers now (the "Run" affordance).
 pub fn render_profile(
     snap: &Snapshot,
     profile_name: &str,
     agent: &str,
+    mode: DynamicMode,
 ) -> crate::Result<PreviewOutcome> {
     let cfg = staged_config(snap)?;
     let profile = cfg
@@ -250,16 +255,18 @@ pub fn render_profile(
         .find(|p| p.name == profile_name)
         .ok_or_else(|| anyhow::anyhow!("unknown profile '{profile_name}'"))?
         .clone();
-    render_profile_config(snap, &profile, agent)
+    render_profile_config(snap, &profile, agent, mode)
 }
 
 /// Render an arbitrary (possibly unsaved/draft) profile composed for `agent`.
 /// The context is synthesized from the profile's own targets so its capabilities
 /// gate as intended. Used by the Profiles-tab preview and the editor's live draft.
+/// `mode` gates dynamic execution (ReadOnly = placeholder cards; Live = run now).
 pub fn render_profile_config(
     snap: &Snapshot,
     profile: &ProfileConfig,
     agent: &str,
+    mode: DynamicMode,
 ) -> crate::Result<PreviewOutcome> {
     let cfg = staged_config(snap)?;
     let ctx = context_for_profile(&snap.base_context, profile);
@@ -281,7 +288,7 @@ pub fn render_profile_config(
         composition: &composition,
         config: &cfg,
         generated_at: now_rfc3339(),
-        dynamic: DynamicMode::ReadOnly,
+        dynamic: mode,
     })?;
     let cap_count = composition
         .capabilities
@@ -295,8 +302,11 @@ pub fn render_profile_config(
     // card. Such caps get a "runs at render" placeholder so the preview still
     // lists — and can open/edit — them. Each cap's icon/editability is looked up
     // from the staged library (inline/synthetic caps fall back to a default).
-    let rendered: std::collections::HashMap<&str, _> =
-        out.capabilities.iter().map(|c| (c.id.as_str(), c)).collect();
+    let rendered: std::collections::HashMap<&str, _> = out
+        .capabilities
+        .iter()
+        .map(|c| (c.id.as_str(), c))
+        .collect();
     let caps: Vec<PreviewCap> = composition
         .capabilities
         .iter()
@@ -316,6 +326,7 @@ pub fn render_profile_config(
                     markdown: c.body.clone(),
                     dynamic: c.dynamic,
                     skipped: c.skipped,
+                    pending: false,
                 })
             } else if cap.is_dynamic() {
                 Some(PreviewCap {
@@ -327,6 +338,7 @@ pub fn render_profile_config(
                     markdown: "_Dynamic — runs at render; no preview output yet._".to_string(),
                     dynamic: true,
                     skipped: false,
+                    pending: true,
                 })
             } else {
                 None // static cap that rendered nothing — omit, as the overlay does
@@ -349,6 +361,35 @@ pub fn render_profile_config(
             .disabled
             .then(|| "This profile is disabled — it won't be selected in real runs.".to_string()),
     })
+}
+
+/// Execute one dynamic capability **now** (Live), in `profile_name`'s context, so
+/// its (redacted) output lands in the on-disk cache. A subsequent ReadOnly
+/// preview then surfaces that cached output. This is the per-card "Run" action;
+/// trust still gates execution (a repo-authored command needs `rosita allow`, in
+/// which case the cache stays empty and the re-render shows the trust note).
+/// Resolving a non-dynamic id is a harmless no-op.
+pub fn run_capability(snap: &Snapshot, profile_name: &str, cap_id: &str) -> crate::Result<()> {
+    let cfg = staged_config(snap)?;
+    let cap = cfg
+        .capabilities
+        .iter()
+        .find(|c| c.id == cap_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown capability '{cap_id}'"))?;
+    let ctx = match cfg.profiles.iter().find(|p| p.name == profile_name) {
+        Some(p) => context_for_profile(&snap.base_context, p),
+        None => snap.base_context.clone(),
+    };
+    // Live resolve runs the provider/command and writes the cache as a side
+    // effect; the returned value (or trust-skip) is surfaced by the re-render.
+    let _ = crate::dynamic::resolve(
+        cap,
+        &ctx,
+        &ctx.repo_base,
+        DynamicMode::Live,
+        chrono::Utc::now(),
+    );
+    Ok(())
 }
 
 /// Synthesize a context from a profile's targets so its capabilities gate as
