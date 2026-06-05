@@ -380,6 +380,23 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .run-all { color: var(--accent); margin: -2px 0; }
 .cap-detail-head .cap-run { color: var(--muted); opacity: .85; }
 .cap-detail-head:hover .cap-run { opacity: 1; }
+
+/* Centered "Run" prompt shown in a not-yet-run dynamic card (replaced by the
+   script's output once run). */
+.cap-run-prompt { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 16px; text-align: center; }
+.cap-run-center { min-width: 132px; }
+.cap-run-prompt .run-hint { margin: 0; max-width: 34rem; font-size: 11.5px; line-height: 1.5; }
+
+/* Indeterminate progress bar inside a Run button while its request is in flight. */
+@keyframes hx-progress { 0% { left: -35%; } 100% { left: 100%; } }
+.cap-run.htmx-request, .run-all.htmx-request, .cap-run-center.htmx-request {
+  position: relative; overflow: hidden; pointer-events: none;
+}
+.cap-run.htmx-request::after, .run-all.htmx-request::after, .cap-run-center.htmx-request::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 35%;
+  background: currentColor; border-radius: 2px; opacity: .85;
+  animation: hx-progress .9s linear infinite;
+}
 .script-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .exec-check { align-self: flex-start; }
 

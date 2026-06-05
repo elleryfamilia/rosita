@@ -1420,10 +1420,10 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_cap_without_cache_shows_placeholder_card() {
+    fn dynamic_cap_without_cache_shows_run_prompt() {
         // A provider cap doesn't run in the read-only preview; with nothing cached
-        // the overlay drops its section, but the profile detail keeps a "runs at
-        // render" placeholder card so it's still listed (and openable).
+        // the overlay drops its section, but the profile detail keeps the card and
+        // offers a centered "Run" prompt (so it's still listed, openable, runnable).
         let cfg = "[[capabilities]]\nid = \"host\"\ndescription = \"Host\"\nprovider = \"host\"\n\
              \n[[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\ncapabilities = [\"host\"]\n";
         let d = rust_repo();
@@ -1433,8 +1433,8 @@ mod tests {
             &req("GET", "/profiles/rust/select", "", &[HOST, COOKIE], ""),
         ));
         assert!(body.contains("cap-detail")); // the card is present
-        assert!(body.contains("runs at render")); // with the placeholder body
-        assert!(body.contains("Run")); // and a Run affordance
+        assert!(body.contains("cap-run-prompt") && body.contains("Run script")); // centered prompt
+        assert!(body.contains("/capabilities/host/run?profile=rust")); // wired to run
     }
 
     #[test]
@@ -1445,12 +1445,12 @@ mod tests {
         let d = rust_repo();
         let st = state_for(d.path(), Some(cfg));
 
-        // Read-only preview: placeholder, no real output.
+        // Read-only preview: a run prompt, no real output yet.
         let before = body_of(route(
             &st,
             &req("GET", "/profiles/m/select", "", &[HOST, COOKIE], ""),
         ));
-        assert!(before.contains("runs at render"));
+        assert!(before.contains("cap-run-prompt") && !before.contains("cap-output"));
 
         // Run all → live render executes the provider and shows verbatim output.
         let after = body_of(route(

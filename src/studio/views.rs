@@ -443,10 +443,13 @@ fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
         .as_deref()
         .unwrap_or(if c.dynamic { "bolt" } else { "box" });
     // A dynamic cap that has produced real output (ran, or was cached) opens by
-    // default so the live context it adds is visible at a glance.
+    // default so the live context is visible; a not-yet-run one also opens, to
+    // show the centered "Run" prompt instead of a bare placeholder line.
     let has_output = c.dynamic && !c.pending && !c.skipped;
+    let prompt = c.dynamic && c.pending;
+    let run_url = format!("/capabilities/{}/run?profile={}", enc(&c.id), enc(profile));
     html! {
-        details class=(format!("cap-detail {}", risk_class(c.risk))) open[has_output] {
+        details class=(format!("cap-detail {}", risk_class(c.risk))) open[has_output || prompt] {
             summary class="cap-detail-head" {
                 span class="cap-glyph" { (icon(glyph)) }
                 span class="cap-detail-title" { (c.title) }
@@ -455,7 +458,7 @@ fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
                 @if c.dynamic {
                     button type="button" class="btn btn-ghost btn-xs cap-run"
                         title="Run this script now and show its output"
-                        hx-post=(format!("/capabilities/{}/run?profile={}", enc(&c.id), enc(profile)))
+                        hx-post=(run_url.clone())
                         hx-target="#profile-main" {
                         (icon("play")) (if c.pending { "Run" } else { "Re-run" })
                     }
@@ -467,6 +470,16 @@ fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
             div class="cap-detail-body" {
                 @if has_output {
                     pre class="cap-output" { (c.markdown) }
+                } @else if prompt {
+                    // Centered run prompt — clicking it (or the corner button)
+                    // re-renders this pane with the script's live output in place.
+                    div class="cap-run-prompt" {
+                        button type="button" class="btn btn-primary cap-run-center"
+                            hx-post=(run_url) hx-target="#profile-main" {
+                            (icon("play")) "Run script"
+                        }
+                        p class="run-hint muted" { "Runs this script and shows the live context it adds — output stays cached in the preview." }
+                    }
                 } @else {
                     div class="markdown-body" { (render_markdown(&c.markdown)) }
                 }

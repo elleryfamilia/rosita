@@ -62,10 +62,15 @@
         opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
         opts.body = form ? serialize(form) : "";
       }
+      // Mark the trigger in-flight (htmx convention) so it can show progress;
+      // on success the target is replaced (so the class goes with it), and the
+      // finally cleans up on error or when the element survives the swap.
+      el.classList.add("htmx-request");
       fetch(url, opts)
         .then(function (r) { return r.text(); })
         .then(function (t) { swap(target, t); })
-        .catch(function () { /* leave the last good fragment in place */ });
+        .catch(function () { /* leave the last good fragment in place */ })
+        .finally(function () { el.classList.remove("htmx-request"); });
     }
 
     function fire(ev) {
