@@ -394,6 +394,36 @@ fn doctor_leak_lint_flags_public_but_not_local() {
 }
 
 #[test]
+fn doctor_flags_repo_declared_caps_and_profiles() {
+    // Capabilities and profiles are global-only; a repo that declares them is
+    // ignored at render time, so doctor surfaces the otherwise-invisible mistake.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\nid = \"x\"\nguidance = \"hi\"\n\
+         \n[[profiles]]\nname = \"p\"\ntargets = [\"rust\"]\ncapabilities = [\"x\"]\n",
+    );
+
+    fx.cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("global-only"))
+        .stdout(predicate::str::contains("capabilities and profiles"));
+
+    // A clean repo (no repo-declared caps/profiles) is not flagged.
+    let clean = Fixture::new();
+    clean.rust_project();
+    clean
+        .cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("global-only").not());
+}
+
+#[test]
 fn run_dry_run_reports_would_exec_without_launching() {
     let fx = Fixture::new();
     fx.rust_project();

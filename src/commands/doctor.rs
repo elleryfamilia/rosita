@@ -84,6 +84,8 @@ pub fn run(rt: &Runtime) -> crate::Result<()> {
             c.line(Status::Ok, format!("loaded config: {}", s.display()));
         }
     }
+    // Capabilities/profiles authored in a repo layer (global-only mistake).
+    check_repo_global_only(&mut c, &prep.repo_base);
     // Allowlist/denylist consistency.
     check_env_policy(&mut c, &prep.config);
     // Private-data leak lint over public config layers.
@@ -231,6 +233,44 @@ fn check_public_leaks(c: &mut Checks, prep: &super::Prepared) {
     }
     if scanned > 0 && flagged == 0 {
         c.line(Status::Ok, "public config has no private-looking literals");
+    }
+}
+
+/// Capabilities and profiles are global-only. A repo `config.toml`/`local.toml`
+/// that declares them is silently ignored by the loader (so the mistake is
+/// invisible at render time) — surface it here. Scans the raw file because the
+/// stripped tables never reach the merged config.
+fn check_repo_global_only(c: &mut Checks, repo_base: &Path) {
+    for (label, path) in [
+        ("config.toml", config::repo_config_path(repo_base)),
+        ("local.toml", config::repo_local_path(repo_base)),
+    ] {
+        if let Some(what) = repo_declares_caps_or_profiles(&path) {
+            c.line(
+                Status::Warn,
+                format!(
+                    ".rosita/{label} declares {what} — these are global-only and are ignored here; move them to ~/.config/rosita/config.toml"
+                ),
+            );
+        }
+    }
+}
+
+/// What global-only tables (if any) a repo TOML file declares. `None` when the
+/// file is absent, unparseable, or declares neither.
+fn repo_declares_caps_or_profiles(path: &Path) -> Option<&'static str> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let val: toml::Value = toml::from_str(&text).ok()?;
+    let has = |k: &str| {
+        val.get(k)
+            .and_then(|v| v.as_array())
+            .is_some_and(|a| !a.is_empty())
+    };
+    match (has("capabilities"), has("profiles")) {
+        (true, true) => Some("capabilities and profiles"),
+        (true, false) => Some("capabilities"),
+        (false, true) => Some("profiles"),
+        (false, false) => None,
     }
 }
 
