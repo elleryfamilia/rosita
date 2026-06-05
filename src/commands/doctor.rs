@@ -61,9 +61,14 @@ pub fn run(rt: &Runtime) -> crate::Result<()> {
             "git not found on PATH (git detection disabled)",
         ),
     }
-    // Config + context.
+    // Config + context. Suppress compose's `warn_user!` lines here — doctor
+    // reports the same conditions (dangling refs, etc.) through its own checks,
+    // so the raw stderr warnings would just duplicate them.
     println!("\nConfiguration");
-    let prep = match prepare(rt) {
+    crate::report::set_quiet_warnings(true);
+    let prep = prepare(rt);
+    crate::report::set_quiet_warnings(false);
+    let prep = match prep {
         Ok(p) => p,
         Err(e) => {
             c.line(

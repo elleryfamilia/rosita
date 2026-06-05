@@ -456,7 +456,10 @@ fn doctor_flags_a_profile_referencing_an_unknown_capability() {
         .assert()
         .success()
         .stdout(predicate::str::contains("unknown capability 'gone'"))
-        .stdout(predicate::str::contains("unknown capability 'present'").not());
+        .stdout(predicate::str::contains("unknown capability 'present'").not())
+        // doctor reports the dangling ref through its own check, so the raw
+        // compose `warning:` line is suppressed (no duplicate).
+        .stderr(predicate::str::contains("warning: unknown capability").not());
 }
 
 #[test]
