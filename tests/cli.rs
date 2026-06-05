@@ -935,6 +935,32 @@ fn binding_in_local_toml_selects_profile_without_prompt() {
 }
 
 #[test]
+fn stale_binding_targets_hash_redetects() {
+    // A remembered binding whose `targets_hash` no longer matches the profile's
+    // targets (the profile was retargeted since binding) is treated as stale:
+    // the name is ignored and selection re-detects. With two profiles matching
+    // that means the ambiguity warning + no profile — not a silent stale pick.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.git_init();
+    fx.author(TWO_RUST_PROFILES);
+    fx.write(
+        ".rosita/local.toml",
+        "[binding]\nprofile = \"rust-b\"\ntargets_hash = \"sha256:stale\"\n",
+    );
+
+    fx.cmd()
+        .args(["render", "--agent", "claude"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("profiles match this project"))
+        .stdout(predicate::str::contains("profile none"));
+
+    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(!overlay.contains("BBB guidance"));
+}
+
+#[test]
 fn run_with_ambiguous_profiles_non_tty_falls_back_without_blocking() {
     // The interactive `run` chooser must never block when there's no terminal
     // (CI/piped): it warns and applies no profile instead of reading stdin.

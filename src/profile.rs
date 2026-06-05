@@ -216,11 +216,23 @@ pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Bindin
     if let Some(b) = binding {
         match b {
             Binding::None => return Selection::None,
-            Binding::Profile(name) => {
-                // A disabled bound profile is inert — fall through to re-selection.
+            Binding::Profile { name, targets_hash } => {
+                // Honor the bound profile only while it still exists, is enabled,
+                // and hasn't been retargeted since it was bound. A stale
+                // `targets_hash` (the profile's targets changed) ⇒ fall through
+                // and re-detect; a `None` fingerprint is trusted by name (a
+                // hand-written or pre-hash binding, incl. deliberate manual binds
+                // and empty-targets profiles). A disabled bound profile is inert.
                 if let Some(p) = profiles.iter().find(|p| &p.name == name && !p.disabled) {
-                    return Selection::Use(p.clone());
+                    let fresh = match targets_hash {
+                        Some(h) => h == &crate::hash::context_hash(&p.targets),
+                        None => true,
+                    };
+                    if fresh {
+                        return Selection::Use(p.clone());
+                    }
                 }
+                // Missing, disabled, or stale → fall through to fresh detection.
             }
         }
     }
@@ -581,7 +593,7 @@ mod tests {
         ];
         // A named binding resolves straight to that profile (no prompt) even
         // though 2 match.
-        match select(&ctx, &profs, Some(&Binding::Profile("rust-browser".into()))) {
+        match select(&ctx, &profs, Some(&Binding::profile("rust-browser"))) {
             Selection::Use(p) => assert_eq!(p.name, "rust-browser"),
             other => panic!("expected Use, got {other:?}"),
         }
@@ -598,10 +610,44 @@ mod tests {
         ctx.stacks = vec!["rust".into()];
         let profs = [prof("rust", &["rust"], &["x"])];
         // Bound to a now-deleted profile → ignore the binding, re-select (1 match).
-        match select(&ctx, &profs, Some(&Binding::Profile("gone".into()))) {
+        match select(&ctx, &profs, Some(&Binding::profile("gone"))) {
             Selection::Use(p) => assert_eq!(p.name, "rust"),
             other => panic!("expected Use, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn select_redetects_when_bound_profile_is_retargeted() {
+        let mut ctx = sample_context();
+        ctx.stacks = vec!["rust".into()];
+        let profs = [
+            prof("kept", &["rust"], &["x"]),
+            prof("moved", &["rust"], &["y"]),
+        ];
+        let fresh = crate::hash::context_hash(&vec!["rust".to_string()]);
+        let stale = crate::hash::context_hash(&vec!["go".to_string()]);
+
+        // Fresh fingerprint (matches the profile's current targets) → honored,
+        // even though another profile also matches.
+        let bound_fresh = Binding::Profile {
+            name: "moved".into(),
+            targets_hash: Some(fresh),
+        };
+        match select(&ctx, &profs, Some(&bound_fresh)) {
+            Selection::Use(p) => assert_eq!(p.name, "moved"),
+            other => panic!("expected Use(moved), got {other:?}"),
+        }
+
+        // Stale fingerprint (the profile was retargeted since binding) → the
+        // binding is ignored and selection re-detects → 2 match → Ambiguous.
+        let bound_stale = Binding::Profile {
+            name: "moved".into(),
+            targets_hash: Some(stale),
+        };
+        assert!(matches!(
+            select(&ctx, &profs, Some(&bound_stale)),
+            Selection::Ambiguous(_)
+        ));
     }
 
     // --- within-profile composition ----------------------------------------

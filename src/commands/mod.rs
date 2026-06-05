@@ -143,7 +143,10 @@ fn resolve_selection(
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("chooser returned unknown profile '{name}'"))?;
             if !rt.dry_run {
-                binding::write(context, &Binding::Profile(name))
+                // Fingerprint the chosen profile's targets so the binding goes
+                // stale (and re-detects) if the profile is later retargeted.
+                let targets_hash = Some(crate::hash::context_hash(&chosen.targets));
+                binding::write(context, &Binding::Profile { name, targets_hash })
                     .context("remembering profile choice")?;
             }
             Ok(Selection::Use(chosen))

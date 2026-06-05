@@ -26,10 +26,28 @@ use crate::writer::atomic_write;
 /// A remembered profile choice for a project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
-    /// Use this profile by name.
-    Profile(String),
+    /// Use this profile by name. `targets_hash` fingerprints the profile's
+    /// `targets` at the moment it was bound. When it is present and the live
+    /// profile's targets hash differs, the profile was *retargeted* since you
+    /// chose it — the binding is stale and selection re-detects. A `None`
+    /// fingerprint (a hand-written or pre-hash binding) is trusted by name, so
+    /// a deliberate manual bind keeps working.
+    Profile {
+        name: String,
+        targets_hash: Option<String>,
+    },
     /// Explicitly apply no profile here (a remembered opt-out).
     None,
+}
+
+impl Binding {
+    /// A name-only profile binding (no freshness fingerprint).
+    pub fn profile(name: impl Into<String>) -> Self {
+        Binding::Profile {
+            name: name.into(),
+            targets_hash: None,
+        }
+    }
 }
 
 /// The on-disk shape of a binding: the `[binding]` table in repo `local.toml`,
@@ -42,6 +60,11 @@ pub struct RawBinding {
     /// The chosen profile name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    /// Fingerprint of the bound profile's `targets` at bind time. Absent for
+    /// hand-written bindings (trusted by name). Used to detect a retargeted
+    /// profile and re-run selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub targets_hash: Option<String>,
     /// Explicit opt-out ("no profile here").
     #[serde(default, skip_serializing_if = "is_false")]
     pub none: bool,
@@ -57,18 +80,23 @@ impl RawBinding {
         if self.none {
             Some(Binding::None)
         } else {
-            self.profile.clone().map(Binding::Profile)
+            self.profile.clone().map(|name| Binding::Profile {
+                name,
+                targets_hash: self.targets_hash.clone(),
+            })
         }
     }
 
     fn from_binding(b: &Binding) -> Self {
         match b {
-            Binding::Profile(p) => RawBinding {
-                profile: Some(p.clone()),
+            Binding::Profile { name, targets_hash } => RawBinding {
+                profile: Some(name.clone()),
+                targets_hash: targets_hash.clone(),
                 none: false,
             },
             Binding::None => RawBinding {
                 profile: None,
+                targets_hash: None,
                 none: true,
             },
         }
@@ -124,7 +152,12 @@ pub fn write_repo(repo_base: &Path, b: &Binding) -> Result<()> {
     // a stale key behind.
     let mut table = toml_edit::Table::new();
     match b {
-        Binding::Profile(p) => table["profile"] = toml_edit::value(p.as_str()),
+        Binding::Profile { name, targets_hash } => {
+            table["profile"] = toml_edit::value(name.as_str());
+            if let Some(h) = targets_hash {
+                table["targets_hash"] = toml_edit::value(h.as_str());
+            }
+        }
         Binding::None => table["none"] = toml_edit::value(true),
     }
     doc["binding"] = toml_edit::Item::Table(table);
@@ -207,10 +240,10 @@ mod tests {
         assert_eq!(read_repo(repo.path()), None);
 
         // Write a profile binding; the unrelated content + comment survive.
-        write_repo(repo.path(), &Binding::Profile("rust — browser".into())).unwrap();
+        write_repo(repo.path(), &Binding::profile("rust — browser")).unwrap();
         assert_eq!(
             read_repo(repo.path()),
-            Some(Binding::Profile("rust — browser".into()))
+            Some(Binding::profile("rust — browser"))
         );
         let text = std::fs::read_to_string(config::repo_local_path(repo.path())).unwrap();
         assert!(text.contains("# private notes"));
@@ -231,15 +264,35 @@ mod tests {
         let b = Path::new("/work/proj-b");
 
         assert_eq!(read_global_at(&store, a), None);
-        write_global_at(&store, a, &Binding::Profile("machine".into())).unwrap();
+        write_global_at(&store, a, &Binding::profile("machine")).unwrap();
         write_global_at(&store, b, &Binding::None).unwrap();
 
-        assert_eq!(
-            read_global_at(&store, a),
-            Some(Binding::Profile("machine".into()))
-        );
+        assert_eq!(read_global_at(&store, a), Some(Binding::profile("machine")));
         assert_eq!(read_global_at(&store, b), Some(Binding::None));
         // Independent paths don't bleed into each other.
         assert_eq!(read_global_at(&store, Path::new("/elsewhere")), None);
+    }
+
+    #[test]
+    fn targets_hash_round_trips_through_repo_and_global() {
+        let bound = Binding::Profile {
+            name: "rust".into(),
+            targets_hash: Some("sha256:abc123".into()),
+        };
+
+        // Repo `local.toml` (toml_edit path).
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(config::repo_dir(repo.path())).unwrap();
+        write_repo(repo.path(), &bound).unwrap();
+        assert_eq!(read_repo(repo.path()), Some(bound.clone()));
+        let text = std::fs::read_to_string(config::repo_local_path(repo.path())).unwrap();
+        assert!(text.contains("targets_hash"));
+
+        // Global path-keyed store (plain toml serializer).
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("bindings.toml");
+        let p = Path::new("/work/proj");
+        write_global_at(&store, p, &bound).unwrap();
+        assert_eq!(read_global_at(&store, p), Some(bound));
     }
 }
