@@ -107,6 +107,7 @@ impl Config {
         let mut raw = RawConfig::default();
         for (layer, path) in layers {
             if let Some(mut parsed) = RawConfig::from_path(&path)? {
+                strip_global_only(layer, &mut parsed);
                 for cap in &mut parsed.capabilities {
                     cap.origin = layer;
                 }
@@ -141,6 +142,10 @@ impl Config {
         for (layer, path, text) in layers {
             let mut parsed: RawConfig = toml::from_str(&text)
                 .with_context(|| format!("parsing staged config for {}", path.display()))?;
+            // NOTE: global-only stripping is intentionally NOT applied here yet —
+            // studio still authors into the repo layer; it moves to global in the
+            // same change that gates this path (so staged repo edits never vanish
+            // mid-preview). See `strip_global_only` and the studio routing slice.
             for cap in &mut parsed.capabilities {
                 cap.origin = layer;
             }
@@ -148,6 +153,21 @@ impl Config {
             sources.push(path);
         }
         Ok(raw.finalize(sources))
+    }
+}
+
+/// Enforce the global-only model: capabilities and profiles are honored only
+/// from the layers allowed to contribute them (caps: built-in/global/global-local;
+/// profiles: built-in/global). A repo layer that declares either is silently
+/// dropped here so it can never select or render — `rosita doctor` flags the
+/// raw file so the mistake is visible. Other repo-layer content (`capability_params`,
+/// `host_classes`, `[binding]`, `defaults`, `env`, `agents`) is untouched.
+fn strip_global_only(layer: crate::capability::Layer, parsed: &mut RawConfig) {
+    if !layer.contributes_capabilities() {
+        parsed.capabilities.clear();
+    }
+    if !layer.contributes_profiles() {
+        parsed.profiles.clear();
     }
 }
 
@@ -638,4 +658,67 @@ mod tests {
         assert!(c.sources[0].ends_with("config.toml"));
         assert!(c.sources[1].ends_with("local.toml"));
     }
+
+    // --- global-only enforcement (strip_global_only) -------------------------
+
+    const CAP_AND_PROFILE: &str = r#"
+        [[capabilities]]
+        id = "x"
+        guidance = "hello"
+
+        [[profiles]]
+        name = "p"
+        targets = ["rust"]
+        capabilities = ["x"]
+    "#;
+
+    #[test]
+    fn repo_layer_caps_and_profiles_are_dropped_by_loader() {
+        // A repo `config.toml` may *declare* caps/profiles (the strict parser
+        // accepts the tables), but the loader honors neither — they are global.
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
+        std::fs::write(repo_config_path(repo.path()), CAP_AND_PROFILE).unwrap();
+
+        let c = Config::load_from(None, repo.path()).unwrap();
+        assert!(c.capabilities.is_empty(), "repo caps must be dropped");
+        assert!(c.profiles.is_empty(), "repo profiles must be dropped");
+    }
+
+    #[test]
+    fn global_config_contributes_caps_and_profiles() {
+        let global = tempfile::tempdir().unwrap();
+        let gcfg = global.path().join("config.toml");
+        std::fs::write(&gcfg, CAP_AND_PROFILE).unwrap();
+        let repo = tempfile::tempdir().unwrap();
+
+        let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
+        assert!(c.capabilities.iter().any(|x| x.id == "x"));
+        assert!(c.profiles.iter().any(|p| p.name == "p"));
+    }
+
+    #[test]
+    fn global_local_contributes_caps_but_not_profiles() {
+        // The private global layer may hold capabilities (real hostnames etc.)
+        // but never profiles — profiles are public-global only.
+        let global = tempfile::tempdir().unwrap();
+        let gcfg = global.path().join("config.toml");
+        std::fs::write(&gcfg, "").unwrap();
+        std::fs::write(global.path().join("local.toml"), CAP_AND_PROFILE).unwrap();
+        let repo = tempfile::tempdir().unwrap();
+
+        let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
+        assert!(
+            c.capabilities.iter().any(|x| x.id == "x"),
+            "global local.toml caps must be kept"
+        );
+        assert!(
+            c.profiles.is_empty(),
+            "global local.toml profiles must be dropped"
+        );
+    }
+
+    // NOTE: the studio path (`from_layer_strs`) is gated in the studio-routing
+    // slice, together with moving studio authoring to the global layer — see
+    // `from_layer_strs` for why the gate is deferred there.
 }

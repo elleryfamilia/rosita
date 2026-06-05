@@ -67,12 +67,11 @@ impl Fixture {
         self.write("src/main.rs", "fn main() { println!(\"hi\"); }\n");
     }
 
-    /// Author a minimal repo config: a `rust-conventions` capability plus a
-    /// `rust` profile that targets the rust stack and composes it. Nothing is
-    /// built in anymore, so tests that expect an active profile write one.
+    /// Author a minimal library: a `rust-conventions` capability plus a `rust`
+    /// profile that targets the rust stack and composes it. Capabilities and
+    /// profiles are global-only, so this writes the *global* config.
     fn rust_profile(&self) {
-        self.write(
-            ".rosita/config.toml",
+        self.author(
             "[[capabilities]]\n\
              id = \"rust-conventions\"\n\
              description = \"Rust conventions\"\n\
@@ -86,12 +85,23 @@ impl Fixture {
         );
     }
 
+    /// Author global capabilities/profiles — the only layer that honors them.
+    /// (A repo layer declaring caps/profiles is dropped by the loader.)
+    fn author(&self, content: &str) {
+        self.write_global("config.toml", content);
+    }
+
     /// Write a file into the isolated global config dir (the one `cmd()` points
     /// `ROSITA_CONFIG_DIR` at), e.g. a trusted global `config.toml`.
     fn write_global(&self, rel: &str, content: &str) {
         let p = self.global.path().join("empty").join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, content).unwrap();
+    }
+
+    /// Read a file back from the isolated global config dir.
+    fn read_global(&self, rel: &str) -> String {
+        fs::read_to_string(self.global.path().join("empty").join(rel)).unwrap()
     }
 }
 
@@ -314,8 +324,7 @@ fn local_toml_supplies_private_params_to_capabilities() {
     // overlay carries the private values; the public config never does.
     let fx = Fixture::new();
     fx.rust_project();
-    fx.write(
-        ".rosita/config.toml",
+    fx.author(
         "[[capabilities]]\n\
          id = \"deploy\"\n\
          description = \"Deploy target\"\n\
@@ -326,6 +335,8 @@ fn local_toml_supplies_private_params_to_capabilities() {
          targets = [\"rust\"]\n\
          capabilities = [\"deploy\"]\n",
     );
+    // Private params still come from the repo's local.toml (merged by id onto
+    // the global capability).
     fx.write(
         ".rosita/local.toml",
         "[capability_params.deploy]\nhost = \"box.private.example\"\nuser = \"deployer\"\n",
@@ -338,9 +349,9 @@ fn local_toml_supplies_private_params_to_capabilities() {
 
     let overlay = fx.read(".rosita/generated/claude.md");
     assert!(overlay.contains("Deploy as deployer@box.private.example."));
-    // The shareable config never contained the private host.
+    // The shareable (global) config never contained the private host.
     assert!(!fx
-        .read(".rosita/config.toml")
+        .read_global("config.toml")
         .contains("box.private.example"));
 }
 
@@ -568,8 +579,7 @@ fn profile_composes_its_capability_set_with_no_baseline() {
     // as its own section. There is no always-on baseline layered underneath.
     let fx = Fixture::new();
     fx.rust_project();
-    fx.write(
-        ".rosita/config.toml",
+    fx.author(
         "[[capabilities]]\n\
          id = \"rust-conventions\"\n\
          description = \"Rust conventions\"\n\
@@ -613,8 +623,7 @@ fn user_capability_via_config_is_composed() {
     let fx = Fixture::new();
     fx.rust_project();
     // Reusable capabilities plus a profile that composes them — no code change.
-    fx.write(
-        ".rosita/config.toml",
+    fx.author(
         "[[capabilities]]\n\
          id = \"house-style\"\n\
          description = \"House style\"\n\
@@ -683,8 +692,7 @@ fn dynamic_provider_capability_renders_live_output() {
     fx.rust_project();
     // A capability backed by the built-in `host` provider (always available,
     // no exec, no trust needed).
-    fx.write(
-        ".rosita/config.toml",
+    fx.author(
         "[[capabilities]]\n\
          id = \"machine\"\n\
          description = \"Machine\"\n\
@@ -733,54 +741,33 @@ fn global_layer_command_runs_without_allow() {
 }
 
 #[test]
-fn repo_command_capability_is_trust_gated() {
+fn repo_command_capability_is_ignored() {
+    // Capabilities are global-only: a `command` capability authored in a repo
+    // layer is dropped by the loader. It never renders, and there is nothing to
+    // trust — the per-repo command-trust gate is therefore dormant. (A command
+    // authored in the GLOBAL config still runs; see `global_layer_command_runs`.)
     let fx = Fixture::new();
     fx.rust_project();
-    let cfg = "[[capabilities]]\n\
+    fx.write(
+        ".rosita/config.toml",
+        "[[capabilities]]\n\
          id = \"greet\"\n\
          command = \"echo hello-rosita\"\n\
          \n\
          [[profiles]]\n\
          name = \"dyn\"\n\
          targets = [\"rust\"]\n\
-         capabilities = [\"greet\"]\n";
-    fx.write(".rosita/config.toml", cfg);
+         capabilities = [\"greet\"]\n",
+    );
 
-    // Before allow: a repo-authored command is refused.
     fx.cmd()
         .args(["render", "--agent", "claude"])
         .assert()
         .success();
     let overlay = fx.read(".rosita/generated/claude.md");
-    assert!(overlay.contains("skipped untrusted command"));
+    // Neither the command output nor a trust-skip marker — the cap is gone.
     assert!(!overlay.contains("hello-rosita"));
-
-    // trust status reflects untrusted.
-    fx.cmd()
-        .arg("trust")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("untrusted"));
-
-    // allow → the command now runs.
-    fx.cmd().arg("allow").assert().success();
-    fx.cmd()
-        .args(["render", "--agent", "claude"])
-        .assert()
-        .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
-    assert!(overlay.contains("hello-rosita"));
     assert!(!overlay.contains("skipped untrusted"));
-
-    // Editing the repo config re-locks trust → refused again.
-    fx.write(".rosita/config.toml", &format!("{cfg}\n# changed\n"));
-    fx.cmd()
-        .args(["render", "--agent", "claude"])
-        .assert()
-        .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
-    assert!(overlay.contains("skipped untrusted command"));
-    assert!(!overlay.contains("hello-rosita"));
 }
 
 #[test]
@@ -803,8 +790,7 @@ fn capabilities_list_marks_active_and_shows_one() {
     fx.rust_project();
     // Your library: two capabilities, with only rust-conventions composed by the
     // selected rust profile (terse-comms is present but inactive here).
-    fx.write(
-        ".rosita/config.toml",
+    fx.author(
         "[[capabilities]]\n\
          id = \"rust-conventions\"\n\
          description = \"Rust conventions\"\n\
@@ -912,7 +898,7 @@ fn ambiguous_profiles_render_empty_and_warn() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.git_init();
-    fx.write(".rosita/config.toml", TWO_RUST_PROFILES);
+    fx.author(TWO_RUST_PROFILES);
 
     fx.cmd()
         .args(["render", "--agent", "claude"])
@@ -933,7 +919,7 @@ fn binding_in_local_toml_selects_profile_without_prompt() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.git_init(); // repo scope → binding is read from .rosita/local.toml
-    fx.write(".rosita/config.toml", TWO_RUST_PROFILES);
+    fx.author(TWO_RUST_PROFILES);
     fx.write(".rosita/local.toml", "[binding]\nprofile = \"rust-b\"\n");
 
     fx.cmd()
@@ -955,7 +941,7 @@ fn run_with_ambiguous_profiles_non_tty_falls_back_without_blocking() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.git_init();
-    fx.write(".rosita/config.toml", TWO_RUST_PROFILES);
+    fx.author(TWO_RUST_PROFILES);
 
     fx.cmd()
         .args(["--dry-run", "run", "claude"])

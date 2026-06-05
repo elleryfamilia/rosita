@@ -225,10 +225,11 @@ mod tests {
         // No global layer → fully hermetic.
         let cfg = Config::load_from(None, d.path()).expect("sample config must parse");
         assert_eq!(cfg.default_agent, "claude");
-        assert!(cfg.profiles.iter().any(|p| p.name == "rust"));
-        // The sample profile ties to a language target, not the retired rules.
-        let rust = cfg.profiles.iter().find(|p| p.name == "rust").unwrap();
-        assert_eq!(rust.targets, vec!["rust".to_string()]);
+        // Capabilities and profiles are global-only: a repo layer that declares
+        // them is honored for nothing (the loader drops them). The sample's
+        // non-cap/profile content (defaults, etc.) still applies.
+        assert!(cfg.profiles.is_empty(), "repo-layer profiles are dropped");
+        assert!(cfg.capabilities.is_empty(), "repo-layer caps are dropped");
         // The public sample must not name a machine (host_classes moved to local).
         assert!(!SAMPLE_REPO_CONFIG.contains("example.com"));
     }

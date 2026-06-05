@@ -43,6 +43,21 @@ impl Layer {
     pub fn is_trusted_authorship(self) -> bool {
         matches!(self, Layer::BuiltIn | Layer::Global | Layer::GlobalLocal)
     }
+
+    /// Whether `[[capabilities]]` defined in this layer are honored. Capabilities
+    /// are a **global** concept (the library any profile can compose); a repo
+    /// layer that declares them is ignored (and `doctor` flags it). Aligns with
+    /// trusted authorship — a repo can never contribute a capability.
+    pub fn contributes_capabilities(self) -> bool {
+        self.is_trusted_authorship()
+    }
+
+    /// Whether `[[profiles]]` defined in this layer are honored. Profiles are
+    /// **public-global only**: authored once in the global `config.toml`, shared
+    /// across repos. Not the private global `local.toml`, never a repo layer.
+    pub fn contributes_profiles(self) -> bool {
+        matches!(self, Layer::BuiltIn | Layer::Global)
+    }
 }
 
 /// How attention-worthy a capability's guidance is. Rendered as an annotation
