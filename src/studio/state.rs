@@ -149,6 +149,9 @@ pub struct PreviewCap {
 pub struct CapView {
     pub id: String,
     pub title: String,
+    /// A one-line plain-text summary of what the capability says (the first
+    /// meaningful line of its guidance, or a kind-based phrase for dynamic caps).
+    pub summary: Option<String>,
     pub kind: &'static str,
     /// Primary category for grouping the library (the capability's first tag).
     pub category: Option<String>,
@@ -453,6 +456,7 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             category: c.tags.first().cloned(),
             active: active_ids.contains(&c.id),
             title: c.title().to_string(),
+            summary: cap_summary(c),
             icon: c.icon.clone(),
             script_lang: c.script_lang.clone(),
             private: matches!(c.origin, Layer::RepoLocal | Layer::GlobalLocal),
@@ -495,6 +499,7 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             category: c.tags.first().cloned(),
             active: false,
             title: c.title().to_string(),
+            summary: cap_summary(c),
             icon: c.icon.clone(),
             script_lang: c.script_lang.clone(),
             private: false,
@@ -716,6 +721,46 @@ fn kind_of(has_command: bool, has_provider: bool) -> &'static str {
     } else {
         "static"
     }
+}
+
+/// A one-line, plain-text summary for a capability card — the "what it says" the
+/// title alone can't carry. For a dynamic cap (whose guidance is often a
+/// `{{ provider.output }}` template) we describe the source instead of dumping
+/// the template; otherwise it's the first meaningful line of the guidance.
+fn cap_summary(c: &Capability) -> Option<String> {
+    if c.command.is_some() {
+        return Some("Runs a script; its output is embedded.".to_string());
+    }
+    if let Some(p) = &c.provider {
+        return Some(format!("Embeds live {p} output."));
+    }
+    first_meaningful_line(&c.guidance)
+}
+
+/// The first non-empty line of markdown as plain-ish text: skip leading HTML
+/// comments and blanks, drop a leading heading/bullet marker, collapse runs of
+/// whitespace to single spaces. `None` when there's nothing to show.
+fn first_meaningful_line(md: &str) -> Option<String> {
+    let mut text = md.trim_start();
+    // Skip leading HTML comments (e.g. a generated header).
+    while let Some(rest) = text.strip_prefix("<!--") {
+        match rest.find("-->") {
+            Some(end) => text = rest[end + 3..].trim_start(),
+            None => break,
+        }
+    }
+    for raw in text.lines() {
+        let line = raw
+            .trim()
+            .trim_start_matches('#')
+            .trim_start_matches(['-', '*', '>'])
+            .trim();
+        if line.is_empty() {
+            continue;
+        }
+        return Some(line.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    None
 }
 
 /// Current UTC time as an RFC3339 (`…Z`) string for the rendered header.
@@ -1004,6 +1049,35 @@ mod tests {
         let got = parse_pairs("lang=rust&agent=claude&q=a%20b");
         assert_eq!(got[0], ("lang".to_string(), "rust".to_string()));
         assert_eq!(got[2], ("q".to_string(), "a b".to_string()));
+    }
+
+    #[test]
+    fn summary_takes_first_meaningful_guidance_line() {
+        let mut c = crate::capability::palette()
+            .into_iter()
+            .find(|c| c.id == "terse-comms")
+            .unwrap();
+        let s = cap_summary(&c).expect("static cap has a summary");
+        assert!(s.starts_with("Be terse"), "got: {s}");
+        assert!(!s.contains('\n'), "summary is a single line");
+        // A leading HTML comment + heading marker are stripped, whitespace collapsed.
+        c.guidance = "<!-- gen -->\n# Heading\n\nbody".into();
+        assert_eq!(cap_summary(&c).as_deref(), Some("Heading"));
+    }
+
+    #[test]
+    fn summary_describes_dynamic_caps_by_source() {
+        let mut c = crate::capability::palette().into_iter().next().unwrap();
+        // A provider cap's guidance is often a template — describe the source.
+        c.guidance = "Running on {{ provider.output }}".into();
+        c.provider = Some("host".into());
+        assert_eq!(cap_summary(&c).as_deref(), Some("Embeds live host output."));
+        c.provider = None;
+        c.command = Some("uname -sm".into());
+        assert_eq!(
+            cap_summary(&c).as_deref(),
+            Some("Runs a script; its output is embedded.")
+        );
     }
 
     #[test]

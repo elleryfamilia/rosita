@@ -689,6 +689,7 @@ fn cap_card(c: &CapView) -> Markup {
             span class="cap-glyph" { (icon(cap_icon_name(c))) }
             div class="cap-main" {
                 span class="cap-title" { (c.title) }
+                @if let Some(s) = &c.summary { span class="cap-summary" { (s) } }
                 span class="cap-id" { (id) }
             }
             div class="cap-tags" {
@@ -1255,6 +1256,7 @@ mod tests {
         CapView {
             id: id.into(),
             title: id.into(),
+            summary: None,
             kind: "static",
             category: category.map(str::to_string),
             icon: None,

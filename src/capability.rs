@@ -244,7 +244,7 @@ pub fn palette() -> Vec<Capability> {
         // --- baseline awareness --------------------------------------------
         cap(
             "baseline",
-            "Baseline",
+            "Follow repo conventions",
             "box",
             &["awareness"],
             "Follow the repository's existing conventions and keep changes minimal, \
@@ -335,7 +335,7 @@ pub fn palette() -> Vec<Capability> {
         ),
         cap(
             "experimental-iteration",
-            "Experimental iteration",
+            "Spike fast on a throwaway branch",
             "rocket",
             &["dev-workflow"],
             "Experimental branch — optimize for iteration speed. Throwaway spikes are \
@@ -345,7 +345,7 @@ pub fn palette() -> Vec<Capability> {
         // --- quality -------------------------------------------------------
         cap(
             "validate-before-done",
-            "Validate before done",
+            "Build, test, and lint before done",
             "terminal",
             &["quality"],
             "Before declaring work done, run the build, the tests, and the linter, and \
@@ -354,7 +354,7 @@ pub fn palette() -> Vec<Capability> {
         ),
         cap(
             "testing-discipline",
-            "Testing discipline",
+            "Cover changes with tests",
             "flask",
             &["quality"],
             "Add or update tests to match the change: unit or integration tests for \
@@ -364,7 +364,7 @@ pub fn palette() -> Vec<Capability> {
         // --- safety --------------------------------------------------------
         caution(cap(
             "branch-discipline",
-            "Branch discipline",
+            "Never commit to main",
             "git-branch",
             &["safety"],
             "Never commit or push directly to the main/master branch — always work on \
@@ -381,7 +381,7 @@ pub fn palette() -> Vec<Capability> {
         )),
         caution(cap(
             "infra-caution",
-            "Infrastructure caution",
+            "Be conservative with infrastructure",
             "server",
             &["infra", "safety"],
             "This is infrastructure code. Be conservative: prefer plans over direct \
@@ -391,7 +391,7 @@ pub fn palette() -> Vec<Capability> {
         // --- security ------------------------------------------------------
         caution(cap(
             "secrets-hygiene",
-            "Secrets hygiene",
+            "Never commit or log secrets",
             "lock",
             &["security"],
             "Never print, log, or commit secrets, credentials, tokens, or `.env` \
