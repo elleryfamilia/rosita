@@ -5,28 +5,34 @@ rosita is configured by layered TOML. **(implemented)** unless marked
 
 ## Layers (precedence: later wins)
 
-**Implemented:** built-in defaults ← global ← repo.
-
-**Planned (full):** built-in ← global (public) ← **global-local (private)** ←
-repo ← **repo-local (private)**.
+Built-in defaults ← global `config.toml` ← global `local.toml` ← repo
+`config.toml` ← repo `local.toml`.
 
 | Layer | Path | Shareable? |
 | --- | --- | --- |
 | global | `$ROSITA_CONFIG_DIR` or `$XDG_CONFIG_HOME/rosita` or `~/.config/rosita`, file `config.toml` | yes (commit / open-source) |
-| global-local *(planned)* | `<global>/local.toml` | **no** (gitignored / private repo) |
-| repo | `<repo_base>/.rosita/config.toml` | yes (commit, team-shared) |
-| repo-local *(planned)* | `<repo_base>/.rosita/local.toml` | **no** (gitignored) |
+| global-local | `<global>/local.toml` | **no** (gitignored / private) |
+| repo | `<repo_base>/.rosita/config.toml` | yes (committable) |
+| repo-local | `<repo_base>/.rosita/local.toml` | **no** (gitignored) |
+
+**Capabilities and profiles are global-only.** You author them once, in the
+global layers, and share them across machines by committing `config.toml` to a
+synced repo. A repo's `.rosita/` carries only the per-project **`[binding]`** (in
+the gitignored `local.toml`), the generated overlays, the audit log, the probe
+cache, and optional template overrides — *not* capabilities or profiles.
+Capabilities or profiles declared in a repo layer are ignored, and `rosita
+doctor` flags them.
 
 - `$ROSITA_CONFIG_DIR` overrides the global dir (used in tests / isolation).
-- Templates resolve repo → global → embedded; profiles/agents/capabilities merge
-  **by id/name** (later layers override).
+- Templates resolve repo → global → embedded; agents merge **by id** (later
+  layers override).
 - Lists like `env.allowlist` are **additive** across layers (union, deduped).
 - The merge keeps "unset" distinct from "default": each layer parses into an
   all-optional `RawConfig`, layers fold, then defaults are applied.
 
 Other directories under `<repo_base>/.rosita/`: `generated/` (overlays,
 gitignored), `logs/events.jsonl` (audit, gitignored), `templates/` (overrides),
-`cache/` *(planned, gitignored — provider caches)*.
+`cache/` (gitignored — provider caches).
 
 ## `[defaults]` (implemented)
 
@@ -53,25 +59,49 @@ write_override = true    # auto-write AGENTS.override.md (default; `--no-overrid
 max_output_kib = 32      # warn when generated output exceeds this
 ```
 
-## `[[profiles]]` (implemented; `capabilities`/`exclude`/`exclusive` planned)
+## `[[profiles]]` (implemented)
+
+A profile is tied to one or more detected **targets** and composes a list of
+capabilities. It is the unit of selection — one profile per context.
 
 ```toml
 [[profiles]]
-name = "infra"
-priority = 50                                                   # higher wins (today: single-winner)
-when = [{ field = "path", op = "starts_with", value = "infra/" }]   # all clauses AND-ed
-guidance = "Infrastructure code — prefer plans over direct mutation."   # inline (implemented)
-# template = "infra"            # optional body-template override
-# capabilities = ["infra-caution", "no-prod"]   # (planned) compose capabilities
-# exclude     = ["deploy"]                       # (planned) remove a capability a base profile added
-# exclusive   = false                            # (planned) replace rather than add
+name = "rust — web"
+targets = ["rust"]                                  # selected when the repo detects as rust
+capabilities = [
+  "rust-conventions",
+  { id = "ssh", params = { user = "deploy" } },     # optional inline params override
+]
+# guidance = "…"        # optional inline guidance (becomes a <profile>:inline capability)
+# template = "infra"    # optional body-template override
+# disabled = true       # keep the definition but never select or compose it
 ```
 
-- Fields: `stack` `language` `package_manager` `path` `branch` `repo`
-  `host_class` `os` `arch`.
-- Ops: `equals` `starts_with` `contains` `matches` (regex).
-- Built-in profiles (`rust`, `nextjs`, `node`, `go`, `python`, `infra`,
-  `experimental`, `default`) are a base layer, overridable by name.
+- **`targets`:** the coarse detected tags — `stack` values `rust`, `node`,
+  `nextjs`, `go`, `python`, `android`, `java`, plus `machine` (the no-repo
+  context). A profile is a selection candidate when **any** of its targets
+  matches. Empty `targets` ⇒ never auto-selected (still bindable by name).
+- **Selection is pick-one:** of the profiles whose targets match, exactly one is
+  used — 0 → none (empty overlay), 1 → auto, 2+ → you pick once and it's
+  remembered (the [`[binding]`](#binding-implemented)). Profiles do **not** merge;
+  there is no `priority`, `exclude`, or `exclusive`, and no built-in profiles.
+- A saved profile needs **≥1 capability** (studio enforces it; the parser accepts
+  zero for hand-edits).
+
+Profiles select on `targets`, not rules — a *capability* may still self-gate with
+`when` rules (see [`[[capabilities]]`](#capabilities-implemented)).
+
+## `[binding]` (implemented)
+
+The per-project remembered profile choice, written when 2+ profiles match and you
+pick one. It lives in the gitignored repo `local.toml` (a global path-keyed store
+is used outside a repo); rosita manages it, so you rarely hand-edit it.
+
+```toml
+[binding]
+profile = "rust — web"      # the chosen profile … or:  none = true  to opt this project out
+# targets_hash = "…"        # fingerprint of the profile's targets at bind time (freshness)
+```
 
 ## `[[agents]]` (implemented)
 
@@ -115,7 +145,7 @@ work     = ["*.corp.example.com", "work-*"]
 personal = ["my-laptop", "*.tailnet.ts.net"]
 ```
 
-## `[[capabilities]]` (planned)
+## `[[capabilities]]` (implemented)
 
 ```toml
 [[capabilities]]
@@ -139,8 +169,8 @@ cache    = "60s"
 guidance = "Live tailnet (as of {{ generated_at }}):\n{{ provider.output }}"
 ```
 
-See the [implementation plan](implementation-plan.md) for the exact schema and
-the trust rules governing `command` providers.
+See [security](security.md) for the trust rules governing `command`-backed
+capabilities.
 
 ## Global flags (implemented)
 

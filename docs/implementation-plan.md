@@ -1,5 +1,12 @@
 # Implementation plan — capabilities, providers, dynamic, public/private
 
+> **Historical record.** This plan describes the original phased build, which used
+> **additive** composition. The selection model has since changed to **pick-one +
+> global-only**, and `rosita studio` (the web UI) was added on top. For the
+> **current** model see [studio-design.md](studio-design.md),
+> [concepts.md](concepts.md), and [configuration.md](configuration.md). This file
+> is kept as a roadmap record and is intentionally not rewritten to the new model.
+
 This is the executable plan for the next phases, written so a fresh session can
 pick it up. It builds on the committed MVP. Read [architecture](architecture.md)
 and [concepts](concepts.md) first.

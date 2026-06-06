@@ -11,16 +11,17 @@ stack, package manager, build/test/lint/run commands, OS/arch/host/user, the
 calling process, and an allowlisted+redacted slice of the environment. Detection
 is best-effort and degrades gracefully (e.g. outside a git repo).
 
-## Capabilities **(static implemented; dynamic planned)**
+## Capabilities **(implemented)**
 
 A **capability** is one reusable, self-contained unit of guidance — e.g.
 "Rust conventions", "you may SSH within my tailnet", "be terse, lead with the
-result". Authored once, kept in a library (built-ins plus `[[capabilities]]`
-config entries, merged by id), composed by profiles.
+result". You author them once into your own library (`[[capabilities]]` in your
+global config); a shipped, read-only **palette** of starters is there to
+duplicate from (it is never auto-composed). Profiles compose them.
 
 Two flavors:
-- **Static (implemented)** — fixed, templated guidance text.
-- **Dynamic (implemented)** — guidance computed at render time from a `provider`
+- **Static** — fixed, templated guidance text.
+- **Dynamic** — guidance computed at render time from a `provider`
   (a built-in probe) or a `command` (a shell command), whose live output is
   embedded as `{{ provider.output }}` / `{{ provider.data }}`. Cache-backed
   (per-capability `cache` TTL), redacted, and **trust-gated** (see *Public vs
@@ -30,28 +31,44 @@ Two flavors:
 Capabilities are parameterized (`params`), can self-gate (`when`), declare
 dependencies (`requires`), can be restricted to specific `agents`, and carry
 `risk`/`tags` metadata. Each renders as its own `###` section, annotated when its
-risk is not `Info`. See [configuration](configuration.md#capabilities-planned).
+risk is not `Info`. See [configuration](configuration.md#capabilities-implemented).
 
-## Profiles **(implemented)**
+## Profiles & selection **(implemented)**
 
-A **profile** maps context → guidance. It has `when` rules and lists the
-`capabilities` it composes (inline `guidance` is still supported for back-compat
-— it becomes a `<profile>:inline` capability, rendered after the explicit ones).
+A **profile** is a named bundle of capabilities tied to one or more **targets** —
+the coarse thing rosita detects: `rust`, `node`, `nextjs`, `go`, `python`,
+`android`, `java`, or `machine` (the no-repo context). Inline `guidance` is still
+supported for back-compat (it becomes a `<profile>:inline` capability, rendered
+after the explicit ones).
 
-- **Rules** match context fields — `stack`, `language`, `package_manager`,
-  `path` (cwd relative to repo root), `branch`, `repo`, `host_class`, `os`,
-  `arch` — with ops `equals` / `starts_with` / `contains` / `matches` (regex).
-  All clauses in a profile are AND-ed.
-- **Selection is additive**: every matching profile contributes; their
-  capabilities are unioned (deduped by id, priority-ordered, `requires` resolved
-  dependencies-first with cycle protection), each capability's own `when` is
-  filtered, and any selected profile's `exclude` is applied across the whole set.
-  An `exclusive` profile replaces rather than adds (the highest-priority
-  exclusive match wins alone). The built-in `default` has empty rules, always
-  matches, and contributes the `baseline` capability. The primary
-  (highest-priority) matching profile is the display/audit label. This is what
-  lets "in `~` I get these, on repo X these, on macOS these" *layer* instead of
-  fight.
+**One profile per context — not a union.** rosita gathers the profiles whose
+`targets` match the detected context and selects **exactly one**:
+
+- **0 match** → no profile applies (the overlay is empty).
+- **1 matches** → use it, no prompt.
+- **2+ match** → you pick once, and the choice is remembered for that project
+  (the **binding**, below).
+
+Composition then happens *within* the chosen profile, over its capability list:
+deduped by id, `requires`-resolved (dependencies first, cycle-protected), each
+capability's own `when` self-gate applied (fields `stack`, `language`,
+`package_manager`, `path`, `branch`, `repo`, `host_class`, `os`, `arch`; ops
+`equals`/`starts_with`/`contains`/`matches`), and `params` merged (capability
+default ← profile-supplied ← private `[capability_params]`). There is **no**
+priority ordering, no `exclude`/`exclusive`, and no always-on baseline profile —
+all retired along with additive composition. Selection is deterministic and
+inspectable (`rosita explain` shows what was detected, which profiles matched,
+and which one is bound); no LLM is involved.
+
+## The binding **(implemented)**
+
+When more than one profile matches a project, rosita asks once which to use and
+remembers the answer so it never asks again. In a repo the choice lives in the
+gitignored `.rosita/local.toml` `[binding]` (per-checkout); outside a repo it
+lives in a global, path-keyed store. **"None" is a valid, remembered choice** —
+you can opt a project out of rosita entirely. A binding also fingerprints the
+profile's `targets`, so if you later retarget that profile the stale binding is
+dropped and selection re-runs.
 
 ## Providers (native environment discovery) **(implemented)**
 
@@ -115,7 +132,7 @@ rosita knows the context is current; one launched directly knows to check.
 `doctor` flags drift by comparing hashes. Staleness is made *evident*, not
 prevented.
 
-## Public vs private **(layering + lint implemented; provider output planned)**
+## Public vs private **(implemented)**
 
 The guiding principle: **references are public; definitions of sensitive
 specifics are private.**
@@ -136,8 +153,7 @@ specifics are private.**
   them to `local.toml`. The private `local.toml` is created on demand and is
   auto-gitignored the first time rosita renders into a repo.
 - **Prefer detection over storage** — don't store network topology; let a
-  provider probe it at runtime (planned). It can't leak (it's local) and can't
-  go stale.
+  provider probe it at runtime. It can't leak (it's local) and can't go stale.
 
 This is what lets you share a capability library across machines (and publicly)
 without exposing what your machines are or what they can reach.

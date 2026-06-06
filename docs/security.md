@@ -17,7 +17,7 @@ execute untrusted code), not about constraining the agent.
   value` assignments. Conservative by design — over-redacts rather than leaks.
 - Git remote URLs are credential-sanitized before they're ever surfaced.
 
-## The public/private split **(principle implemented; private layer planned)**
+## The public/private split **(implemented)**
 
 The rule: **references are public; definitions of sensitive specifics are
 private.**
@@ -34,7 +34,7 @@ you can SSH to, your employer's internal domains, or your tailnet leaks that to
 the world. Keep the *behavior* public ("you may SSH within my tailnet, confirm
 first") and the *specifics* private or detected.
 
-**Planned guardrail:** `rosita doctor` lints the public layer and warns if a
+**`rosita doctor` lints** the public layer and warns if a
 capability/profile/`host_class` there contains hostname/IP/domain-looking
 literals ("looks private — move it to local.toml").
 
@@ -51,7 +51,7 @@ specific content, or (for `AGENTS.override.md`, which Codex *prefers* over
 gitignore management is skipped entirely outside a git repo (no stray
 `.gitignore` in `$HOME`).
 
-## Command-execution trust model **(planned)**
+## Command-execution trust model **(implemented)**
 
 Dynamic capabilities can run code at render time. That's a real supply-chain
 surface, so rosita follows **direnv's trust model**:

@@ -1,11 +1,12 @@
 # rosita docs
 
-`rosita` is "direnv for AI coding agents": detect project/runtime context,
-select a profile, compose guidance, render one agent-neutral overlay, and
-deliver it to each agent — keeping it fresh and never leaking secrets.
+`rosita` injects global context into your AI coding agents: detect the
+project/runtime context, select the **one** profile that fits, compose its
+capabilities into a single agent-neutral overlay, and deliver it to each agent —
+keeping it fresh and never leaking secrets.
 
 ## For consumers
-- [Concepts](concepts.md) — the mental model (context, profiles, capabilities, agents, freshness, public/private).
+- [Concepts](concepts.md) — the mental model (context, capabilities, profiles, the binding, agents, freshness, public/private).
 - [Configuration](configuration.md) — the layered config and full schema reference.
 - [Security](security.md) — secrets, redaction, the public/private split, and the command-execution trust model.
 

@@ -51,24 +51,24 @@ the TOML surface follows automatically. Add a unit test.
 Drop `<repo>/.rosita/templates/<name>.md.j2` or
 `<global>/templates/<name>.md.j2`. Any name falls back to the embedded
 `overlay.md.j2`. The model exposes `context`, `profile`, `profile_guidance`,
-`agent` (and, planned, `params` and `provider.output` inside a capability). The
-provenance/freshness banner is prepended in Rust (`render/header.rs`), so the
-body template stays simple.
+`agent`; inside a capability, `params` and `provider.output`/`provider.data` are
+in scope. The provenance/freshness banner is prepended in Rust
+(`render/header.rs`), so the body template stays simple.
 
-## Add a capability **(planned — no code)**
+## Add a capability **(implemented — no code)**
 
-Add a `[[capabilities]]` entry and reference its `id` from a profile's
-`capabilities` list. Static capabilities are just templated guidance; dynamic
-ones name a `provider` (or, trust permitting, a `command`). See
-[configuration](configuration.md#capabilities-planned).
+Add a `[[capabilities]]` entry to your **global** config and reference its `id`
+from a profile's `capabilities` list. Static capabilities are just templated
+guidance; dynamic ones name a `provider` (or, trust permitting, a `command`). See
+[configuration](configuration.md#capabilities-implemented).
 
-## Add a native provider **(planned — code)**
+## Add a native provider **(implemented — code)**
 
 Implement the `EnvProvider` trait (id + `probe(&Context) -> Result<ProviderOutput>`),
 register it in the provider registry, and it becomes usable as
 `provider = "<id>"` in a dynamic capability and as a `detect` section. Built-ins
-to follow as the template: `tailnet`, `docker`, `toolchain`, `ai-tools`. Probes
-must degrade gracefully (missing tool → empty), redact output, and be cacheable.
+for reference: `host`, `toolchain`, `ai-tools`, `tailnet`, `docker`. Probes must
+degrade gracefully (missing tool → empty), redact output, and be cacheable.
 
 ## Testing conventions
 
