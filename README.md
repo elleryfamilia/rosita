@@ -185,18 +185,19 @@ block in a user file), and **freshness**. Built-ins:
 | `codex` | `.rosita/generated/agents.md` | **auto-wires** by merging into a gitignored `AGENTS.override.md` (which Codex reads *before* `AGENTS.md`); never touches `AGENTS.md`. `--no-override` for emit-only |
 | `gemini` | `.rosita/generated/gemini.md` | **auto-wires** a gitignored `GEMINI.local.md` (`@import`) and registers it in `~/.gemini/settings.json` `context.fileName` so Gemini loads it alongside `GEMINI.md`; never touches `GEMINI.md` |
 | `opencode` | `.rosita/generated/opencode.md` | emit-only (add to `opencode.json` `instructions`) |
-| `copilot` | `.rosita/generated/copilot.md` | emit-only (`.github/copilot-instructions.md` / `AGENTS.md`) |
+| `copilot` | `.rosita/generated/copilot/.github/instructions/rosita.instructions.md` | **auto-wires** at launch: `rosita run copilot` points the Copilot CLI at the gitignored overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (inlined as a custom instruction); never touches `.github/copilot-instructions.md` |
 | `generic` | `.rosita/generated/generic.md` | emit-only; you wire it in |
 
-**The key rule:** rosita auto-wires whenever it can do so through a file that is
-itself *local/gitignored* — Claude's `CLAUDE.local.md` (`@import`) and Codex's
-`AGENTS.override.md` (which Codex prefers over the committed `AGENTS.md`). It
+**The key rule:** rosita auto-wires only through *local/gitignored* paths, and
 **never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
-`copilot-instructions.md`). Gemini has no built-in local-context filename, so
-rosita auto-wires a gitignored `GEMINI.local.md` (`@import`) and registers that
-name once in `~/.gemini/settings.json`. The remaining agents (`opencode`,
-`copilot`, `generic`) stay **emit-only** — rosita writes a gitignored overlay and
-prints how to wire it, rather than pushing machine-specific content onto teammates.
+`copilot-instructions.md`). Each launchable agent gets the cleanest hook it
+supports: Claude → `CLAUDE.local.md` (`@import`); Codex → `AGENTS.override.md`
+(which it prefers over `AGENTS.md`); Gemini → a gitignored `GEMINI.local.md`
+(`@import`) registered once in `~/.gemini/settings.json`; Copilot → the gitignored
+overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` at launch (it has no persistent
+local hook). The rest (`opencode`, `generic`) stay **emit-only** — rosita writes a
+gitignored overlay and prints how to wire it, rather than pushing machine-specific
+content onto teammates.
 
 Add or override agents in config without code changes:
 

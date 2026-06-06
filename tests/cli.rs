@@ -599,7 +599,7 @@ fn render_all_six_agents_emit_gitignored_overlays() {
         "agents.md",
         "gemini.md",
         "opencode.md",
-        "copilot.md",
+        "copilot/.github/instructions/rosita.instructions.md",
         "generic.md",
     ] {
         assert!(fx.exists(&format!(".rosita/generated/{f}")), "missing {f}");
@@ -671,6 +671,47 @@ fn gemini_warns_when_workspace_settings_would_mask_registration() {
         .assert()
         .success()
         .stdout(predicate::str::contains("overrides the home registration"));
+}
+
+#[test]
+fn copilot_render_writes_nested_overlay_without_touching_committed_files() {
+    let fx = Fixture::new();
+    fx.rust_project();
+
+    fx.cmd()
+        .args(["render", "--agent", "copilot"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("COPILOT_CUSTOM_INSTRUCTIONS_DIRS"));
+
+    // Overlay is a `.instructions.md` (no applyTo → Copilot inlines it) under the
+    // gitignored generated dir's .github/instructions.
+    let rel = ".rosita/generated/copilot/.github/instructions/rosita.instructions.md";
+    assert!(fx.exists(rel));
+    let overlay = fx.read(rel);
+    assert!(overlay.contains("rosita:generated"));
+    // No frontmatter delimiter at the top → no `applyTo` → inlined, not a pointer.
+    assert!(!overlay.starts_with("---"));
+    // Committed instruction files are never touched.
+    assert!(!fx.exists(".github/copilot-instructions.md"));
+    assert!(!fx.exists("AGENTS.md"));
+}
+
+#[test]
+fn copilot_run_injects_custom_instructions_dirs_env() {
+    let fx = Fixture::new();
+    fx.rust_project();
+
+    // Dry-run shows the env that points Copilot at the gitignored overlay dir.
+    fx.cmd()
+        .args(["--dry-run", "run", "copilot"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "COPILOT_CUSTOM_INSTRUCTIONS_DIRS=",
+        ))
+        .stdout(predicate::str::contains(".rosita/generated/copilot"))
+        .stdout(predicate::str::contains("would exec:"));
 }
 
 #[test]

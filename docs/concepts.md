@@ -87,18 +87,21 @@ described by an `AgentDescriptor` along four axes:
 3. **Whose** — rosita-owned file vs a managed marker block in a user file.
 4. **Freshness** — banner ▸ wrapper (`rosita run`) ▸ (no enforced hook).
 
-The decisive rule: **auto-wire through local/gitignored files only** — Claude →
+The decisive rule: **auto-wire through local/gitignored paths only** — Claude →
 `CLAUDE.local.md` (`@import`), Codex → `AGENTS.override.md` (which Codex reads
 before the committed `AGENTS.md`), Gemini → a gitignored `GEMINI.local.md`
-(`@import`) registered once in `~/.gemini/settings.json` `context.fileName`. rosita
-**never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
-`.github/copilot-instructions.md`); agents with no wiring path are **emit-only** —
-a gitignored overlay plus a hint on how to wire it, not content in a shared file.
+(`@import`) registered once in `~/.gemini/settings.json` `context.fileName`,
+Copilot → the gitignored overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` set by
+`rosita run` (no persistent local hook exists). rosita **never edits a committed,
+shared instruction file** (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`);
+agents with no wiring path are **emit-only** — a gitignored overlay plus a hint on
+how to wire it, not content in a shared file.
 
 Built-ins: `claude` (import), `codex` (auto `AGENTS.override.md` merge,
 `--no-override` to skip), `gemini` (auto `GEMINI.local.md` @import + registers it
-in `~/.gemini/settings.json`), `opencode`/`copilot`/`generic` (emit-only).
-All overridable / extendable via `[[agents]]`.
+in `~/.gemini/settings.json`), `copilot` (`rosita run` sets
+`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → the gitignored overlay),
+`opencode`/`generic` (emit-only). All overridable / extendable via `[[agents]]`.
 
 ## Freshness **(implemented)**
 

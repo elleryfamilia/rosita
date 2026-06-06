@@ -344,6 +344,8 @@ fn delivery_of(a: &AgentDescriptor, write_override: bool) -> String {
         } else {
             format!("override → {ovr} (off; set [codex] write_override = true)")
         }
+    } else if let Some(var) = &a.launch_context_dir_env {
+        format!("run env → {var}")
     } else {
         "emit-only".to_string()
     }

@@ -10,6 +10,11 @@
 //! that can read env — or its hook — knows the context is current), and, for
 //! agents with an `append_prompt_flag` (e.g. Claude's `--append-system-prompt`),
 //! a short "context is fresh" note injected directly into the launch.
+//!
+//! For an agent with no persistent local hook but a `launch_context_dir_env`
+//! (e.g. Copilot's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`), rosita also sets that env
+//! var to the directory holding the generated overlay, so the agent discovers it
+//! at launch without any committed file being touched.
 
 use std::io::{IsTerminal, Write as _};
 use std::process::Command;
@@ -104,13 +109,36 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
 
     let rendered_at = now_rfc3339();
     let launch_args = build_launch_args(&descriptor, &prep, rendered, &rendered_at, &args.args);
+    let extra_env = launch_context_env(&descriptor, &prep);
 
     if rt.dry_run {
-        println!("dry run — would exec: {program} {}", launch_args.join(" "));
+        let env_prefix: String = extra_env.iter().map(|(k, v)| format!("{k}={v} ")).collect();
+        println!(
+            "dry run — would exec: {env_prefix}{program} {}",
+            launch_args.join(" ")
+        );
         return Ok(());
     }
 
-    launch(&program, &launch_args, &rendered_at, &rt.cwd)
+    launch(&program, &launch_args, &rendered_at, &rt.cwd, &extra_env)
+}
+
+/// Env vars `rosita run` injects so an agent with no persistent local hook finds
+/// the overlay at launch: maps `launch_context_dir_env` → the absolute
+/// `launch_context_dir` under `.rosita/generated/` (e.g. Copilot's
+/// `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `<repo>/.rosita/generated/copilot`).
+fn launch_context_env(
+    descriptor: &AgentDescriptor,
+    prep: &super::Prepared,
+) -> Vec<(String, String)> {
+    let (Some(var), Some(rel)) = (
+        &descriptor.launch_context_dir_env,
+        &descriptor.launch_context_dir,
+    ) else {
+        return Vec::new();
+    };
+    let dir = crate::config::generated_dir(&prep.repo_base).join(rel);
+    vec![(var.clone(), dir.to_string_lossy().into_owned())]
 }
 
 /// Prepend a freshness note via the agent's prompt flag when we just rendered.
@@ -144,12 +172,16 @@ fn launch(
     args: &[String],
     rendered_at: &str,
     cwd: &std::path::Path,
+    extra_env: &[(String, String)],
 ) -> crate::Result<()> {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .current_dir(cwd)
         .env("ROSITA_RUN", "1")
         .env("ROSITA_RENDERED_AT", rendered_at);
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
     vlog!("launching: {program} {}", args.join(" "));
 
     #[cfg(unix)]

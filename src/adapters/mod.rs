@@ -70,6 +70,18 @@ pub struct AgentDescriptor {
     /// Claude's `--append-system-prompt`).
     #[serde(default)]
     pub append_prompt_flag: Option<String>,
+    /// `rosita run` sets this env var to [`launch_context_dir`] (an absolute path)
+    /// so an agent with no persistent local hook discovers the overlay at launch
+    /// (e.g. Copilot's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`).
+    #[serde(default)]
+    pub launch_context_dir_env: Option<String>,
+    /// Directory (relative to `.rosita/generated/`) that [`launch_context_dir_env`]
+    /// points at. The agent scans it for its own instruction layout, so the
+    /// `generated_filename` is written *inside* this dir in the shape the agent
+    /// expects — e.g. Copilot scans `<dir>/.github/instructions/**/*.instructions.md`,
+    /// so copilot uses dir `copilot` + file `copilot/.github/instructions/rosita.instructions.md`.
+    #[serde(default)]
+    pub launch_context_dir: Option<String>,
 }
 
 fn default_template() -> String {
@@ -116,6 +128,8 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             override_base: None,
             wire_hint: None,
             append_prompt_flag: None,
+            launch_context_dir_env: None,
+            launch_context_dir: None,
         }
     }
     vec![
@@ -170,14 +184,26 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             ..d("opencode", "opencode.md")
         },
         AgentDescriptor {
-            display_name: Some("GitHub Copilot".into()),
-            // Copilot is IDE/cloud-driven: render-only (no launch) by default.
+            display_name: Some("GitHub Copilot CLI".into()),
+            launch: Some("copilot".into()),
+            // The Copilot CLI has no gitignored persistent hook (its repo
+            // .github/instructions discovery is gitignore-filtered, and
+            // copilot-instructions.md / AGENTS.md are committed). So `rosita run`
+            // points it at the gitignored overlay dir via an env var. The overlay
+            // is written as a `.instructions.md` (with no `applyTo`, so Copilot
+            // *inlines* it — a nested AGENTS.md would only become a "view this
+            // file" pointer). Additive; never touches committed files.
+            launch_context_dir_env: Some("COPILOT_CUSTOM_INSTRUCTIONS_DIRS".into()),
+            launch_context_dir: Some("copilot".into()),
             wire_hint: Some(
-                "Copilot reads .github/copilot-instructions.md and AGENTS.md; include \
-                 .rosita/generated/copilot.md there."
+                "`rosita run copilot` wires this via COPILOT_CUSTOM_INSTRUCTIONS_DIRS. \
+                 For other entry points, point that env at .rosita/generated/copilot."
                     .into(),
             ),
-            ..d("copilot", "copilot.md")
+            ..d(
+                "copilot",
+                "copilot/.github/instructions/rosita.instructions.md",
+            )
         },
         AgentDescriptor {
             display_name: Some("Generic (AGENTS.md-style)".into()),

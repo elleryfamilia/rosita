@@ -21,6 +21,14 @@ for any descriptor. The wiring it picks:
 - otherwise (or override opted out) → emit-only: write the gitignored overlay +
   print `wire_hint`.
 
+Orthogonally, `launch_context_dir_env` + `launch_context_dir` make `rosita run`
+set an env var to a generated subdir at launch — for agents with no persistent
+local hook that accept a custom-instructions dir (e.g. Copilot's
+`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `.rosita/generated/copilot`). Write the
+`generated_filename` inside that dir in the shape the agent scans for — copilot
+uses `copilot/.github/instructions/rosita.instructions.md` (no `applyTo`, so
+Copilot *inlines* it rather than emitting a "view this file" pointer).
+
 To add a genuinely new *delivery mechanism* (beyond import / override / emit),
 extend the wiring branch in `adapters::apply()` and add the descriptor field(s).
 
