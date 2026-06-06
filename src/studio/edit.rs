@@ -16,7 +16,8 @@
 //!
 //! The staged config can also be assembled in memory via
 //! [`Config::from_layer_strs`](crate::config::Config::from_layer_strs), which
-//! **re-tags capability origins by layer** so the command-trust gate is honored.
+//! **re-tags capability origins by layer** so the global-only enforcement
+//! (`Layer::contributes_capabilities`) sees the right authorship.
 
 use std::path::{Path, PathBuf};
 
@@ -770,11 +771,10 @@ mod tests {
     }
 
     #[test]
-    fn created_command_capability_is_owned_globally_and_trusted() {
+    fn created_command_capability_is_owned_globally() {
         // Capabilities are global-only, so an authored `command` capability lands
-        // in the global layer (trusted authorship) — there is no repo-authored,
-        // untrusted command path anymore. Origin tagging is still verified via
-        // the in-memory assembly seam.
+        // in the global layer. Origin tagging is verified via the in-memory
+        // assembly seam (it gates global-only enforcement, not trust).
         let (d, gdir) = repo_with_global("");
         let mut s = session_global(d.path(), &gdir);
         let mut command_cap = cap("danger", "runs a command");
@@ -788,7 +788,7 @@ mod tests {
         let cfg = s.staged_config().unwrap();
         let landed = cfg.capabilities.iter().find(|c| c.id == "danger").unwrap();
         assert_eq!(landed.origin, Layer::Global);
-        assert!(landed.origin.is_trusted_authorship());
+        assert!(landed.origin.contributes_capabilities());
     }
 
     #[test]

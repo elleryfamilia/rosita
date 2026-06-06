@@ -37,15 +37,14 @@ cwd → repo_base → Config::load → detect_context → select (one profile by
 | Module | Responsibility |
 | --- | --- |
 | `cli` | clap definitions; agents selected by id string, validated at runtime. |
-| `commands/` | one file per subcommand (`detect`/`render`/`run`/`explain`/`refresh`/`clean`/`doctor`/`trust`/`introspect` (`capabilities`/`profiles`/`agents`)) + shared `prepare()`/`resolve_agents()`. (`studio` lives in `studio/`.) |
+| `commands/` | one file per subcommand (`detect`/`render`/`run`/`explain`/`refresh`/`clean`/`doctor`/`introspect` (`capabilities`/`profiles`/`agents`)) + shared `prepare()`/`resolve_agents()`. (`studio` lives in `studio/`.) |
 | `config` | layered TOML model; per-layer `RawConfig` (all-optional) merged then finalized. Built-in **agents** are defaults (merged by id); **capabilities and profiles are global-only** and never injected from built-ins. `Config::from_layer_strs` assembles staged docs in-memory (origin-tagged) for studio. |
 | `context/` | `Context` (+ `Scope` repo/machine, `selection_targets()`) + the `ContextDetector` trait and detectors: `git`, `languages`, `commands`, `system`, `env`. |
 | `capability` | `Capability` (reusable guidance atom) + `Risk` + the read-only shipped `palette()` (starters to duplicate from, never auto-composed). |
 | `profile` | `ProfileConfig` (with `targets`), `Rule`/`Field`/`Op` (capability `when`), `CapabilityRef`, pick-one `select()`, and `compose_profile()` → `Composition` of `ResolvedCapability`s. |
 | `binding` | the per-project remembered profile choice: repo `local.toml` `[binding]` (via `toml_edit`) + a global path-keyed store; `None` is an explicit opt-out. |
 | `providers/` | `EnvProvider` trait + built-ins (`host`/`toolchain`/`ai-tools`/`tailnet`/`docker`), `gather()`/`probe_one()`/`run_command()`, TTL cache; output redacted and excluded from the context hash. |
-| `dynamic` | resolves a dynamic capability's `provider`/`command` output at render time (`DynamicMode` Live/ReadOnly), trust-gated. |
-| `trust` | direnv-style trust store (`<global>/trust.toml`): repo path → config-bundle sha256; `allow`/`deny`/`status`. |
+| `dynamic` | resolves a dynamic capability's `provider`/`command` output at render time (`DynamicMode` Live/ReadOnly); a `command` runs unless `allow_exec = false`. |
 | `render/` | `TemplateRenderer` trait (minijinja impl) + `header` (the self-healing banner) + the high-level `render()`. |
 | `templates` | the single embedded `overlay.md.j2` + repo→global→embedded resolution. |
 | `adapters/` | the descriptor-driven agent engine: `AgentDescriptor`, `builtin_agents()`, `apply()`, `clean()`, `artifacts()`. |

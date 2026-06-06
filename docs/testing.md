@@ -38,7 +38,7 @@ cargo install --git https://github.com/elleryfamilia/rosita
 #   …or, from a local clone:  cargo install --path .
 
 # Isolated global config (so nothing real is touched) + a throwaway rust repo:
-export ROSITA_CONFIG_DIR="$(mktemp -d)"          # global library + trust store sandbox
+export ROSITA_CONFIG_DIR="$(mktemp -d)"          # isolated global library
 SB="$(mktemp -d)"; mkdir -p "$SB/src" "$SB/infra/db"
 printf '[package]\nname="demo"\nversion="0.1.0"\n' > "$SB/Cargo.toml"
 printf 'fn main(){}\n' > "$SB/src/main.rs"
@@ -208,11 +208,9 @@ rosita detect --probes        # host/toolchain/ai-tools/(tailnet/docker if prese
 ```
 
 The generic escape hatch is a capability `command` (any shell command, redacted
-stdout embedded). A command is **trust-gated by where it's authored**: ones in
-your global config are trusted (you wrote them); `rosita allow` / `deny` /
-`trust` manage per-repo trust for command authorship. Because repo-declared caps
-are ignored entirely (§7), the common path is: author commands globally, and they
-just run.
+stdout embedded). It runs at render unless you set `allow_exec = false` (the
+per-capability off-switch). There's no repo-trust prompt: capabilities are
+global-only (§7), so a `command` is always one you authored globally.
 
 ### 9. Freshness lifecycle
 
@@ -233,9 +231,9 @@ no-op. An overlay with a **dynamic** capability (like `host-info`) re-probes, so
 ```bash
 cd ~ && rm -rf "$SB" "$ROSITA_CONFIG_DIR" && unset ROSITA_CONFIG_DIR
 ```
-Because the global library and trust store were isolated under
-`ROSITA_CONFIG_DIR`, nothing touched your real `~/.config/rosita`, and the only
-repo affected was the throwaway one.
+Because the global library was isolated under `ROSITA_CONFIG_DIR`, nothing
+touched your real `~/.config/rosita`, and the only repo affected was the
+throwaway one.
 
 ## What "passing" looks like
 

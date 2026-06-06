@@ -12,7 +12,6 @@ pub mod introspect;
 pub mod refresh;
 pub mod render;
 pub mod run;
-pub mod trust;
 
 use std::path::PathBuf;
 

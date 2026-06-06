@@ -514,7 +514,7 @@ fn preview_cap_card(c: &PreviewCap, profile: &str) -> Markup {
                         (icon("play")) (if c.pending { "Run" } else { "Re-run" })
                     }
                 }
-                @if c.skipped { span class="tag off-tag" { (icon("shield")) "trust" } }
+                @if c.skipped { span class="tag off-tag" { (icon("shield")) "exec off" } }
                 @else if c.dynamic { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
                 span class="cap-chev" { (icon("chevron-down")) }
             }
@@ -799,7 +799,7 @@ pub fn cap_dialog(
                                 textarea name="command" rows="7" class="mono code-edit" spellcheck="false" placeholder="echo 'last deploy: green'" { (cap.and_then(|c| c.command.as_deref()).unwrap_or("")) }
                             }
                             label class="check exec-check" { input type="checkbox" name="allow_exec" checked[allow_exec]; span { "Allow execution" } }
-                            p class="hint small" { "Runs only when the repo is trusted (" code { "rosita allow" } ") and execution is allowed. Review trust in the diff before applying." }
+                            p class="hint small" { "The script runs at render and its output is embedded. Uncheck " strong { "Allow execution" } " to keep it from running." }
                         }
                         (lives_in(layer))
                         @if !is_new {
@@ -1001,18 +1001,10 @@ pub fn editor_preview_fragment(p: &PreviewOutcome) -> String {
 
 // --- diff / review -----------------------------------------------------------
 
-/// Trust state surfaced in the review when repo-authored `command` caps exist.
-pub struct TrustBanner {
-    pub command_caps: Vec<String>,
-    pub status: String,
-    pub trusted: bool,
-}
-
 pub fn diff_view(
     diffs: &[FileDiff],
     leaks: &[String],
     fs_changed: &[std::path::PathBuf],
-    trust: &TrustBanner,
     staged: usize,
 ) -> String {
     html! {
@@ -1023,21 +1015,6 @@ pub fn diff_view(
                     h1 { "Review staged changes" }
                 }
                 span class="pill" { (staged) " staged" }
-            }
-
-            @if !trust.command_caps.is_empty() {
-                div class="banner warn" {
-                    span class="banner-icon" { (icon("shield")) }
-                    div class="banner-body" {
-                        p { "Repo command capabilities (" (trust.command_caps.join(", ")) ") won't run until you trust this repo — currently " span class="trust-status" { (trust.status) } "." }
-                        @if !trust.trusted {
-                            button class="btn btn-primary btn-sm" hx-post="/trust/allow" hx-target="#main" hx-confirm="Trust this repo to run its command-backed capabilities?" { "Allow this repo" }
-                        } @else {
-                            button class="btn btn-danger btn-sm" hx-post="/trust/deny" hx-target="#main" { "Revoke trust" }
-                        }
-                        p class="muted" { "An apply changes the repo config bundle, which re-locks trust — re-allow afterward." }
-                    }
-                }
             }
 
             @if !leaks.is_empty() {

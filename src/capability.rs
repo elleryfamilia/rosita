@@ -19,9 +19,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::profile::Rule;
 
-/// Which config layer defined a capability. Used for trust: commands authored
-/// in built-in/global layers are trusted; commands from a repo layer require
-/// `rosita allow`.
+/// Which config layer defined a capability. Drives global-only enforcement:
+/// capabilities are honored only from built-in/global/global-local layers (a
+/// repo layer that declares them is ignored, and `doctor` flags it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Layer {
     /// Shipped with rosita.
@@ -38,18 +38,12 @@ pub enum Layer {
 }
 
 impl Layer {
-    /// Whether commands authored in this layer run without `rosita allow`
-    /// (you authored built-in/global config; repo config is untrusted by default).
-    pub fn is_trusted_authorship(self) -> bool {
-        matches!(self, Layer::BuiltIn | Layer::Global | Layer::GlobalLocal)
-    }
-
     /// Whether `[[capabilities]]` defined in this layer are honored. Capabilities
-    /// are a **global** concept (the library any profile can compose); a repo
-    /// layer that declares them is ignored (and `doctor` flags it). Aligns with
-    /// trusted authorship — a repo can never contribute a capability.
+    /// are a **global** concept (the library any profile can compose): built-in,
+    /// the global `config.toml`, or the global `local.toml`. A repo layer that
+    /// declares them is ignored (and `doctor` flags it).
     pub fn contributes_capabilities(self) -> bool {
-        self.is_trusted_authorship()
+        matches!(self, Layer::BuiltIn | Layer::Global | Layer::GlobalLocal)
     }
 
     /// Whether `[[profiles]]` defined in this layer are honored. Profiles are
@@ -124,11 +118,11 @@ pub struct Capability {
     #[serde(default)]
     pub agents: Vec<String>,
     /// Dynamic: a built-in provider id (`host`/`docker`/…) whose live output is
-    /// embedded. Always trusted (built-in probes are safe).
+    /// embedded. Built-in probes are safe (no arbitrary command execution).
     #[serde(default)]
     pub provider: Option<String>,
     /// Dynamic: a shell command (or script body) whose (redacted) stdout is
-    /// embedded. Trust-gated when authored in a repo layer (see [`crate::trust`]).
+    /// embedded. Runs at render unless `allow_exec` is `false`.
     #[serde(default)]
     pub command: Option<String>,
     /// Interpreter for `command` when it is a script body: `bash`, `sh`, or
@@ -137,15 +131,15 @@ pub struct Capability {
     pub script_lang: Option<String>,
     /// Whether a `command`-backed capability is allowed to execute. Defaults to
     /// `true` (existing configs keep running); set `false` to disable a script
-    /// without deleting it. Layered *on top of* repo trust — a command runs only
-    /// when the repo is trusted AND this is `true`. Only serialized when `false`.
+    /// without deleting it — the off-switch for command execution. Only
+    /// serialized when `false`.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub allow_exec: bool,
     /// Cache TTL for dynamic output (e.g. `60s`, `5m`); default 60s.
     #[serde(default)]
     pub cache: Option<String>,
     /// Which config layer defined this capability (set during config load, not
-    /// deserialized). Drives command trust.
+    /// deserialized). Drives global-only enforcement.
     #[serde(skip)]
     pub origin: Layer,
 }
@@ -367,8 +361,8 @@ mod tests {
 
     #[test]
     fn palette_items_are_built_in_origin() {
-        // Palette items default to the BuiltIn origin and are never trusted as
-        // your own authorship until duplicated into a config layer.
+        // Palette items default to the BuiltIn origin; you don't own them until
+        // you duplicate one into a config layer.
         for c in palette() {
             assert_eq!(c.origin, Layer::BuiltIn);
         }

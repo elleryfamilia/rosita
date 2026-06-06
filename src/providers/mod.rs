@@ -12,7 +12,7 @@
 //! - **cached** under `.rosita/cache/<id>.json` with a TTL.
 //!
 //! New providers are rows in [`builtin_providers`]. Dynamic capabilities embed
-//! provider output (or a trust-gated shell `command`) via [`crate::dynamic`].
+//! provider output (or a shell `command`) via [`crate::dynamic`].
 
 mod ai_tools;
 mod docker;

@@ -93,8 +93,8 @@ impl Config {
 
         // Layers in precedence order (later wins). `None` entries (e.g. no
         // global dir) are skipped; missing files contribute nothing. Each layer
-        // tags its capabilities with their origin so command-trust can tell
-        // repo-authored commands from your own global ones.
+        // tags its capabilities with their origin so global-only enforcement can
+        // tell repo-declared caps from your own global ones.
         let mut layers: Vec<(Layer, PathBuf)> = Vec::new();
         if let Some(global) = global {
             layers.push((Layer::Global, global.to_path_buf()));
@@ -132,10 +132,10 @@ impl Config {
     ///
     /// Layers are given in precedence order (later wins). This is
     /// security-critical: `Capability::origin` is `#[serde(skip)]` and defaults
-    /// to [`Layer::BuiltIn`](crate::capability::Layer::BuiltIn), and the
-    /// command-trust gate keys off origin — a repo-authored `command` capability
-    /// assembled *without* re-tagging would look built-in and bypass
-    /// `rosita allow`. Mirrors the disk-load tagging in [`Config::load_from`].
+    /// to [`Layer::BuiltIn`](crate::capability::Layer::BuiltIn), and global-only
+    /// enforcement keys off origin — a repo-declared capability assembled
+    /// *without* re-tagging would look built-in and slip past the global-only
+    /// check. Mirrors the disk-load tagging in [`Config::load_from`].
     pub fn from_layer_strs(
         layers: Vec<(crate::capability::Layer, PathBuf, String)>,
     ) -> Result<Self> {

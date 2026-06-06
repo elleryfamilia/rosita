@@ -130,11 +130,11 @@ pub struct PreviewCap {
     pub risk: Risk,
     /// The capability's curated icon, if any (else the card uses a default).
     pub icon: Option<String>,
-    /// Rendered guidance markdown (or the trust-skip note).
+    /// Rendered guidance markdown (or the skip note).
     pub markdown: String,
     /// Resolved a dynamic provider/command.
     pub dynamic: bool,
-    /// A dynamic command was refused for lack of trust (markdown is the note).
+    /// A dynamic command was skipped (e.g. `allow_exec = false`; markdown is the note).
     pub skipped: bool,
     /// True when this id is an editable library capability (not a synthetic
     /// inline section) — gates the card's "Edit capability" affordance.
@@ -366,9 +366,9 @@ pub fn render_profile_config(
 /// Execute one dynamic capability **now** (Live), in `profile_name`'s context, so
 /// its (redacted) output lands in the on-disk cache. A subsequent ReadOnly
 /// preview then surfaces that cached output. This is the per-card "Run" action;
-/// trust still gates execution (a repo-authored command needs `rosita allow`, in
-/// which case the cache stays empty and the re-render shows the trust note).
-/// Resolving a non-dynamic id is a harmless no-op.
+/// execution is gated by `allow_exec` (a disabled command leaves the cache empty
+/// and the re-render shows the skip note). Resolving a non-dynamic id is a
+/// harmless no-op.
 pub fn run_capability(snap: &Snapshot, profile_name: &str, cap_id: &str) -> crate::Result<()> {
     let cfg = staged_config(snap)?;
     let cap = cfg
@@ -381,7 +381,7 @@ pub fn run_capability(snap: &Snapshot, profile_name: &str, cap_id: &str) -> crat
         None => snap.base_context.clone(),
     };
     // Live resolve runs the provider/command and writes the cache as a side
-    // effect; the returned value (or trust-skip) is surfaced by the re-render.
+    // effect; the returned value (or skip note) is surfaced by the re-render.
     let _ = crate::dynamic::resolve(
         cap,
         &ctx,

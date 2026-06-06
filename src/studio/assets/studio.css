@@ -465,7 +465,6 @@ legend { padding: 0 6px; font-size: 12px; font-weight: 600; display: flex; gap: 
 .banner.warn .banner-icon { color: var(--caution); }
 .banner.error { border-color: rgba(224, 98, 107, .45); background: rgba(224, 98, 107, .1); color: #ffc9cd; }
 .banner.error .banner-icon { color: var(--danger); }
-.trust-status { font-family: var(--mono); color: var(--caution); }
 .ok-line { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ok); font-size: 12.5px; }
 .ok-line .icon { color: var(--ok); }
 .mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }

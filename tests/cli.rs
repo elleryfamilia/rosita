@@ -1018,9 +1018,9 @@ fn dynamic_provider_capability_renders_live_output() {
 }
 
 #[test]
-fn global_layer_command_runs_without_allow() {
-    // A command authored in the GLOBAL config is trusted (you wrote it) and
-    // runs without `rosita allow`.
+fn global_layer_command_runs() {
+    // A command authored in the GLOBAL config runs and embeds its output —
+    // command capabilities are always global-authored now (no trust gate).
     let fx = Fixture::new();
     fx.rust_project();
     fx.write_global(
@@ -1047,9 +1047,8 @@ fn global_layer_command_runs_without_allow() {
 #[test]
 fn repo_command_capability_is_ignored() {
     // Capabilities are global-only: a `command` capability authored in a repo
-    // layer is dropped by the loader. It never renders, and there is nothing to
-    // trust — the per-repo command-trust gate is therefore dormant. (A command
-    // authored in the GLOBAL config still runs; see `global_layer_command_runs`.)
+    // layer is dropped by the loader, so it never renders. (A command authored
+    // in the GLOBAL config still runs; see `global_layer_command_runs`.)
     let fx = Fixture::new();
     fx.rust_project();
     fx.write(
@@ -1069,9 +1068,8 @@ fn repo_command_capability_is_ignored() {
         .assert()
         .success();
     let overlay = fx.read(".rosita/generated/claude.md");
-    // Neither the command output nor a trust-skip marker — the cap is gone.
+    // The command output never appears — the repo-declared cap is dropped.
     assert!(!overlay.contains("hello-rosita"));
-    assert!(!overlay.contains("skipped untrusted"));
 }
 
 #[test]

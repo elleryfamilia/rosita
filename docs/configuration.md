@@ -164,13 +164,13 @@ Confirm before any destructive remote command.
 # dynamic capability (native provider):
 [[capabilities]]
 id       = "network-awareness"
-provider = "tailnet"     # built-in provider (or: command = "..." for the generic, trust-gated one)
+provider = "tailnet"     # built-in provider (or: command = "..." for the generic shell-command form)
 cache    = "60s"
 guidance = "Live tailnet (as of {{ generated_at }}):\n{{ provider.output }}"
 ```
 
-See [security](security.md) for the trust rules governing `command`-backed
-capabilities.
+See [security](security.md) for how `command` execution is handled
+(`allow_exec`).
 
 ## Global flags (implemented)
 

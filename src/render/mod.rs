@@ -81,9 +81,8 @@ pub struct RenderOutput {
     /// empty, e.g. when every capability is restricted to other agents).
     pub profile_guidance: String,
     /// Whether any rendered capability was dynamic. Dynamic overlays bypass the
-    /// hash-skip so live output and trust changes always land (their volatile
-    /// output is excluded from the context hash, so the cache TTL — not the
-    /// hash — governs churn).
+    /// hash-skip so live output always lands (their volatile output is excluded
+    /// from the context hash, so the cache TTL — not the hash — governs churn).
     pub has_dynamic: bool,
     /// The composed capabilities, each rendered to its own markdown section.
     /// `profile_guidance` is exactly these joined; exposed structured so callers
@@ -103,12 +102,12 @@ pub struct RenderedCapability {
     pub title: String,
     /// Risk, for the section's annotation / the card's spine.
     pub risk: Risk,
-    /// Rendered guidance markdown, or the trust-skip note.
+    /// Rendered guidance markdown, or the skip note.
     pub body: String,
     /// True when this capability resolved a dynamic provider/command.
     pub dynamic: bool,
-    /// True when a dynamic command was refused for lack of trust (`body` is the
-    /// `> [rosita] …` skip note rather than rendered guidance).
+    /// True when a dynamic command was skipped (`allow_exec = false`); `body` is
+    /// the `> [rosita] …` skip note rather than rendered guidance.
     pub skipped: bool,
 }
 
@@ -234,8 +233,8 @@ pub fn render(req: &RenderRequest) -> crate::Result<RenderOutput> {
 /// per render), as are ones that render empty. A synthetic `<profile>:inline`
 /// capability can still be overridden by a `profiles/<name>.md.j2` template file
 /// (repo, then global). A **dynamic** capability resolves its provider/command
-/// output (trust-gated, cache-backed) with `provider.output`/`provider.data` in
-/// scope; an untrusted command renders a skip note instead.
+/// output (cache-backed) with `provider.output`/`provider.data` in scope; a
+/// command with `allow_exec = false` renders a skip note instead.
 fn render_capability_list(
     renderer: &MinijinjaRenderer,
     ctx: &Context,
@@ -277,7 +276,7 @@ fn render_capability_list(
         let mut skipped = false;
 
         let body: String = match &dyn_res {
-            // Dynamic, but the command was refused for lack of trust.
+            // Dynamic, but the command was skipped (e.g. allow_exec = false).
             Some(res) if res.skipped.is_some() => {
                 skipped = true;
                 format!("> [rosita] {}", res.skipped.as_ref().unwrap())

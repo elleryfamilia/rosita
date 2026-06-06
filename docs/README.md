@@ -8,7 +8,7 @@ keeping it fresh and never leaking secrets.
 ## For consumers
 - [Concepts](concepts.md) — the mental model (context, capabilities, profiles, the binding, agents, freshness, public/private).
 - [Configuration](configuration.md) — the layered config and full schema reference.
-- [Security](security.md) — secrets, redaction, the public/private split, and the command-execution trust model.
+- [Security](security.md) — secrets, redaction, the public/private split, and command execution (`allow_exec`).
 
 ## For developers / extenders
 - [Architecture](architecture.md) — modules, trait seams, and the render pipeline (reflects the current code).

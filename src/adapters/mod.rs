@@ -557,9 +557,9 @@ fn render_overlay(d: &AgentDescriptor, app: &AppContext) -> crate::Result<render
 /// matches (unless `force`). Keeps renders idempotent despite the timestamp.
 ///
 /// Dynamic overlays pass `force = true`: their volatile output is excluded from
-/// the context hash, so the hash alone can't detect that live output or a trust
-/// decision changed — always rewriting lets those land (the cache TTL still
-/// prevents re-executing the probe).
+/// the context hash, so the hash alone can't detect that live output changed —
+/// always rewriting lets it land (the cache TTL still prevents re-executing the
+/// probe).
 fn write_hash_skipping(
     app: &AppContext,
     force: bool,

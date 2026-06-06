@@ -1,13 +1,12 @@
-//! Resolving dynamic capabilities — live provider/command output, trust-gated.
+//! Resolving dynamic capabilities — live provider/command output.
 //!
 //! A capability is *dynamic* when it has a `provider` (a built-in probe) or a
 //! `command` (a shell command). At render time [`resolve`] produces its output,
-//! honoring the cache and the trust model:
+//! honoring the cache:
 //!
-//! - built-in `provider` → always allowed (safe probes),
-//! - `command` from a built-in/global layer → allowed (you authored it),
-//! - `command` from a repo layer → allowed only if the repo is trusted
-//!   ([`crate::trust`]); otherwise it is refused and a skip note is rendered.
+//! - built-in `provider` → always run (safe probes),
+//! - `command` → run unless `allow_exec` is `false` (the per-capability
+//!   off-switch), in which case a skip note is rendered instead.
 //!
 //! [`DynamicMode::ReadOnly`] (used by `explain` and dry-run) never executes or
 //! writes — it surfaces only what is already cached. This keeps `explain`
@@ -38,7 +37,8 @@ pub enum DynamicMode {
 pub struct Resolution {
     /// Embedded output, if available (absent when unavailable or not cached).
     pub output: Option<ProviderOutput>,
-    /// Set when a command was refused for lack of trust (renders a skip note).
+    /// Set when a command was skipped (e.g. `allow_exec = false`); the value is
+    /// the human note, rendered in place of output.
     pub skipped: Option<String>,
 }
 
@@ -62,20 +62,12 @@ pub fn resolve(
 
     // An explicit command wins over a provider when both are set.
     if let Some(command) = &cap.command {
-        // Per-capability off-switch, layered on top of repo trust.
+        // Per-capability off-switch (`allow_exec = false` disables execution).
         if !cap.allow_exec {
             return Some(Resolution {
                 output: None,
                 skipped: Some(
                     "execution disabled for this capability (allow_exec = false)".to_string(),
-                ),
-            });
-        }
-        if !command_trusted(cap, repo_base) {
-            return Some(Resolution {
-                output: None,
-                skipped: Some(
-                    "skipped untrusted command — run `rosita allow` to enable".to_string(),
                 ),
             });
         }
@@ -99,10 +91,4 @@ pub fn resolve(
         output: providers::probe_one(pid, ctx, repo_base, ttl, now, live),
         skipped: None,
     })
-}
-
-/// Whether a command-backed capability may run: trusted if authored in a
-/// built-in/global layer, or if the repo has been `rosita allow`-ed.
-fn command_trusted(cap: &Capability, repo_base: &Path) -> bool {
-    cap.origin.is_trusted_authorship() || crate::trust::is_trusted(repo_base)
 }

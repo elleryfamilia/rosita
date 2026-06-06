@@ -24,8 +24,8 @@ Two flavors:
 - **Dynamic** — guidance computed at render time from a `provider`
   (a built-in probe) or a `command` (a shell command), whose live output is
   embedded as `{{ provider.output }}` / `{{ provider.data }}`. Cache-backed
-  (per-capability `cache` TTL), redacted, and **trust-gated** (see *Public vs
-  private* and *Providers*). This is how rosita natively answers "what
+  (per-capability `cache` TTL), redacted, and gated only by `allow_exec` (see
+  *Providers*). This is how rosita natively answers "what
   machine/network am I on?"
 
 Capabilities are parameterized (`params`), can self-gate (`when`), declare
@@ -83,7 +83,8 @@ environment and returns output (`text` + structured `data`):
 - `docker` — running containers (parsed from `docker ps`).
 
 The generic escape hatch is a capability's `command` (run any shell command,
-embed redacted stdout) rather than a provider — trust-gated (see below).
+embed redacted stdout) rather than a provider — it runs unless `allow_exec` is
+`false`.
 
 Probing is **opt-in** via `rosita detect --probes` (a bare `detect` never spawns
 subprocesses), and dynamic capabilities embed provider/command output into the

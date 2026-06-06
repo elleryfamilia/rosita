@@ -42,7 +42,6 @@ pub mod render;
 pub mod report;
 pub mod studio;
 pub mod templates;
-pub mod trust;
 pub mod writer;
 
 /// Crate-wide result alias built on [`anyhow`].

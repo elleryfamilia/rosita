@@ -6,8 +6,8 @@
 //! - **Repo** → the repo's gitignored `.rosita/local.toml` `[binding]` table
 //!   (per-checkout; a teammate's checkout makes its own choice). Written with
 //!   `toml_edit` so the rest of the private layer is preserved.
-//! - **Machine** (no repo) → a global, path-keyed store `bindings.toml`, the way
-//!   [`crate::trust`] keys by repo path.
+//! - **Machine** (no repo) → a global, path-keyed store `bindings.toml`, keyed
+//!   by the project path.
 //!
 //! `None` is an explicit, remembered choice — opting a project out of rosita
 //! entirely. The store is rosita-owned, so the global file is written with the

@@ -59,7 +59,8 @@ in scope. The provenance/freshness banner is prepended in Rust
 
 Add a `[[capabilities]]` entry to your **global** config and reference its `id`
 from a profile's `capabilities` list. Static capabilities are just templated
-guidance; dynamic ones name a `provider` (or, trust permitting, a `command`). See
+guidance; dynamic ones name a `provider` (or a `command`, run unless `allow_exec`
+is `false`). See
 [configuration](configuration.md#capabilities-implemented).
 
 ## Add a native provider **(implemented — code)**

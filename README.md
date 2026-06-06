@@ -152,8 +152,8 @@ comment-preserving TOML you could have hand-written.
   detected target plus a few palette capabilities, all staged for you to tweak.
 
 Hand-edit a config file and studio reflects it; everything stays git-diffable and
-yours. Studio never executes a capability during preview, so it stays off the
-command-trust attack surface.
+yours. Studio never executes a capability during preview — editing is
+side-effect-free until you Apply.
 
 ## Install
 
@@ -199,7 +199,6 @@ ln -s "$PWD/skills/rosita-migrate" ~/.claude/skills/rosita-migrate
 | `rosita capabilities [list\|show <id>] [--json]` | List your capability library (active ones marked), or show one in detail. |
 | `rosita profiles [--json]` | List your profiles with their `targets`, marking which match and which is selected. |
 | `rosita agents [--json]` | List configured agents and how each delivers the overlay. |
-| `rosita allow` / `deny` / `trust` | Trust / untrust / show trust for `command`-backed capabilities in this repo. |
 
 `<id>` is an agent id — built-ins are `claude`, `codex`, `gemini`, `opencode`,
 `copilot`, `generic` (plus any you add via `[[agents]]`). `--agent` defaults to
@@ -285,9 +284,10 @@ A capability may embed **live** environment output via a built-in `provider`
 (`host` / `toolchain` / `ai-tools` / `tailnet` / `docker`) or a shell `command`
 (`{{ provider.output }}` / `{{ provider.data }}` in scope, cache-backed). Output
 is redacted, kept out of the context hash, and lands only in the gitignored
-overlay. A `command`-backed capability is **trust-gated**: rosita refuses to run
-it until you `rosita allow` the repo (direnv-style trust, re-locked when the
-config changes); built-in providers are always safe.
+overlay. A `command`-backed capability runs at render unless you set
+`allow_exec = false` (the per-capability off-switch); built-in providers are
+always safe. Because capabilities are global-only, a cloned repo can't introduce
+one — there's nothing untrusted to gate.
 
 ```toml
 [[capabilities]]

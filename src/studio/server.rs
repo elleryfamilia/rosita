@@ -30,8 +30,7 @@ use crate::studio::edit::{Session, StagedOp};
 use crate::studio::state::{
     self, BindingState, LibraryView, PreviewOutcome, Simulated, StudioState,
 };
-use crate::studio::views::{self, TrustBanner};
-use crate::trust;
+use crate::studio::views;
 
 /// The sole route reachable without the session cookie (carries the token).
 pub const BOOTSTRAP_PATH: &str = "/__studio/bootstrap";
@@ -135,8 +134,6 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("GET", "/fs-status") => handle_fs_status(state),
         ("GET", "/diff") => handle_diff(state),
         ("POST", "/apply") => handle_apply(state),
-        ("POST", "/trust/allow") => handle_trust(state, true),
-        ("POST", "/trust/deny") => handle_trust(state, false),
         ("GET", "/capabilities/new") => {
             Resp::html(views::cap_dialog(None, Layer::Global, true, None, &[]))
         }
@@ -327,8 +324,8 @@ fn handle_profile_detail(
 }
 
 /// Run all of a profile's dynamic caps now (Live), then re-render its detail so
-/// every script/provider shows real output. Scripts run trust-gated and their
-/// (redacted) output is cached, so the read-only preview keeps showing it.
+/// every script/provider shows real output. Scripts run (subject to `allow_exec`)
+/// and their (redacted) output is cached, so the read-only preview keeps it.
 fn handle_profile_run(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
     handle_profile_detail(state, name, "", DynamicMode::Live)
 }
@@ -838,14 +835,13 @@ fn profile_preview_or_empty(
 }
 
 fn handle_diff(state: &Arc<Mutex<StudioState>>) -> Resp {
-    let (diffs, texts, staged, fs_changed, repo_base) = {
+    let (diffs, texts, staged, fs_changed) = {
         let s = state.lock().unwrap();
         (
             s.session.diff(),
             s.session.staged_layer_texts(),
             s.session.ops().len(),
             s.session.external_edits(),
-            s.repo_base.clone(),
         )
     };
     // Leak-lint the full staged PUBLIC config (the sync-safety guard, §7) — what
@@ -857,21 +853,7 @@ fn handle_diff(state: &Arc<Mutex<StudioState>>) -> Resp {
         .collect();
     leaks.sort();
     leaks.dedup();
-    let trust = match Config::from_layer_strs(texts) {
-        Ok(cfg) => trust_banner(&cfg, &repo_base),
-        Err(_) => TrustBanner {
-            command_caps: vec![],
-            status: "unknown".into(),
-            trusted: false,
-        },
-    };
-    Resp::html(views::diff_view(
-        &diffs,
-        &leaks,
-        &fs_changed,
-        &trust,
-        staged,
-    ))
+    Resp::html(views::diff_view(&diffs, &leaks, &fs_changed, staged))
 }
 
 fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
@@ -886,35 +868,6 @@ fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
             true,
         ),
         Err(e) => Resp::html(views::error_fragment(&format!("apply failed: {e}"))),
-    }
-}
-
-fn handle_trust(state: &Arc<Mutex<StudioState>>, allow: bool) -> Resp {
-    let repo_base = state.lock().unwrap().repo_base.clone();
-    let res = if allow {
-        trust::allow(&repo_base)
-    } else {
-        trust::deny(&repo_base).map(|_| ())
-    };
-    match res {
-        // Re-render the review so the trust banner reflects the new state.
-        Ok(()) => handle_diff(state),
-        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
-    }
-}
-
-fn trust_banner(cfg: &Config, repo_base: &std::path::Path) -> TrustBanner {
-    let command_caps: Vec<String> = cfg
-        .capabilities
-        .iter()
-        .filter(|c| c.command.is_some() && matches!(c.origin, Layer::Repo | Layer::RepoLocal))
-        .map(|c| c.id.clone())
-        .collect();
-    let status = trust::status(repo_base);
-    TrustBanner {
-        command_caps,
-        status: status.label().to_string(),
-        trusted: status == trust::Status::Trusted,
     }
 }
 
@@ -1559,9 +1512,7 @@ mod tests {
     #[test]
     fn diff_surfaces_leak_warning_for_public_config() {
         // A capability whose guidance carries a machine-specific literal in the
-        // public (global) config.toml is leak-linted before apply. The command
-        // is global-authored → trusted, so there is no trust banner (that gate
-        // is dormant now that repos can't author commands).
+        // public (global) config.toml is leak-linted before apply.
         let cfg = "[[capabilities]]\n\
              id = \"deploy\"\n\
              command = \"echo hi\"\n\
@@ -1664,7 +1615,7 @@ mod tests {
 
     #[test]
     fn run_all_executes_dynamic_caps_live() {
-        // The `host` provider is always trusted, so a Live run produces output.
+        // The `host` provider is a safe built-in probe, so a Live run produces output.
         let cfg = "[[capabilities]]\nid = \"host\"\ndescription = \"Host\"\nprovider = \"host\"\n\
              \n[[profiles]]\nname = \"m\"\ntargets = [\"rust\"]\ncapabilities = [\"host\"]\n";
         let d = rust_repo();

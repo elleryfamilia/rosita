@@ -51,22 +51,21 @@ specific content, or (for `AGENTS.override.md`, which Codex *prefers* over
 gitignore management is skipped entirely outside a git repo (no stray
 `.gitignore` in `$HOME`).
 
-## Command-execution trust model **(implemented)**
+## Command execution **(implemented)**
 
-Dynamic capabilities can run code at render time, so rosita gates it
-direnv-style:
+Dynamic capabilities can run code at render time, so the surface is kept small:
 
 - **Built-in providers** (`host`, `toolchain`, `ai-tools`, `tailnet`, `docker`)
-  are rosita-controlled probes — always allowed, no trust needed.
-- **`command`-backed capabilities** run an arbitrary shell command. One is
-  honored only from a **trusted-authorship** layer — your global / global-local
-  config, which you wrote — or from a repo you've explicitly `rosita allow`-ed.
-  `allow` records a hash of the repo's `.rosita` bundle in a global trust store;
-  a config change re-locks it; `rosita deny` / `rosita trust status` manage it.
-- **Repo-declared capabilities and profiles are ignored entirely** under the
-  global-only model (see [configuration](configuration.md)). A cloned repo can't
-  inject guidance *or* commands into your overlay at all; the command-authorship
-  trust gate is the defense-in-depth backstop on top of that.
+  are rosita-controlled probes — they never run arbitrary commands.
+- **`command`-backed capabilities** run a shell command. The per-capability
+  `allow_exec` flag is the off-switch: `allow_exec = false` makes rosita embed a
+  skip note instead of running it.
+- **Capabilities are global-only** (see [configuration](configuration.md)).
+  They're honored only from your built-in / global / global-local config — *you*
+  author them. A cloned repo cannot contribute a capability at all: repo-declared
+  caps are dropped by the loader and `doctor` flags them. So there's no
+  "untrusted command from a cloned repo" to gate — the global-only model removes
+  that surface rather than prompting for it (there is no `rosita allow`).
 - Provider/command output is treated as sensitive (see the split above):
   local/gitignored only, redacted, never committed.
 
@@ -76,6 +75,7 @@ never reads or runs what the repo itself declares.
 ## Threat model summary
 
 rosita defends against: leaking secrets into overlays; leaking sensitive
-topology into shareable/committed config; and executing untrusted code from
-cloned repos. It does **not** attempt to constrain what the agent does once it
-reads the overlay — that is out of scope by design (guidance, not policy).
+topology into shareable/committed config; and running code a cloned repo tries
+to introduce (it can't — capabilities are global-only). It does **not** attempt
+to constrain what the agent does once it reads the overlay — that is out of scope
+by design (guidance, not policy).
