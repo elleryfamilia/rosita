@@ -19,10 +19,19 @@ pub fn run(rt: &Runtime, args: &RenderArgs) -> crate::Result<()> {
         codex_no_override: args.codex_no_override,
         force: args.force,
     };
-    apply_for_agents(rt, &prep, &agents, &opts)
+    if rt.dry_run {
+        println!("dry run — no files will be written\n");
+    }
+    let results = apply_for_agents(rt, &prep, &agents, &opts)?;
+    for (agent, result) in &results {
+        print_result(agent, prep.profile_label(), result);
+    }
+    Ok(())
 }
 
-/// Render + apply for each agent id, audit each, and print a summary.
+/// Render + apply for each agent id and audit each, returning the per-agent
+/// results (the caller decides how to present them — detailed for
+/// `render`/`refresh`, a concise summary for `run`).
 ///
 /// Shared by `render`, `refresh`, and the pre-launch step of `run`.
 pub fn apply_for_agents(
@@ -30,14 +39,11 @@ pub fn apply_for_agents(
     prep: &Prepared,
     agents: &[String],
     opts: &ApplyOptions,
-) -> crate::Result<()> {
+) -> crate::Result<Vec<(String, ApplyResult)>> {
     let writer = AtomicWriter::new(rt.dry_run);
     let generated_at = now_rfc3339();
 
-    if rt.dry_run {
-        println!("dry run — no files will be written\n");
-    }
-
+    let mut results = Vec::with_capacity(agents.len());
     for agent in agents {
         let descriptor = adapters::descriptor(&prep.config, agent)
             .ok_or_else(|| anyhow!("unknown agent '{agent}'"))?;
@@ -73,12 +79,12 @@ pub fn apply_for_agents(
             }
         }
 
-        print_result(agent, prep.profile_label(), &result);
+        results.push((agent.clone(), result));
     }
-    Ok(())
+    Ok(results)
 }
 
-fn print_result(agent: &str, profile_label: &str, result: &ApplyResult) {
+pub(crate) fn print_result(agent: &str, profile_label: &str, result: &ApplyResult) {
     println!(
         "{agent}  ·  profile {profile_label}  ·  {}",
         hash::short(&result.context_hash)

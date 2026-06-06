@@ -21,11 +21,16 @@ use std::process::Command;
 
 use anyhow::anyhow;
 
+use std::time::Duration;
+
 use super::{now_rfc3339, prepare_with, Choice, ProfileChooser, Runtime};
-use crate::adapters::{self, AgentDescriptor, ApplyOptions};
+use crate::adapters::{self, AgentDescriptor, ApplyOptions, ApplyResult};
 use crate::cli::RunArgs;
 use crate::context::Context;
+use crate::hash;
 use crate::profile::ProfileConfig;
+use crate::style::Painter;
+use crate::sync::{self, SyncStatus};
 use crate::vlog;
 
 /// Interactive "which profile?" prompt for `rosita run` when 2+ profiles match
@@ -85,6 +90,14 @@ impl ProfileChooser for StdinChooser {
 /// Entry point for `rosita run`.
 pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     let agent = args.agent.as_str();
+    let p = Painter::auto();
+
+    // Pull the latest config first — best-effort, throttled, timeout-bounded;
+    // it never blocks the launch. Done before `prepare_with` so the render below
+    // composes freshly-pulled capabilities/profiles. Print the line right away.
+    let sync_status = sync_before_render(rt);
+    print_sync_step(&p, &sync_status);
+
     let prep = prepare_with(rt, &StdinChooser)?;
     let descriptor = adapters::descriptor(&prep.config, agent)
         .ok_or_else(|| anyhow!("unknown agent '{agent}'"))?
@@ -104,18 +117,23 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
         ));
     }
 
-    // Preflight render (unless skipped).
+    // Preflight render (quiet — `run` prints its own concise summary).
     let rendered = !args.skip_render;
-    if rendered {
+    let result = if rendered {
         let opts = ApplyOptions {
             codex_override: args.codex_override,
             codex_no_override: args.codex_no_override,
             force: false,
         };
-        super::render::apply_for_agents(rt, &prep, &[agent.to_string()], &opts)?;
+        super::render::apply_for_agents(rt, &prep, &[agent.to_string()], &opts)?
+            .into_iter()
+            .next()
+            .map(|(_, r)| r)
     } else {
         vlog!("skipping pre-launch render (--skip-render)");
-    }
+        None
+    };
+    print_render_step(&p, &prep, agent, result.as_ref());
 
     let rendered_at = now_rfc3339();
     let launch_args = build_launch_args(&descriptor, &prep, rendered, &rendered_at, &args.args);
@@ -124,13 +142,154 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     if rt.dry_run {
         let env_prefix: String = extra_env.iter().map(|(k, v)| format!("{k}={v} ")).collect();
         println!(
-            "dry run — would exec: {env_prefix}{program} {}",
-            launch_args.join(" ")
+            "  {} {}  {} {}",
+            p.cyan("▸"),
+            p.bold("dry run"),
+            p.dim("would exec:"),
+            p.dim(&format!("{env_prefix}{program} {}", launch_args.join(" ")))
         );
         return Ok(());
     }
+    print_launch_step(&p, &program, &args.args);
 
     launch(&program, &launch_args, &rendered_at, &rt.cwd, &extra_env)
+}
+
+// --- sync + the stepped run summary ------------------------------------------
+
+/// Best-effort auto-pull of the global config before rendering. Loads config to
+/// read `[sync]`, then pulls if enabled + stale (the subsequent `prepare_with`
+/// re-reads the now-current config). Never fails — errors map to `Offline`.
+fn sync_before_render(rt: &Runtime) -> SyncStatus {
+    let Ok(dir) = sync::config_dir() else {
+        return SyncStatus::Disabled;
+    };
+    let repo_base = crate::context::repo_base_for(&rt.cwd);
+    match crate::config::Config::load(&repo_base) {
+        Ok(cfg) => sync::auto_pull(&cfg.sync, &dir),
+        Err(_) => SyncStatus::Disabled,
+    }
+}
+
+/// `  <glyph> <label>  <detail>` — one aligned step line.
+fn step(p: &Painter, glyph: String, label: &str, detail: String) -> String {
+    format!("  {glyph} {}  {detail}", p.bold(&format!("{label:<6}")))
+}
+
+fn print_sync_step(p: &Painter, s: &SyncStatus) {
+    let line = match s {
+        SyncStatus::Disabled => return,
+        SyncStatus::Skipped { age } => step(
+            p,
+            p.green("✓"),
+            "sync",
+            format!(
+                "up to date {}",
+                p.dim(&format!("· synced {}", age_ago(*age)))
+            ),
+        ),
+        SyncStatus::UpToDate => step(
+            p,
+            p.green("✓"),
+            "sync",
+            format!("up to date {}", p.dim("· synced just now")),
+        ),
+        SyncStatus::Pulled {
+            commits,
+            remote,
+            took,
+        } => step(
+            p,
+            p.green("⟳"),
+            "sync",
+            format!(
+                "pulled {} {}",
+                changes(*commits),
+                p.dim(&format!("· {remote}  {}", dur(*took)))
+            ),
+        ),
+        SyncStatus::Offline { last } => step(
+            p,
+            p.yellow("⚠"),
+            "sync",
+            format!(
+                "offline — using local config{}",
+                last.map(|a| p.dim(&format!(" · synced {}", age_ago(a))))
+                    .unwrap_or_default()
+            ),
+        ),
+        SyncStatus::Diverged => step(
+            p,
+            p.yellow("⚠"),
+            "sync",
+            "diverged — run `rosita sync` to reconcile".to_string(),
+        ),
+    };
+    println!("{line}");
+}
+
+fn print_render_step(
+    p: &Painter,
+    prep: &super::Prepared,
+    agent: &str,
+    result: Option<&ApplyResult>,
+) {
+    let label = prep.profile_label();
+    let profile = if label.is_empty() {
+        "no profile"
+    } else {
+        label
+    };
+    let detail = match result {
+        Some(r) => format!(
+            "{profile} → {agent} {}",
+            p.dim(&format!("· {}", hash::short(&r.context_hash)))
+        ),
+        None => format!("{profile} → {agent} {}", p.dim("· render skipped")),
+    };
+    println!("{}", step(p, p.green("✓"), "render", detail));
+}
+
+fn print_launch_step(p: &Painter, program: &str, args: &[String]) {
+    let cmd = if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{program} {}", args.join(" "))
+    };
+    println!("{}", step(p, p.cyan("▸"), "launch", cmd));
+}
+
+/// "1 change" / "N changes".
+fn changes(n: usize) -> String {
+    if n == 1 {
+        "1 change".to_string()
+    } else {
+        format!("{n} changes")
+    }
+}
+
+/// "just now" / "Nm ago" / "Nh ago" / "Nd ago".
+fn age_ago(d: Duration) -> String {
+    let s = d.as_secs();
+    if s < 60 {
+        "just now".to_string()
+    } else if s < 3600 {
+        format!("{}m ago", s / 60)
+    } else if s < 86_400 {
+        format!("{}h ago", s / 3600)
+    } else {
+        format!("{}d ago", s / 86_400)
+    }
+}
+
+/// "320ms" / "1.3s".
+fn dur(d: Duration) -> String {
+    let ms = d.as_millis();
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
 }
 
 /// Env vars `rosita run` injects so an agent with no persistent local hook finds

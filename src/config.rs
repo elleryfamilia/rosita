@@ -48,8 +48,37 @@ pub struct Config {
     pub agents: Vec<AgentDescriptor>,
     /// hostname-glob → host class (e.g. `work`).
     pub host_classes: BTreeMap<String, Vec<String>>,
+    /// Cross-machine sync settings (`[sync]`).
+    pub sync: SyncConfig,
     /// Config files that actually contributed, in load order.
     pub sources: Vec<PathBuf>,
+}
+
+/// Cross-machine sync of the global config dir (`[sync]`). Auto-pull/push are on
+/// by default but **inert** unless the config dir is a git repo with a remote
+/// (`rosita sync init`), so they never act on a machine that opted out.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncConfig {
+    /// Pull the latest config before `run`/`render`/`refresh` (throttled by
+    /// `pull_max_age`, bounded by `timeout`, best-effort).
+    pub auto_pull: bool,
+    /// Commit + push after an apply (studio / future CLI edits). Best-effort.
+    pub auto_push: bool,
+    /// Skip an auto-pull when the last successful sync was within this window.
+    pub pull_max_age: std::time::Duration,
+    /// Hard cap on any git network op; exceeded → fall back to local config.
+    pub timeout: std::time::Duration,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        SyncConfig {
+            auto_pull: true,
+            auto_push: true,
+            pull_max_age: std::time::Duration::from_secs(300), // 5m
+            timeout: std::time::Duration::from_secs(5),
+        }
+    }
 }
 
 /// Environment-variable exposure policy. Allowlist-only, with a name denylist
@@ -178,6 +207,7 @@ struct RawConfig {
     defaults: Option<RawDefaults>,
     env: Option<RawEnv>,
     codex: Option<RawCodex>,
+    sync: Option<RawSync>,
     #[serde(default)]
     profiles: Vec<ProfileConfig>,
     #[serde(default)]
@@ -214,6 +244,15 @@ struct RawEnv {
 struct RawCodex {
     write_override: Option<bool>,
     max_output_kib: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSync {
+    auto_pull: Option<bool>,
+    auto_push: Option<bool>,
+    pull_max_age: Option<String>, // duration string, e.g. "5m"
+    timeout: Option<String>,      // duration string, e.g. "5s"
 }
 
 impl RawConfig {
@@ -258,6 +297,21 @@ impl RawConfig {
                 slot.max_output_kib = c.max_output_kib;
             }
         }
+        if let Some(s) = other.sync {
+            let slot = self.sync.get_or_insert_with(Default::default);
+            if s.auto_pull.is_some() {
+                slot.auto_pull = s.auto_pull;
+            }
+            if s.auto_push.is_some() {
+                slot.auto_push = s.auto_push;
+            }
+            if s.pull_max_age.is_some() {
+                slot.pull_max_age = s.pull_max_age;
+            }
+            if s.timeout.is_some() {
+                slot.timeout = s.timeout;
+            }
+        }
         // Later-layer profiles replace earlier ones of the same name.
         for p in other.profiles {
             match self.profiles.iter_mut().find(|e| e.name == p.name) {
@@ -297,6 +351,7 @@ impl RawConfig {
         let defaults = self.defaults.unwrap_or_default();
         let env = self.env.unwrap_or_default();
         let codex = self.codex.unwrap_or_default();
+        let sync = self.sync.unwrap_or_default();
 
         // No shipped profiles and no auto-injected capabilities: both are
         // entirely user-authored (already merged by name/id across layers in
@@ -332,6 +387,20 @@ impl RawConfig {
             capability_params: self.capability_params,
             agents,
             host_classes: self.host_classes,
+            sync: SyncConfig {
+                auto_pull: sync.auto_pull.unwrap_or(true),
+                auto_push: sync.auto_push.unwrap_or(true),
+                pull_max_age: sync
+                    .pull_max_age
+                    .as_deref()
+                    .and_then(crate::providers::parse_duration)
+                    .unwrap_or_else(|| std::time::Duration::from_secs(300)),
+                timeout: sync
+                    .timeout
+                    .as_deref()
+                    .and_then(crate::providers::parse_duration)
+                    .unwrap_or_else(|| std::time::Duration::from_secs(5)),
+            },
             sources,
         }
     }

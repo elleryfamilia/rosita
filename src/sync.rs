@@ -1,0 +1,588 @@
+//! Cross-machine sync of the global config dir via the `git` CLI (no libgit2).
+//!
+//! The global config dir (where `config.toml` lives) is a git repo. `config.toml`
+//! — your shareable capabilities & profiles, secret-free by design — is tracked
+//! and syncs; `local.toml` (per-machine hostnames / secret-adjacent params) is
+//! gitignored and never leaves the machine. Every network op is **timeout-bounded
+//! and non-fatal**: a slow/offline remote degrades to "use the local config",
+//! never a hang and never a failed `rosita run`.
+//!
+//! Auto-pull (before run/render) is throttled by `[sync] pull_max_age`; auto-push
+//! (after an apply) is best-effort. `rosita sync` is the manual force.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime};
+
+use anyhow::{anyhow, bail, Context as _, Result};
+
+use crate::config::SyncConfig;
+
+/// The status of an auto-pull, used to drive the `rosita run` sync line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncStatus {
+    /// Not configured here (auto-pull off, or the dir isn't a synced repo).
+    /// No line is printed.
+    Disabled,
+    /// Skipped the network: the last sync is within `pull_max_age`.
+    Skipped { age: Duration },
+    /// Pulled new commits from the remote.
+    Pulled {
+        commits: usize,
+        remote: String,
+        took: Duration,
+    },
+    /// Reached the remote; already current.
+    UpToDate,
+    /// Couldn't reach the remote (offline / timeout / auth) — using local config.
+    Offline { last: Option<Duration> },
+    /// Local and remote diverged — a manual `rosita sync` is needed.
+    Diverged,
+}
+
+/// Outcome of a fast-forward pull.
+pub enum PullOutcome {
+    /// Fast-forwarded `n` commits (0 = already up to date).
+    Pulled(usize),
+    /// Remote has commits that don't fast-forward onto local.
+    Diverged,
+}
+
+/// Outcome of a commit + push.
+pub enum PushOutcome {
+    /// Pushed (committed first if there were changes).
+    Pushed,
+    /// Working tree clean and nothing unpushed.
+    NothingToPush,
+    /// Push rejected — the remote moved ahead; pull first.
+    Diverged,
+}
+
+/// The global config dir we sync (the directory holding `config.toml`).
+pub fn config_dir() -> Result<PathBuf> {
+    crate::config::global_config_dir()
+        .ok_or_else(|| anyhow!("no config directory (could not determine home)"))
+}
+
+/// Whether `dir` is a git repo with at least one remote — i.e. `rosita sync init`
+/// (or `clone`) has been run. Auto-pull/push are inert otherwise.
+pub fn is_synced(dir: &Path) -> bool {
+    dir.join(".git").exists()
+        && git(dir, &["remote"], None)
+            .map(|o| o.ok && !o.stdout.trim().is_empty())
+            .unwrap_or(false)
+}
+
+/// Time of the last successful sync (a stamp file we touch on pull/clone/init —
+/// more reliable than `FETCH_HEAD`, which `git clone` doesn't always write).
+pub fn last_synced(dir: &Path) -> Option<SystemTime> {
+    std::fs::metadata(stamp_path(dir)).ok()?.modified().ok()
+}
+
+fn stamp_path(dir: &Path) -> PathBuf {
+    dir.join(".git").join("rosita-sync")
+}
+
+/// Record "synced just now" (mtime = now). Best-effort; ignored on failure.
+fn touch_stamp(dir: &Path) {
+    let _ = std::fs::write(stamp_path(dir), b"");
+}
+
+/// A short, human display name for the remote (the repo name, e.g. `rosita-config`).
+pub fn remote_name(dir: &Path) -> String {
+    git(dir, &["remote", "get-url", "origin"], None)
+        .ok()
+        .filter(|o| o.ok)
+        .map(|o| {
+            let url = o.stdout.trim();
+            url.rsplit(['/', ':'])
+                .next()
+                .unwrap_or(url)
+                .trim_end_matches(".git")
+                .to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "remote".to_string())
+}
+
+// --- the throttled auto-pull (the run/render hook) ---------------------------
+
+/// Pull the latest config before a render, honoring `[sync]`: inert if not a
+/// synced repo or `auto_pull = false`; skipped when synced within `pull_max_age`;
+/// otherwise a timeout-bounded fast-forward pull. **Never fails** — any error maps
+/// to `Offline` so the caller proceeds with the on-disk config.
+pub fn auto_pull(cfg: &SyncConfig, dir: &Path) -> SyncStatus {
+    if !cfg.auto_pull || !is_synced(dir) {
+        return SyncStatus::Disabled;
+    }
+    let age = last_synced(dir).and_then(|t| t.elapsed().ok());
+    if let Some(age) = age {
+        if age < cfg.pull_max_age {
+            return SyncStatus::Skipped { age };
+        }
+    }
+    let start = Instant::now();
+    match pull(dir, cfg.timeout) {
+        Ok(PullOutcome::Pulled(0)) => SyncStatus::UpToDate,
+        Ok(PullOutcome::Pulled(n)) => SyncStatus::Pulled {
+            commits: n,
+            remote: remote_name(dir),
+            took: start.elapsed(),
+        },
+        Ok(PullOutcome::Diverged) => SyncStatus::Diverged,
+        Err(_) => SyncStatus::Offline { last: age },
+    }
+}
+
+// --- primitive git operations ------------------------------------------------
+
+/// Fast-forward pull, timeout-bounded. Returns how many commits were pulled.
+pub fn pull(dir: &Path, timeout: Duration) -> Result<PullOutcome> {
+    let before = head(dir);
+    let out = git(dir, &["pull", "--ff-only", "--no-rebase"], Some(timeout))?;
+    if !out.ok {
+        if out.stderr.contains("fast-forward") || out.stderr.contains("diverg") {
+            return Ok(PullOutcome::Diverged);
+        }
+        bail!("git pull failed: {}", first_line(&out.stderr));
+    }
+    touch_stamp(dir);
+    let after = head(dir);
+    let n = match (before, after) {
+        (Some(a), Some(b)) if a != b => count_commits(dir, &a, &b),
+        _ => 0,
+    };
+    Ok(PullOutcome::Pulled(n))
+}
+
+/// Stage tracked changes (the `.gitignore` keeps `local.toml` out), commit if
+/// anything changed, and push. Timeout-bounded; returns what happened.
+pub fn commit_push(dir: &Path, message: &str, timeout: Duration) -> Result<PushOutcome> {
+    git(dir, &["add", "-A"], None)?; // respects .gitignore → never stages local.toml
+    let staged_clean = git(dir, &["diff", "--cached", "--quiet"], None)?.ok;
+    if !staged_clean {
+        let c = git(dir, &["commit", "-q", "-m", message], None)?;
+        if !c.ok {
+            bail!("git commit failed: {}", first_line(&c.stderr));
+        }
+    }
+    // Anything to push? (clean tree AND no unpushed commits → nothing to do.)
+    if staged_clean && !has_unpushed(dir) {
+        return Ok(PushOutcome::NothingToPush);
+    }
+    let out = git(dir, &["push"], Some(timeout))?;
+    if !out.ok {
+        if out.stderr.contains("rejected") || out.stderr.contains("non-fast-forward") {
+            return Ok(PushOutcome::Diverged);
+        }
+        bail!("git push failed: {}", first_line(&out.stderr));
+    }
+    Ok(PushOutcome::Pushed)
+}
+
+/// Initialize `dir` as the synced config repo: scaffold `.gitignore`, ensure
+/// `local.toml`/generated artifacts are untracked, and commit `config.toml`.
+/// `remote` (if set) is wired as `origin` and the first commit pushed.
+pub fn init(dir: &Path, remote: Option<&str>, timeout: Duration) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    ensure_gitignore(dir)?;
+    if !dir.join(".git").exists() {
+        run_ok(dir, &["init", "-q"])?;
+        run_ok(dir, &["branch", "-M", "main"])?;
+    }
+    // Belt-and-suspenders: never track the private/derived files even if a prior
+    // setup added them.
+    let _ = git(
+        dir,
+        &[
+            "rm",
+            "--cached",
+            "-r",
+            "--ignore-unmatch",
+            "-q",
+            "local.toml",
+            "bindings.toml",
+            "generated",
+            "cache",
+            "logs",
+        ],
+        None,
+    );
+    let _ = git(dir, &["add", "config.toml"], None); // may not exist yet
+    run_ok(dir, &["add", ".gitignore"])?;
+    if !git(dir, &["diff", "--cached", "--quiet"], None)?.ok {
+        run_ok(dir, &["commit", "-q", "-m", "rosita: sync config"])?;
+    }
+    if let Some(url) = remote {
+        // Set or replace origin, then push.
+        let _ = git(dir, &["remote", "remove", "origin"], None);
+        run_ok(dir, &["remote", "add", "origin", url])?;
+        let out = git(dir, &["push", "-u", "origin", "main"], Some(timeout))?;
+        if !out.ok {
+            bail!("git push to {url} failed: {}", first_line(&out.stderr));
+        }
+    }
+    touch_stamp(dir);
+    Ok(())
+}
+
+/// Clone an existing config repo into `dir` (which must be empty or absent), then
+/// ensure a fresh per-machine `local.toml` exists.
+pub fn clone(url: &str, dir: &Path, timeout: Duration) -> Result<()> {
+    if dir.join(".git").exists() {
+        bail!(
+            "{} is already a git repo — use `rosita sync` to pull",
+            dir.display()
+        );
+    }
+    if dir.exists()
+        && dir
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
+        bail!(
+            "{} is not empty — move it aside, or set ROSITA_CONFIG_DIR to a fresh path",
+            dir.display()
+        );
+    }
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let out = git_in(
+        dir.parent().unwrap_or(dir),
+        &["clone", "-q", url, &dir.to_string_lossy()],
+        Some(timeout),
+    )?;
+    if !out.ok {
+        bail!("git clone {url} failed: {}", first_line(&out.stderr));
+    }
+    // local.toml is gitignored and per-machine — make sure one exists to edit.
+    let local = dir.join("local.toml");
+    if !local.exists() {
+        std::fs::write(
+            &local,
+            "# Private, per-machine config (gitignored). Real hostnames,\n\
+             # [host_classes], and [capability_params] live here.\n",
+        )
+        .ok();
+    }
+    ensure_gitignore(dir)?;
+    touch_stamp(dir);
+    Ok(())
+}
+
+/// The `.gitignore` for a synced config dir: track `config.toml` + `templates/`,
+/// never the private/derived files.
+pub fn ensure_gitignore(dir: &Path) -> Result<()> {
+    let path = dir.join(".gitignore");
+    let want = "# rosita sync — keep machine-private and generated files out of the repo.\n\
+                local.toml\n\
+                bindings.toml\n\
+                generated/\n\
+                cache/\n\
+                logs/\n";
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    // Only (re)write if our managed lines aren't all present.
+    let missing = [
+        "local.toml",
+        "bindings.toml",
+        "generated/",
+        "cache/",
+        "logs/",
+    ]
+    .iter()
+    .any(|l| !current.lines().any(|c| c.trim() == *l));
+    if missing {
+        let body = if current.trim().is_empty() {
+            want.to_string()
+        } else {
+            format!("{}\n{want}", current.trim_end())
+        };
+        std::fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
+}
+
+// --- low-level git runner ----------------------------------------------------
+
+struct GitOut {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn head(dir: &Path) -> Option<String> {
+    git(dir, &["rev-parse", "HEAD"], None)
+        .ok()
+        .filter(|o| o.ok)
+        .map(|o| o.stdout.trim().to_string())
+}
+
+fn count_commits(dir: &Path, a: &str, b: &str) -> usize {
+    git(dir, &["rev-list", "--count", &format!("{a}..{b}")], None)
+        .ok()
+        .filter(|o| o.ok)
+        .and_then(|o| o.stdout.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn has_unpushed(dir: &Path) -> bool {
+    // `@{u}..HEAD` is the set of local commits not on the upstream; non-zero ⇒
+    // there's something to push. No upstream tracked ⇒ assume yes (first push).
+    match git(dir, &["rev-list", "--count", "@{u}..HEAD"], None) {
+        Ok(o) if o.ok => o.stdout.trim().parse::<usize>().unwrap_or(0) > 0,
+        _ => true,
+    }
+}
+
+fn run_ok(dir: &Path, args: &[&str]) -> Result<()> {
+    let out = git(dir, args, None)?;
+    if !out.ok {
+        bail!("git {} failed: {}", args.join(" "), first_line(&out.stderr));
+    }
+    Ok(())
+}
+
+fn first_line(s: &str) -> &str {
+    s.lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+}
+
+/// Run `git <args>` with the working directory set to `dir` (the repo root). With
+/// `timeout`, the child is killed past the deadline (so a hung network op never
+/// blocks). Auth never prompts interactively — it fails fast instead.
+fn git(dir: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
+    git_in(dir, args, timeout)
+}
+
+/// Like [`git`] but spelled out for callers that run from a *parent* dir (e.g.
+/// `clone`, whose target doesn't exist yet). `args` are passed verbatim.
+fn git_in(cwd: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0") // never block on a credential prompt
+        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes") // SSH fails fast, no prompt
+        .spawn()
+        .with_context(|| "spawning git (is it installed?)".to_string())?;
+
+    if let Some(to) = timeout {
+        let deadline = Instant::now() + to;
+        loop {
+            if child.try_wait()?.is_some() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("git timed out after {}s", to.as_secs());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    let out = child.wait_with_output()?;
+    Ok(GitOut {
+        ok: out.status.success(),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// A bare repo to act as the "remote".
+    fn bare(parent: &Path) -> PathBuf {
+        let r = parent.join("remote.git");
+        Command::new("git")
+            .args(["init", "--bare", "-q"])
+            .arg(&r)
+            .status()
+            .unwrap();
+        r
+    }
+
+    /// Give a repo dir a committer identity so `init`/`commit_push` work in any
+    /// environment (CI may have none configured).
+    fn identify(dir: &Path) {
+        for (k, v) in [
+            ("user.email", "t@example.test"),
+            ("user.name", "rosita test"),
+        ] {
+            Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["config", k, v])
+                .status()
+                .unwrap();
+        }
+    }
+
+    fn timeout() -> Duration {
+        Duration::from_secs(30)
+    }
+
+    #[test]
+    fn init_push_clone_edit_pull_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = bare(tmp.path());
+        let url = remote.to_str().unwrap();
+
+        // Machine A: author config (+ a private local.toml) and `sync init`.
+        let a = tmp.path().join("a");
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("config.toml"), "x = 1\n").unwrap();
+        fs::write(a.join("local.toml"), "secret = 1\n").unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(&a)
+            .status()
+            .unwrap();
+        identify(&a);
+        init(&a, Some(url), timeout()).unwrap();
+        assert!(is_synced(&a));
+
+        // The remote got config.toml + .gitignore but NOT the private local.toml.
+        let tree = Command::new("git")
+            .arg("--git-dir")
+            .arg(&remote)
+            .args(["ls-tree", "--name-only", "HEAD"])
+            .output()
+            .unwrap();
+        let names = String::from_utf8_lossy(&tree.stdout);
+        assert!(names.contains("config.toml"));
+        assert!(names.contains(".gitignore"));
+        assert!(
+            !names.contains("local.toml"),
+            "local.toml must never sync: {names}"
+        );
+
+        // Machine B: clone onto a fresh box.
+        let b = tmp.path().join("b");
+        clone(url, &b, timeout()).unwrap();
+        assert!(is_synced(&b));
+        assert_eq!(
+            fs::read_to_string(b.join("config.toml")).unwrap(),
+            "x = 1\n"
+        );
+        assert!(
+            b.join("local.toml").exists(),
+            "a fresh local.toml is created"
+        );
+        identify(&b);
+
+        // A edits and pushes; B pulls exactly one commit.
+        fs::write(a.join("config.toml"), "x = 2\n").unwrap();
+        assert!(matches!(
+            commit_push(&a, "edit", timeout()).unwrap(),
+            PushOutcome::Pushed
+        ));
+        match pull(&b, timeout()).unwrap() {
+            PullOutcome::Pulled(n) => assert_eq!(n, 1),
+            PullOutcome::Diverged => panic!("unexpected divergence"),
+        }
+        assert_eq!(
+            fs::read_to_string(b.join("config.toml")).unwrap(),
+            "x = 2\n"
+        );
+
+        // A second push with nothing changed is a no-op.
+        assert!(matches!(
+            commit_push(&a, "noop", timeout()).unwrap(),
+            PushOutcome::NothingToPush
+        ));
+    }
+
+    #[test]
+    fn auto_pull_honors_disabled_throttle_and_pulls() {
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = bare(tmp.path());
+        let url = remote.to_str().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("config.toml"), "x = 1\n").unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(&a)
+            .status()
+            .unwrap();
+        identify(&a);
+        init(&a, Some(url), timeout()).unwrap();
+        let b = tmp.path().join("b");
+        clone(url, &b, timeout()).unwrap();
+        identify(&b);
+
+        // auto_pull = false → no network, Disabled.
+        let off = SyncConfig {
+            auto_pull: false,
+            ..Default::default()
+        };
+        assert!(matches!(auto_pull(&off, &b), SyncStatus::Disabled));
+        // A non-synced dir → Disabled.
+        assert!(matches!(
+            auto_pull(&SyncConfig::default(), tmp.path()),
+            SyncStatus::Disabled
+        ));
+        // Throttled (just cloned, huge window) → Skipped, no network.
+        let throttled = SyncConfig {
+            pull_max_age: Duration::from_secs(9999),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auto_pull(&throttled, &b),
+            SyncStatus::Skipped { .. }
+        ));
+
+        // Force a pull (zero window): A pushes a change, B auto-pulls it.
+        fs::write(a.join("config.toml"), "x = 9\n").unwrap();
+        commit_push(&a, "edit", timeout()).unwrap();
+        let force = SyncConfig {
+            pull_max_age: Duration::from_secs(0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auto_pull(&force, &b),
+            SyncStatus::Pulled { commits: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn gitignore_excludes_private_and_derived() {
+        let tmp = tempfile::tempdir().unwrap();
+        ensure_gitignore(tmp.path()).unwrap();
+        let gi = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+        for line in [
+            "local.toml",
+            "bindings.toml",
+            "generated/",
+            "cache/",
+            "logs/",
+        ] {
+            assert!(gi.contains(line), "missing ignore: {line}");
+        }
+        // Idempotent: a second call preserves existing content and doesn't dupe.
+        ensure_gitignore(tmp.path()).unwrap();
+        let gi2 = fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+        assert_eq!(gi, gi2);
+    }
+
+    #[test]
+    fn not_synced_without_a_remote() {
+        let tmp = tempfile::tempdir().unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(tmp.path())
+            .status()
+            .unwrap();
+        // A git repo with no remote isn't "synced".
+        assert!(!is_synced(tmp.path()));
+    }
+}

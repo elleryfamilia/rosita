@@ -9,7 +9,7 @@ walkthrough** that drives the real CLI in a sandbox. The output below is real
 ```bash
 git clone https://github.com/elleryfamilia/rosita
 cd rosita
-cargo test                      # → 208 tests passing
+cargo test                      # → 210 tests passing
 cargo clippy --all-targets      # → no warnings
 cargo fmt --check               # → clean
 ```
@@ -237,7 +237,7 @@ throwaway one.
 
 ## What "passing" looks like
 
-- **Level 1:** green tests / clippy / fmt (208 tests).
+- **Level 1:** green tests / clippy / fmt (210 tests).
 - **Level 2:** `rust` auto-selected as the **one** profile; `infra-caution`
   gated in only under `infra/`; the dynamic `host-info` output rendered into the
   overlay; a repo-declared capability flagged as **ignored** (global-only); and

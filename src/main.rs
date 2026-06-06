@@ -34,6 +34,7 @@ fn main() -> ExitCode {
         Command::Profiles(args) => commands::introspect::profiles(&rt, args),
         Command::Agents(args) => commands::introspect::agents(&rt, args),
         Command::Studio(args) => rosita::studio::serve(&rt, args),
+        Command::Sync(args) => commands::sync::run(&rt, args),
     };
 
     match result {

@@ -172,6 +172,51 @@ git clone https://github.com/elleryfamilia/rosita && cd rosita
 cargo install --path .       # or: cargo build --release  → ./target/release/rosita
 ```
 
+## Sync across machines
+
+Because capabilities and profiles are **global-only**, sharing them across
+machines is just syncing one file — `config.toml`. rosita git-backs your config
+dir and keeps it current automatically, so your laptop's library is there on every
+headless box (a VPS, Proxmox, a container).
+
+**Set it up once**, on the machine you author from:
+
+```bash
+rosita sync init        # or: rosita sync init git@github.com:you/rosita-config.git
+```
+
+This makes your config dir a git repo, scaffolds a `.gitignore` so `local.toml`
+(your per-machine hostnames / secret-adjacent params) **never syncs**, and pushes.
+With `gh` installed and no URL given, it creates the private repo for you.
+
+**Onboard a headless box** — install, then pull your config:
+
+```bash
+rosita sync clone https://github.com/you/rosita-config.git
+```
+
+That's the whole setup: `rosita run claude` there now composes your laptop-authored
+profiles. A fresh per-machine `local.toml` is created for the box's own specifics.
+
+**Then it's automatic.** Editing in studio commits + pushes on Apply; `rosita run`
+pulls the latest first — throttled, timeout-bounded, and **never blocking** (offline
+just uses the last-synced config):
+
+```text
+  ⟳ sync    pulled 2 changes · rosita-config  1.3s
+  ✓ render  rust → claude · sha256:a1fb087…
+  ▸ launch  claude
+```
+
+`rosita sync` forces a pull + push by hand. Auto-pull/push default on but stay
+inert until you `sync init`; tune them under `[sync]` (see
+[configuration](docs/configuration.md#sync-implemented)).
+
+> **Public or private repo?** `config.toml` is secret-free by design (the leak-lint
+> guarantees it), so the config repo can be **public** — then onboarding a box
+> needs no git auth at all. Keep it private if you prefer; either way your secrets
+> live only in the per-machine `local.toml`, which never syncs.
+
 ## Already have a `CLAUDE.md` / `AGENTS.md`?
 
 Don't hand-translate it. rosita ships a Claude Code **skill**,
@@ -189,6 +234,7 @@ ln -s "$PWD/skills/rosita-migrate" ~/.claude/skills/rosita-migrate
 | Command | What it does |
 | --- | --- |
 | `rosita studio [--port N] [--no-open]` | Launch the local web UI to view/edit capabilities & profiles. |
+| `rosita sync [init [url] \| clone <url>]` | Sync your global config across machines (git-backed); bare `sync` pulls + pushes. See [Sync across machines](#sync-across-machines). |
 | `rosita detect [--json] [--probes]` | Detect and print the current context; `--probes` also runs environment providers (host/toolchain/ai-tools/tailnet/docker). |
 | `rosita explain [--agent <id>\|all] [--json]` | Show what was detected, which profiles matched their `targets`, the selected one, and the write plan. |
 | `rosita render [--agent <id>\|all] [--no-override] [--force]` | Render the overlay(s) for the selected profile and wire them up. |
@@ -406,14 +452,15 @@ shell over it (see [docs/architecture.md](docs/architecture.md)).
 ## Testing
 
 ```bash
-cargo test       # 208 unit + end-to-end + studio tests
+cargo test       # 210 unit + end-to-end + studio tests
 cargo clippy --all-targets
 cargo fmt --check
 ```
 
 Unit tests cover detection, pick-one selection + binding, the comment-preserving
-studio write engine (stage/diff/apply), capability-params merge, the providers'
-parsers, the cache TTL, trust, rendering, atomic writes, and redaction;
+studio write engine (stage/diff/apply), the git-backed sync engine, capability-
+params merge, the providers' parsers, the cache TTL, rendering, atomic writes, and
+redaction;
 `tests/cli.rs` drives the real binary against temp repos, and `tests/studio.rs`
 drives the studio handlers. For a hands-on, sandboxed walkthrough of every
 feature, see **[docs/testing.md](docs/testing.md)**.

@@ -103,6 +103,26 @@ profile = "rust — web"      # the chosen profile … or:  none = true  to opt 
 # targets_hash = "…"        # fingerprint of the profile's targets at bind time (freshness)
 ```
 
+## `[sync]` (implemented)
+
+Cross-machine sync of the global config dir, git-backed (see
+[Sync across machines](../README.md#sync-across-machines)). Auto-pull/push default
+on but are **inert** until `rosita sync init` makes the dir a git repo with a
+remote, so they never act on a machine that opted out.
+
+```toml
+[sync]
+auto_pull    = true     # pull the latest before run/render/refresh (throttled)
+auto_push    = true     # commit + push after a studio apply (best-effort)
+pull_max_age = "5m"     # skip the auto-pull when synced within this window
+timeout      = "5s"     # hard cap on a git network op → fall back to local config
+```
+
+`config.toml` (shared, secret-free) is tracked and syncs; `local.toml` (per-machine
+hostnames/secrets) is gitignored and never leaves the box. Put `[sync]` in
+`local.toml` to vary it per machine — e.g. a CI box that should pull but never
+push: `auto_push = false`.
+
 ## `[[agents]]` (implemented)
 
 Built-in agents are a base layer; override by `id` or add new ones — no code

@@ -34,7 +34,14 @@ pub fn run(rt: &Runtime, args: &RefreshArgs) -> crate::Result<()> {
         codex_no_override: args.codex_no_override,
         force: args.force,
     };
-    super::render::apply_for_agents(rt, &prep, &agents, &opts)
+    if rt.dry_run {
+        println!("dry run — no files will be written\n");
+    }
+    let results = super::render::apply_for_agents(rt, &prep, &agents, &opts)?;
+    for (agent, result) in &results {
+        super::render::print_result(agent, prep.profile_label(), result);
+    }
+    Ok(())
 }
 
 /// Which agents already have a generated overlay on disk.

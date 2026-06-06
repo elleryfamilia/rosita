@@ -66,6 +66,41 @@ pub enum Command {
     Agents(AgentsArgs),
     /// Launch the local studio web UI (ephemeral; serves until Ctrl-C).
     Studio(StudioArgs),
+    /// Sync your global config (capabilities & profiles) across machines via git.
+    Sync(SyncArgs),
+}
+
+/// `sync` options. Bare `rosita sync` pulls the latest and pushes local edits.
+#[derive(Debug, Args)]
+pub struct SyncArgs {
+    /// `init` (set this machine up) or `clone` (pull config onto a new machine).
+    #[command(subcommand)]
+    pub action: Option<SyncAction>,
+}
+
+/// `sync` subcommands.
+#[derive(Debug, Subcommand)]
+pub enum SyncAction {
+    /// Make this machine's config dir a synced git repo (and optionally wire +
+    /// push a remote).
+    Init(SyncInitArgs),
+    /// Clone an existing config repo onto this machine (for a new headless box).
+    Clone(SyncCloneArgs),
+}
+
+/// `sync init` options.
+#[derive(Debug, Args)]
+pub struct SyncInitArgs {
+    /// Remote URL to push to (e.g. `git@github.com:you/rosita-config.git`).
+    /// Omit to set up the repo locally only (add a remote later).
+    pub remote: Option<String>,
+}
+
+/// `sync clone` options.
+#[derive(Debug, Args)]
+pub struct SyncCloneArgs {
+    /// The config repo URL to clone (e.g. `https://github.com/you/rosita-config.git`).
+    pub url: String,
 }
 
 /// `studio` options.

@@ -861,13 +861,40 @@ fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
     // holding the lock across its (brief, small-file) I/O is correct here.
     let result = state.lock().unwrap().session.apply();
     match result {
-        Ok(written) => profiles_tab_resp(
-            state,
-            None,
-            Some(&format!("applied {} file change(s)", written.len())),
-            true,
-        ),
+        Ok(written) => {
+            let mut msg = format!("applied {} file change(s)", written.len());
+            // Best-effort auto-push of the (now-changed) global config so edits
+            // propagate to your other machines. Never blocks the apply.
+            if let Some(note) = auto_push_after_apply(state) {
+                msg.push_str(" · ");
+                msg.push_str(&note);
+            }
+            profiles_tab_resp(state, None, Some(&msg), true)
+        }
         Err(e) => Resp::html(views::error_fragment(&format!("apply failed: {e}"))),
+    }
+}
+
+/// Commit + push the global config after a studio apply, if `[sync] auto_push`
+/// is on and the config dir is a synced repo. Returns a short status to append
+/// to the flash (or `None` when sync isn't configured / nothing to push).
+fn auto_push_after_apply(state: &Arc<Mutex<StudioState>>) -> Option<String> {
+    let repo_base = state.lock().unwrap().repo_base.clone();
+    let cfg = crate::config::Config::load(&repo_base).ok()?;
+    if !cfg.sync.auto_push {
+        return None;
+    }
+    let dir = crate::sync::config_dir().ok()?;
+    if !crate::sync::is_synced(&dir) {
+        return None;
+    }
+    match crate::sync::commit_push(&dir, "rosita studio: edit config", cfg.sync.timeout) {
+        Ok(crate::sync::PushOutcome::Pushed) => Some("synced ✓".to_string()),
+        Ok(crate::sync::PushOutcome::NothingToPush) => None,
+        Ok(crate::sync::PushOutcome::Diverged) => {
+            Some("remote moved ahead — run `rosita sync`".to_string())
+        }
+        Err(_) => Some("saved locally, push pending".to_string()),
     }
 }
 
