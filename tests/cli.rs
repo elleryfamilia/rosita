@@ -674,6 +674,60 @@ fn gemini_warns_when_workspace_settings_would_mask_registration() {
 }
 
 #[test]
+fn opencode_registers_overlay_path_in_global_config() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    // A committed project opencode.json must be left untouched.
+    fx.write("opencode.json", "{\"$schema\":\"x\"}\n");
+
+    fx.cmd()
+        .args(["render", "--agent", "opencode"])
+        .assert()
+        .success();
+
+    // Overlay written (gitignored); committed opencode.json untouched.
+    assert!(fx.exists(".rosita/generated/opencode.md"));
+    assert_eq!(fx.read("opencode.json"), "{\"$schema\":\"x\"}\n");
+
+    // Global ~/.config/opencode/opencode.json registers the overlay PATH directly
+    // (opencode loads file paths from `instructions`, resolved per-project).
+    let settings: serde_json::Value =
+        serde_json::from_str(&fx.read_home(".config/opencode/opencode.json")).unwrap();
+    let instr = settings["instructions"].as_array().unwrap();
+    assert!(instr.iter().any(|v| v == ".rosita/generated/opencode.md"));
+
+    // Idempotent: a second render leaves the global config byte-identical.
+    let before = fx.read_home(".config/opencode/opencode.json");
+    fx.cmd()
+        .args(["render", "--agent", "opencode"])
+        .assert()
+        .success();
+    assert_eq!(fx.read_home(".config/opencode/opencode.json"), before);
+}
+
+#[test]
+fn run_fails_gracefully_when_cli_not_on_path() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    // A launchable agent whose CLI does not exist.
+    fx.author(
+        "[[agents]]\n\
+         id = \"ghost\"\n\
+         generated_filename = \"ghost.md\"\n\
+         launch = \"rosita-definitely-not-a-real-binary-zzz\"\n",
+    );
+
+    fx.cmd()
+        .args(["run", "ghost"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("isn't on your PATH"));
+
+    // Failed before doing any work: no overlay rendered for the missing tool.
+    assert!(!fx.exists(".rosita/generated/ghost.md"));
+}
+
+#[test]
 fn copilot_render_writes_nested_overlay_without_touching_committed_files() {
     let fx = Fixture::new();
     fx.rust_project();

@@ -58,6 +58,18 @@ impl Prepared {
     }
 }
 
+/// Best-effort check that `program` is an executable on `$PATH` (no subprocess).
+/// A path with a separator is checked directly; a bare name is searched on PATH.
+pub fn program_on_path(program: &str) -> bool {
+    let p = std::path::Path::new(program);
+    if p.components().count() > 1 {
+        return p.is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+        .unwrap_or(false)
+}
+
 /// How an ambiguous (2+ matching) profile selection is resolved. The default
 /// [`SkipChooser`] never prompts; `rosita run` injects an interactive one.
 pub trait ProfileChooser {

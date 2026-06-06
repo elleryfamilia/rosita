@@ -94,6 +94,16 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
         .clone()
         .ok_or_else(|| anyhow!("agent '{agent}' is not launchable (no `launch` program)"))?;
 
+    // Fail gracefully before doing any work if the agent CLI isn't installed —
+    // no half-rendered overlay or stray global registration for a missing tool.
+    // (Dry-run skips this: it only simulates and shouldn't require the binary.)
+    if !rt.dry_run && !super::program_on_path(&program) {
+        return Err(anyhow!(
+            "the '{agent}' CLI ('{program}') isn't on your PATH — install it (or fix PATH), \
+             then retry. `rosita render --agent {agent}` still writes the overlay."
+        ));
+    }
+
     // Preflight render (unless skipped).
     let rendered = !args.skip_render;
     if rendered {

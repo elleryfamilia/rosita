@@ -98,12 +98,19 @@ fn default_template() -> String {
 pub struct ImporterRegistry {
     /// Settings file relative to `$HOME` (e.g. `.gemini/settings.json`).
     pub settings_file: String,
-    /// JSON object-key path to the context-filename array (e.g.
-    /// `["context", "fileName"]`).
+    /// JSON object-key path to the registered string array (e.g.
+    /// `["context", "fileName"]` for Gemini, `["instructions"]` for opencode).
     pub key_path: Vec<String>,
-    /// The agent's built-in default filename, preserved when we first create the
-    /// array (e.g. `GEMINI.md`).
-    pub default_name: String,
+    /// The agent's built-in default, preserved when we first create the array
+    /// (e.g. `GEMINI.md`). `None` for keys with no implicit default (opencode's
+    /// `instructions`).
+    #[serde(default)]
+    pub default_name: Option<String>,
+    /// The literal value to register. When `None`, the [`AgentDescriptor::importer`]
+    /// basename is registered instead (Gemini registers `GEMINI.local.md`; opencode
+    /// has no importer and registers the overlay path `.rosita/generated/opencode.md`).
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 impl AgentDescriptor {
@@ -164,7 +171,8 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             importer_registry: Some(ImporterRegistry {
                 settings_file: ".gemini/settings.json".into(),
                 key_path: vec!["context".into(), "fileName".into()],
-                default_name: "GEMINI.md".into(),
+                default_name: Some("GEMINI.md".into()),
+                value: None, // registers the importer basename (GEMINI.local.md)
             }),
             wire_hint: Some(
                 "Gemini reads GEMINI.md (and resolves @imports). To wire this overlay \
@@ -176,9 +184,20 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
         AgentDescriptor {
             display_name: Some("opencode".into()),
             launch: Some("opencode".into()),
+            // opencode's `instructions` config takes file paths/globs (resolved
+            // per-project, missing ones skipped). Register the gitignored overlay's
+            // path once in the global `~/.config/opencode/opencode.json` so opencode
+            // loads it in every rosita-managed repo — additive, never touches a
+            // committed `opencode.json` or `AGENTS.md`.
+            importer_registry: Some(ImporterRegistry {
+                settings_file: ".config/opencode/opencode.json".into(),
+                key_path: vec!["instructions".into()],
+                default_name: None,
+                value: Some(".rosita/generated/opencode.md".into()),
+            }),
             wire_hint: Some(
                 "opencode reads AGENTS.md; add \".rosita/generated/opencode.md\" to the \
-                 `instructions` array in opencode.json."
+                 `instructions` array in opencode.json (rosita registers it globally)."
                     .into(),
             ),
             ..d("opencode", "opencode.md")
@@ -318,7 +337,14 @@ pub fn apply(
         // Register the importer's name in the agent's own settings so it actually
         // loads (e.g. Gemini's global `~/.gemini/settings.json` `context.fileName`).
         if let Some(reg) = &d.importer_registry {
-            apply_importer_registry(app, reg, importer, &mut files, &mut notes, &mut warnings)?;
+            apply_importer_registry(
+                app,
+                reg,
+                Some(importer),
+                &mut files,
+                &mut notes,
+                &mut warnings,
+            )?;
         }
     } else if let (Some(ovr), true) = (&d.override_target, want_override) {
         // Auto-wire: merge the overlay (inlined) into a gitignored override file
@@ -374,6 +400,11 @@ pub fn apply(
                 "{base} left untouched; overlay merged into {ovr} (Codex prefers it)"
             ));
         }
+    } else if let Some(reg) = &d.importer_registry {
+        // Registry-only wiring (no importer/override): the agent loads the overlay
+        // directly once its path is registered in the agent's own settings (e.g.
+        // opencode's `~/.config/opencode/opencode.json` `instructions`).
+        apply_importer_registry(app, reg, None, &mut files, &mut notes, &mut warnings)?;
     } else if let Some(hint) = &d.wire_hint {
         // Emit-only: never touch committed instruction files.
         notes.push(hint.clone());
@@ -575,22 +606,31 @@ fn generated_path(app: &AppContext, filename: &str) -> PathBuf {
     config::generated_dir(app.repo_base()).join(filename)
 }
 
-/// Register `importer` in the agent's own settings file (resolved under `$HOME`)
-/// so the agent actually loads the importer, and warn if a workspace settings
-/// file would mask that registration. Appends to `files`/`notes`/`warnings`;
-/// degrades to a warning (never corrupts) on any read/parse failure.
+/// Register a value in the agent's own settings file (resolved under `$HOME`) so
+/// the agent actually loads the overlay, and warn if a workspace settings file
+/// would mask that registration. The registered value is `reg.value` when set
+/// (e.g. opencode's overlay path), else the `importer` basename (e.g. Gemini's
+/// `GEMINI.local.md`). Appends to `files`/`notes`/`warnings`; degrades to a
+/// warning (never corrupts) on any read/parse failure.
 fn apply_importer_registry(
     app: &AppContext,
     reg: &ImporterRegistry,
-    importer: &str,
+    importer: Option<&str>,
     files: &mut Vec<WrittenFile>,
     notes: &mut Vec<String>,
     warnings: &mut Vec<String>,
 ) -> crate::Result<()> {
     let key = reg.key_path.join(".");
+    let Some(value) = reg.value.as_deref().or(importer) else {
+        warnings.push(format!(
+            "registry for {} has nothing to register (no `value` or importer)",
+            reg.settings_file
+        ));
+        return Ok(());
+    };
     let Some(home) = config::home_dir() else {
         warnings.push(format!(
-            "$HOME unset — can't register {importer} in {} `{key}`; add it by hand",
+            "$HOME unset — can't register {value} in {} `{key}`; add it by hand",
             reg.settings_file
         ));
         return Ok(());
@@ -605,7 +645,7 @@ fn apply_importer_registry(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
             warnings.push(format!(
-                "could not read {} ({e}); add {importer} to `{key}` by hand",
+                "could not read {} ({e}); add {value} to `{key}` by hand",
                 settings_path.display()
             ));
             return Ok(());
@@ -615,19 +655,19 @@ fn apply_importer_registry(
     match register_context_name(
         existing.as_deref(),
         &reg.key_path,
-        &reg.default_name,
-        importer,
+        reg.default_name.as_deref(),
+        value,
     ) {
         Ok(Some(updated)) => {
             files.push(app.writer.write(&settings_path, &updated)?);
             notes.push(format!(
-                "registered {importer} in {} ({key})",
+                "registered {value} in {} ({key})",
                 settings_path.display()
             ));
         }
         Ok(None) => {} // already registered — idempotent no-op
         Err(e) => warnings.push(format!(
-            "could not update {} to register {importer} ({e:#}); add it to `{key}` by hand",
+            "could not update {} to register {value} ({e:#}); add it to `{key}` by hand",
             settings_path.display()
         )),
     }
@@ -639,10 +679,10 @@ fn apply_importer_registry(
     if workspace != settings_path {
         if let Ok(text) = std::fs::read_to_string(&workspace) {
             if let Some(names) = read_string_list_at(&text, &reg.key_path) {
-                if !names.iter().any(|n| n == importer) {
+                if !names.iter().any(|n| n == value) {
                     warnings.push(format!(
                         "{} sets `{key}` and overrides the home registration — \
-                         add {importer} there too, or it won't load",
+                         add {value} there too, or it won't load",
                         workspace.display()
                     ));
                 }
@@ -671,15 +711,16 @@ fn read_string_list_at(text: &str, key_path: &[String]) -> Option<Vec<String>> {
 }
 
 /// Ensure `name` is present in the JSON string-array at `key_path` within
-/// `existing` settings JSON (creating intermediate objects as needed). Seeds a
-/// freshly created array with `default_name` so the agent's built-in default is
-/// preserved; a user-customized value (string or array) is kept and only
-/// extended. Returns the new pretty-printed JSON when a change is needed, or
-/// `None` when `name` is already registered (idempotent — no churn).
+/// `existing` settings JSON (creating intermediate objects as needed). A freshly
+/// created array is seeded with `default_name` (when `Some`) so the agent's
+/// built-in default is preserved; pass `None` for keys with no implicit default
+/// (e.g. opencode's `instructions`). A user-customized value (string or array) is
+/// kept and only extended. Returns the new pretty-printed JSON when a change is
+/// needed, or `None` when `name` is already registered (idempotent — no churn).
 fn register_context_name(
     existing: Option<&str>,
     key_path: &[String],
-    default_name: &str,
+    default_name: Option<&str>,
     name: &str,
 ) -> crate::Result<Option<String>> {
     use anyhow::{anyhow, bail, Context as _};
@@ -714,7 +755,9 @@ fn register_context_name(
         .ok_or_else(|| anyhow!("settings path at '{last}' is not an object"))?;
 
     let mut names: Vec<String> = match obj.get(last) {
-        None => vec![default_name.to_string()],
+        None => default_name
+            .map(|d| vec![d.to_string()])
+            .unwrap_or_default(),
         Some(Value::String(s)) => vec![s.clone()],
         Some(Value::Array(a)) => a
             .iter()
@@ -748,7 +791,7 @@ mod register_tests {
 
     #[test]
     fn creates_nested_array_seeded_with_default() {
-        let out = register_context_name(None, &keys(), "GEMINI.md", "GEMINI.local.md")
+        let out = register_context_name(None, &keys(), Some("GEMINI.md"), "GEMINI.local.md")
             .unwrap()
             .expect("should write");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -759,21 +802,47 @@ mod register_tests {
     }
 
     #[test]
+    fn creates_array_without_default_when_none() {
+        // opencode's `instructions` has no implicit default → array is just [value].
+        let out = register_context_name(
+            None,
+            &["instructions".to_string()],
+            None,
+            ".rosita/generated/opencode.md",
+        )
+        .unwrap()
+        .expect("should write");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["instructions"],
+            serde_json::json!([".rosita/generated/opencode.md"])
+        );
+    }
+
+    #[test]
     fn idempotent_when_already_present() {
         let existing = r#"{"context":{"fileName":["GEMINI.md","GEMINI.local.md"]}}"#;
-        assert!(
-            register_context_name(Some(existing), &keys(), "GEMINI.md", "GEMINI.local.md")
-                .unwrap()
-                .is_none()
-        );
+        assert!(register_context_name(
+            Some(existing),
+            &keys(),
+            Some("GEMINI.md"),
+            "GEMINI.local.md"
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]
     fn preserves_user_values_and_other_keys() {
         let existing = r#"{"context":{"fileName":"AGENTS.md","x":1},"ui":{"theme":"dark"}}"#;
-        let out = register_context_name(Some(existing), &keys(), "GEMINI.md", "GEMINI.local.md")
-            .unwrap()
-            .unwrap();
+        let out = register_context_name(
+            Some(existing),
+            &keys(),
+            Some("GEMINI.md"),
+            "GEMINI.local.md",
+        )
+        .unwrap()
+        .unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         // User's custom value kept (NOT forced back to GEMINI.md), ours appended.
         assert_eq!(
@@ -788,8 +857,8 @@ mod register_tests {
     fn rejects_non_object_root_without_clobbering() {
         // A present-but-unexpected settings shape must error (caller warns + skips
         // the write) rather than silently overwrite the user's file.
-        assert!(register_context_name(Some("[1,2,3]"), &keys(), "GEMINI.md", "x").is_err());
-        assert!(register_context_name(Some("not json"), &keys(), "GEMINI.md", "x").is_err());
+        assert!(register_context_name(Some("[1,2,3]"), &keys(), Some("GEMINI.md"), "x").is_err());
+        assert!(register_context_name(Some("not json"), &keys(), Some("GEMINI.md"), "x").is_err());
     }
 
     #[test]
