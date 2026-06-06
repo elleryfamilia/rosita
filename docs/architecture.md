@@ -71,10 +71,11 @@ cwd ──► repo_base ──► Config::load ──► detect_context ──�
   per-agent differences are *delivery*, expressed by the descriptor (target
   file, import vs embed, owned vs managed-block).
 - **Auto-wire only through local/gitignored files.** Claude's `CLAUDE.local.md`
-  (`@import`) and Codex's `AGENTS.override.md` (which Codex reads before the
-  committed `AGENTS.md`) are wired automatically; rosita never edits a committed
-  shared file. Agents with no local-file path (`gemini`, `copilot`, …) are
-  emit-only.
+  (`@import`), Codex's `AGENTS.override.md` (read before the committed `AGENTS.md`),
+  and Gemini's `GEMINI.local.md` (`@import`, registered once in
+  `~/.gemini/settings.json` `context.fileName`) are wired automatically; rosita
+  never edits a committed shared file. Agents with no wiring path (`copilot`,
+  `generic`, …) are emit-only.
 - **Derived artifacts are gitignored, never committed** — `.rosita/generated/`,
   `.rosita/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (when rosita
   created it). gitignore management is skipped entirely outside a repo.

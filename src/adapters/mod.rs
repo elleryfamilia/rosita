@@ -7,7 +7,10 @@
 //!
 //! - **`importer`** set → auto-wire: a managed marker block that `@`-imports the
 //!   overlay into a *local* file (e.g. Claude's `CLAUDE.local.md`). Safe to
-//!   auto-wire because the importer is itself local/gitignored.
+//!   auto-wire because the importer is itself local/gitignored. With
+//!   **`importer_registry`** also set, the importer's name is registered in the
+//!   agent's own settings so it's actually loaded (e.g. Gemini's
+//!   `~/.gemini/settings.json` `context.fileName`).
 //! - **`override_target`** set → auto-wire (default-on): merge the overlay
 //!   (inlined) into a gitignored override file the agent *prefers* over its
 //!   committed instruction file (e.g. Codex reads `AGENTS.override.md` before
@@ -49,6 +52,11 @@ pub struct AgentDescriptor {
     /// Local file to auto-wire via `@import` (e.g. `CLAUDE.local.md`).
     #[serde(default)]
     pub importer: Option<String>,
+    /// Some agents only load the `importer` file once its name is registered in
+    /// an external settings file. This declares that registration so the import
+    /// is actually read (e.g. Gemini's `~/.gemini/settings.json` `context.fileName`).
+    #[serde(default)]
+    pub importer_registry: Option<ImporterRegistry>,
     /// Opt-in override file to merge the overlay into (e.g. `AGENTS.override.md`).
     #[serde(default)]
     pub override_target: Option<String>,
@@ -68,6 +76,24 @@ fn default_template() -> String {
     "overlay".to_string()
 }
 
+/// How to register an [`AgentDescriptor::importer`]'s filename in an agent's own
+/// settings file so the agent actually loads it. The settings file is resolved
+/// relative to the user's home dir; the importer's basename is ensured present in
+/// the JSON string-array at `key_path`, seeding it with `default_name` (the
+/// agent's built-in default) when the array doesn't exist yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImporterRegistry {
+    /// Settings file relative to `$HOME` (e.g. `.gemini/settings.json`).
+    pub settings_file: String,
+    /// JSON object-key path to the context-filename array (e.g.
+    /// `["context", "fileName"]`).
+    pub key_path: Vec<String>,
+    /// The agent's built-in default filename, preserved when we first create the
+    /// array (e.g. `GEMINI.md`).
+    pub default_name: String,
+}
+
 impl AgentDescriptor {
     /// Display name, falling back to the id.
     pub fn display(&self) -> &str {
@@ -85,6 +111,7 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             generated_filename: file.into(),
             launch: None,
             importer: None,
+            importer_registry: None,
             override_target: None,
             override_base: None,
             wire_hint: None,
@@ -115,9 +142,19 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
         AgentDescriptor {
             display_name: Some("Gemini CLI".into()),
             launch: Some("gemini".into()),
+            // Gemini has no built-in local-context filename, so auto-wire a
+            // gitignored `GEMINI.local.md` (@import) and register that name in
+            // `~/.gemini/settings.json` `context.fileName` so Gemini loads it
+            // alongside the committed `GEMINI.md` (additive, never shadowing).
+            importer: Some("GEMINI.local.md".into()),
+            importer_registry: Some(ImporterRegistry {
+                settings_file: ".gemini/settings.json".into(),
+                key_path: vec!["context".into(), "fileName".into()],
+                default_name: "GEMINI.md".into(),
+            }),
             wire_hint: Some(
-                "Gemini reads AGENTS.md/GEMINI.md (and resolves @imports). Add \
-                 `@.rosita/generated/gemini.md` to a local GEMINI.md, or copy it in."
+                "Gemini reads GEMINI.md (and resolves @imports). To wire this overlay \
+                 manually instead, add `@.rosita/generated/gemini.md` to a GEMINI.md."
                     .into(),
             ),
             ..d("gemini", "gemini.md")
@@ -251,6 +288,11 @@ pub fn apply(
         // Only gitignore the importer if WE created it (don't touch a tracked file).
         if !existed {
             gitignore_extra.push(importer.clone());
+        }
+        // Register the importer's name in the agent's own settings so it actually
+        // loads (e.g. Gemini's global `~/.gemini/settings.json` `context.fileName`).
+        if let Some(reg) = &d.importer_registry {
+            apply_importer_registry(app, reg, importer, &mut files, &mut notes, &mut warnings)?;
         }
     } else if let (Some(ovr), true) = (&d.override_target, want_override) {
         // Auto-wire: merge the overlay (inlined) into a gitignored override file
@@ -505,4 +547,238 @@ fn ensure_gitignored(app: &AppContext, entries: &[String]) -> crate::Result<Opti
 /// Path to a generated overlay file.
 fn generated_path(app: &AppContext, filename: &str) -> PathBuf {
     config::generated_dir(app.repo_base()).join(filename)
+}
+
+/// Register `importer` in the agent's own settings file (resolved under `$HOME`)
+/// so the agent actually loads the importer, and warn if a workspace settings
+/// file would mask that registration. Appends to `files`/`notes`/`warnings`;
+/// degrades to a warning (never corrupts) on any read/parse failure.
+fn apply_importer_registry(
+    app: &AppContext,
+    reg: &ImporterRegistry,
+    importer: &str,
+    files: &mut Vec<WrittenFile>,
+    notes: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> crate::Result<()> {
+    let key = reg.key_path.join(".");
+    let Some(home) = config::home_dir() else {
+        warnings.push(format!(
+            "$HOME unset — can't register {importer} in {} `{key}`; add it by hand",
+            reg.settings_file
+        ));
+        return Ok(());
+    };
+    let settings_path = home.join(&reg.settings_file);
+
+    // Read the current settings. Only "not found" means "create fresh"; any other
+    // read error (perms, non-UTF8) must NOT be mistaken for an empty file and
+    // overwrite it.
+    let existing = match std::fs::read_to_string(&settings_path) {
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            warnings.push(format!(
+                "could not read {} ({e}); add {importer} to `{key}` by hand",
+                settings_path.display()
+            ));
+            return Ok(());
+        }
+    };
+
+    match register_context_name(
+        existing.as_deref(),
+        &reg.key_path,
+        &reg.default_name,
+        importer,
+    ) {
+        Ok(Some(updated)) => {
+            files.push(app.writer.write(&settings_path, &updated)?);
+            notes.push(format!(
+                "registered {importer} in {} ({key})",
+                settings_path.display()
+            ));
+        }
+        Ok(None) => {} // already registered — idempotent no-op
+        Err(e) => warnings.push(format!(
+            "could not update {} to register {importer} ({e:#}); add it to `{key}` by hand",
+            settings_path.display()
+        )),
+    }
+
+    // A workspace settings file that sets the same key *replaces* (does not merge
+    // with) the home one, masking the global registration. Warn rather than edit a
+    // possibly-committed shared file.
+    let workspace = app.repo_base().join(&reg.settings_file);
+    if workspace != settings_path {
+        if let Ok(text) = std::fs::read_to_string(&workspace) {
+            if let Some(names) = read_string_list_at(&text, &reg.key_path) {
+                if !names.iter().any(|n| n == importer) {
+                    warnings.push(format!(
+                        "{} sets `{key}` and overrides the home registration — \
+                         add {importer} there too, or it won't load",
+                        workspace.display()
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read the JSON string-array (or single string) at `key_path` in `text`.
+/// Returns `None` if absent, unparseable, or not a string/array-of-strings.
+fn read_string_list_at(text: &str, key_path: &[String]) -> Option<Vec<String>> {
+    let mut cur: &serde_json::Value = &serde_json::from_str(text).ok()?;
+    for k in key_path {
+        cur = cur.get(k)?;
+    }
+    match cur {
+        serde_json::Value::String(s) => Some(vec![s.clone()]),
+        serde_json::Value::Array(a) => Some(
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// Ensure `name` is present in the JSON string-array at `key_path` within
+/// `existing` settings JSON (creating intermediate objects as needed). Seeds a
+/// freshly created array with `default_name` so the agent's built-in default is
+/// preserved; a user-customized value (string or array) is kept and only
+/// extended. Returns the new pretty-printed JSON when a change is needed, or
+/// `None` when `name` is already registered (idempotent — no churn).
+fn register_context_name(
+    existing: Option<&str>,
+    key_path: &[String],
+    default_name: &str,
+    name: &str,
+) -> crate::Result<Option<String>> {
+    use anyhow::{anyhow, bail, Context as _};
+    use serde_json::{Map, Value};
+
+    let (last, parents) = key_path
+        .split_last()
+        .ok_or_else(|| anyhow!("empty settings key_path"))?;
+
+    let mut root: Value = match existing {
+        Some(s) if !s.trim().is_empty() => {
+            serde_json::from_str(s).context("parsing existing settings JSON")?
+        }
+        _ => Value::Object(Map::new()),
+    };
+    if !root.is_object() {
+        bail!("settings root is not a JSON object");
+    }
+
+    // Descend (creating objects) to the parent of the target key.
+    let mut cur = &mut root;
+    for k in parents {
+        let obj = cur
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("settings path at '{k}' is not an object"))?;
+        cur = obj
+            .entry(k.clone())
+            .or_insert_with(|| Value::Object(Map::new()));
+    }
+    let obj = cur
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("settings path at '{last}' is not an object"))?;
+
+    let mut names: Vec<String> = match obj.get(last) {
+        None => vec![default_name.to_string()],
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .ok_or_else(|| anyhow!("'{last}' array has a non-string entry"))
+            })
+            .collect::<crate::Result<_>>()?,
+        Some(_) => bail!("'{last}' is not a string or array of strings"),
+    };
+    if names.iter().any(|n| n == name) {
+        return Ok(None);
+    }
+    names.push(name.to_string());
+    obj.insert(
+        last.clone(),
+        Value::Array(names.into_iter().map(Value::String).collect()),
+    );
+
+    Ok(Some(format!("{}\n", serde_json::to_string_pretty(&root)?)))
+}
+
+#[cfg(test)]
+mod register_tests {
+    use super::register_context_name;
+
+    fn keys() -> Vec<String> {
+        vec!["context".into(), "fileName".into()]
+    }
+
+    #[test]
+    fn creates_nested_array_seeded_with_default() {
+        let out = register_context_name(None, &keys(), "GEMINI.md", "GEMINI.local.md")
+            .unwrap()
+            .expect("should write");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["context"]["fileName"],
+            serde_json::json!(["GEMINI.md", "GEMINI.local.md"])
+        );
+    }
+
+    #[test]
+    fn idempotent_when_already_present() {
+        let existing = r#"{"context":{"fileName":["GEMINI.md","GEMINI.local.md"]}}"#;
+        assert!(
+            register_context_name(Some(existing), &keys(), "GEMINI.md", "GEMINI.local.md")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn preserves_user_values_and_other_keys() {
+        let existing = r#"{"context":{"fileName":"AGENTS.md","x":1},"ui":{"theme":"dark"}}"#;
+        let out = register_context_name(Some(existing), &keys(), "GEMINI.md", "GEMINI.local.md")
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // User's custom value kept (NOT forced back to GEMINI.md), ours appended.
+        assert_eq!(
+            v["context"]["fileName"],
+            serde_json::json!(["AGENTS.md", "GEMINI.local.md"])
+        );
+        assert_eq!(v["context"]["x"], serde_json::json!(1));
+        assert_eq!(v["ui"]["theme"], serde_json::json!("dark"));
+    }
+
+    #[test]
+    fn rejects_non_object_root_without_clobbering() {
+        // A present-but-unexpected settings shape must error (caller warns + skips
+        // the write) rather than silently overwrite the user's file.
+        assert!(register_context_name(Some("[1,2,3]"), &keys(), "GEMINI.md", "x").is_err());
+        assert!(register_context_name(Some("not json"), &keys(), "GEMINI.md", "x").is_err());
+    }
+
+    #[test]
+    fn read_string_list_at_reads_string_array_or_none() {
+        use super::read_string_list_at;
+        let k = keys();
+        assert_eq!(
+            read_string_list_at(r#"{"context":{"fileName":["A.md","B.md"]}}"#, &k),
+            Some(vec!["A.md".into(), "B.md".into()])
+        );
+        assert_eq!(
+            read_string_list_at(r#"{"context":{"fileName":"A.md"}}"#, &k),
+            Some(vec!["A.md".into()])
+        );
+        assert_eq!(read_string_list_at(r#"{"context":{}}"#, &k), None);
+        assert_eq!(read_string_list_at("{bad json", &k), None);
+    }
 }

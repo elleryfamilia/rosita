@@ -423,6 +423,15 @@ pub fn global_config_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join("rosita"))
 }
 
+/// The user's home directory (`$HOME`), if set. Used to resolve other tools'
+/// dotfiles (e.g. Gemini's `~/.gemini/settings.json`). Honors a `$HOME` override
+/// so tests stay isolated from the real home.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Path to the global `config.toml`, if a config dir can be resolved.
 pub fn global_config_path() -> Option<PathBuf> {
     global_config_dir().map(|d| d.join("config.toml"))

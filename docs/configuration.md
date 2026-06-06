@@ -97,7 +97,7 @@ Built-in defaults:
 | --- | --- | --- | --- |
 | `claude` | `claude.md` | import → `CLAUDE.local.md` | `claude` |
 | `codex` | `agents.md` | auto → gitignored `AGENTS.override.md` (Codex prefers it); `--no-override` = emit-only | `codex` |
-| `gemini` | `gemini.md` | emit-only | `gemini` |
+| `gemini` | `gemini.md` | auto → gitignored `GEMINI.local.md` (`@import`) + registers it in `~/.gemini/settings.json` `context.fileName` | `gemini` |
 | `opencode` | `opencode.md` | emit-only | `opencode` |
 | `copilot` | `copilot.md` | emit-only | — (render-only) |
 | `generic` | `generic.md` | emit-only | — |

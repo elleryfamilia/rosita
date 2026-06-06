@@ -89,13 +89,15 @@ described by an `AgentDescriptor` along four axes:
 
 The decisive rule: **auto-wire through local/gitignored files only** — Claude →
 `CLAUDE.local.md` (`@import`), Codex → `AGENTS.override.md` (which Codex reads
-before the committed `AGENTS.md`). rosita **never edits a committed, shared
-instruction file** (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`);
-agents with no local-file path are **emit-only** — a gitignored overlay plus a
-hint on how to wire it, rather than machine-specific content in a shared file.
+before the committed `AGENTS.md`), Gemini → a gitignored `GEMINI.local.md`
+(`@import`) registered once in `~/.gemini/settings.json` `context.fileName`. rosita
+**never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
+`.github/copilot-instructions.md`); agents with no wiring path are **emit-only** —
+a gitignored overlay plus a hint on how to wire it, not content in a shared file.
 
 Built-ins: `claude` (import), `codex` (auto `AGENTS.override.md` merge,
-`--no-override` to skip), `gemini`/`opencode`/`copilot`/`generic` (emit-only).
+`--no-override` to skip), `gemini` (auto `GEMINI.local.md` @import + registers it
+in `~/.gemini/settings.json`), `opencode`/`copilot`/`generic` (emit-only).
 All overridable / extendable via `[[agents]]`.
 
 ## Freshness **(implemented)**

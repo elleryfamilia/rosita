@@ -183,7 +183,7 @@ block in a user file), and **freshness**. Built-ins:
 | --- | --- | --- |
 | `claude` | `.rosita/generated/claude.md` | **auto-wires** a managed `@import` block into `CLAUDE.local.md` (a *local* file) |
 | `codex` | `.rosita/generated/agents.md` | **auto-wires** by merging into a gitignored `AGENTS.override.md` (which Codex reads *before* `AGENTS.md`); never touches `AGENTS.md`. `--no-override` for emit-only |
-| `gemini` | `.rosita/generated/gemini.md` | emit-only (Gemini reads `AGENTS.md`/`GEMINI.md`) |
+| `gemini` | `.rosita/generated/gemini.md` | **auto-wires** a gitignored `GEMINI.local.md` (`@import`) and registers it in `~/.gemini/settings.json` `context.fileName` so Gemini loads it alongside `GEMINI.md`; never touches `GEMINI.md` |
 | `opencode` | `.rosita/generated/opencode.md` | emit-only (add to `opencode.json` `instructions`) |
 | `copilot` | `.rosita/generated/copilot.md` | emit-only (`.github/copilot-instructions.md` / `AGENTS.md`) |
 | `generic` | `.rosita/generated/generic.md` | emit-only; you wire it in |
@@ -192,7 +192,9 @@ block in a user file), and **freshness**. Built-ins:
 itself *local/gitignored* — Claude's `CLAUDE.local.md` (`@import`) and Codex's
 `AGENTS.override.md` (which Codex prefers over the committed `AGENTS.md`). It
 **never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
-`copilot-instructions.md`); agents with no local-file path (`gemini`, `opencode`,
+`copilot-instructions.md`). Gemini has no built-in local-context filename, so
+rosita auto-wires a gitignored `GEMINI.local.md` (`@import`) and registers that
+name once in `~/.gemini/settings.json`. The remaining agents (`opencode`,
 `copilot`, `generic`) stay **emit-only** — rosita writes a gitignored overlay and
 prints how to wire it, rather than pushing machine-specific content onto teammates.
 

@@ -12,7 +12,9 @@ config layer. Minimum: `id` + `generated_filename`. See
 for any descriptor. The wiring it picks:
 
 - `importer` set → managed `@import` block in that (local) file; gitignore it if
-  rosita created it.
+  rosita created it. Add `importer_registry` when the agent only loads that file
+  once its name is registered in the agent's own settings (e.g. Gemini's
+  `~/.gemini/settings.json` `context.fileName`).
 - `override_target` set → auto-merge (default-on) into that gitignored file,
   re-seeded from `override_base` on each (re)write; opt out with `--no-override`
   / `[codex] write_override = false`.
