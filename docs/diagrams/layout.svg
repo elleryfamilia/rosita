@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 312" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" role="img" aria-label="Where rosita stores things: a read-only palette you duplicate from, your global library of capabilities and profiles split into shared config.toml and private local.toml, and a repo that only remembers which profile to use.">
+  <style>
+    .bg{fill:#ffffff}
+    .card{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5}
+    .dash{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5;stroke-dasharray:5 4}
+    .sub-card{fill:#ffffff;stroke:#d0d7de;stroke-width:1.25}
+    .divider{stroke:#d0d7de;stroke-width:1}
+    .t{fill:#1f2328}
+    .t-muted{fill:#656d76}
+    .t-accent{fill:#0969da}
+    .s-line{stroke:#8c959f;stroke-width:1.5;fill:none}
+    .arrow{fill:#8c959f}
+    @media (prefers-color-scheme: dark){
+      .bg{fill:#0d1117}
+      .card{fill:#161b22;stroke:#30363d}
+      .dash{fill:#161b22;stroke:#30363d}
+      .sub-card{fill:#0d1117;stroke:#30363d}
+      .divider{stroke:#30363d}
+      .t{fill:#e6edf3}
+      .t-muted{fill:#8b949e}
+      .t-accent{fill:#58a6ff}
+      .s-line{stroke:#6e7681}
+      .arrow{fill:#6e7681}
+    }
+    .title{font-size:19px;font-weight:700}
+    .sub{font-size:12.5px}
+    .h{font-size:14.5px;font-weight:700}
+    .lbl{font-size:12.5px;font-weight:700}
+    .small{font-size:11px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+    .monob{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;font-weight:700}
+  </style>
+  <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 z" class="arrow"/>
+  </marker>
+
+  <rect class="bg" x="0" y="0" width="960" height="312"/>
+
+  <text class="title t" x="480" y="34" text-anchor="middle">Where everything lives</text>
+  <text class="sub t-muted" x="480" y="56" text-anchor="middle">you author capabilities &amp; profiles globally — a repo only remembers which profile to use</text>
+
+  <!-- Palette (left, dashed = read-only) -->
+  <rect class="dash" x="20" y="92" width="178" height="184" rx="12"/>
+  <text class="h t" x="109" y="120" text-anchor="middle">Palette</text>
+  <text class="small t-muted" x="109" y="138" text-anchor="middle">shipped · read-only</text>
+  <text class="mono t-muted" x="109" y="170" text-anchor="middle">rust-conventions</text>
+  <text class="mono t-muted" x="109" y="190" text-anchor="middle">terse-comms</text>
+  <text class="mono t-muted" x="109" y="210" text-anchor="middle">infra-caution</text>
+  <text class="mono t-muted" x="109" y="230" text-anchor="middle">conventional-commits</text>
+  <text class="small t-muted" x="109" y="258" text-anchor="middle" font-style="italic">a catalog to pick from</text>
+
+  <!-- Global library (center) -->
+  <rect class="card" x="300" y="80" width="340" height="208" rx="12"/>
+  <text class="h t" x="318" y="108">Global</text>
+  <text class="mono t-muted" x="386" y="108">~/.config/rosita/</text>
+
+  <rect class="sub-card" x="318" y="124" width="304" height="48" rx="9"/>
+  <text class="lbl t" x="332" y="148">Capabilities</text>
+  <text class="small t-muted" x="332" y="165">reusable units of guidance (or live scripts)</text>
+
+  <rect class="sub-card" x="318" y="180" width="304" height="48" rx="9"/>
+  <text class="lbl t" x="332" y="204">Profiles</text>
+  <text class="small t-muted" x="332" y="221">pick-one · tied to targets · compose capabilities</text>
+
+  <line class="divider" x1="470" y1="246" x2="470" y2="278"/>
+  <text class="monob t" x="332" y="262">config.toml</text>
+  <text class="small t-muted" x="332" y="278">shared · committable</text>
+  <text class="monob t" x="486" y="262">local.toml</text>
+  <text class="small t-muted" x="486" y="278">private · gitignored</text>
+
+  <!-- Repo (right) -->
+  <rect class="card" x="742" y="92" width="198" height="184" rx="12"/>
+  <text class="h t" x="760" y="120">Repo</text>
+  <text class="mono t-muted" x="806" y="120">.rosita/</text>
+  <text class="lbl t-accent" x="760" y="156">binding</text>
+  <text class="small t-muted" x="760" y="174">which profile to use here</text>
+  <text class="small t-muted" x="760" y="190" font-style="italic">local.toml · gitignored</text>
+  <text class="lbl t" x="760" y="220">generated overlay</text>
+  <text class="small t-muted" x="760" y="238" font-style="italic">gitignored</text>
+  <text class="small t-muted" x="760" y="262">no caps or profiles here</text>
+
+  <!-- arrows -->
+  <line x1="200" y1="184" x2="296" y2="184" class="s-line" marker-end="url(#ah2)"/>
+  <text class="small t-muted" x="248" y="176" text-anchor="middle">duplicate</text>
+  <text class="small t-muted" x="248" y="200" text-anchor="middle">to own</text>
+
+  <line x1="642" y1="204" x2="738" y2="204" class="s-line" marker-end="url(#ah2)"/>
+  <text class="small t-accent" x="690" y="196" text-anchor="middle">binds</text>
+  <text class="small t-accent" x="690" y="220" text-anchor="middle">here</text>
+</svg>
