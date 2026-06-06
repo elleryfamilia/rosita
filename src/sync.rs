@@ -226,6 +226,48 @@ pub fn init(dir: &Path, remote: Option<&str>, timeout: Duration) -> Result<()> {
     Ok(())
 }
 
+/// Whether the `gh` CLI is available (so we can offer to create the remote).
+pub fn gh_available() -> bool {
+    Command::new("gh")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Create a GitHub repo from the already-initialized local repo at `dir` via
+/// `gh repo create` and push. `name` is the repo (owner defaults to the gh user);
+/// `private` picks visibility. Wires `origin` and sets upstream so a later bare
+/// `rosita sync` can pull.
+pub fn create_repo_gh(dir: &Path, name: &str, private: bool) -> Result<()> {
+    let vis = if private { "--private" } else { "--public" };
+    let status = Command::new("gh")
+        .args([
+            "repo", "create", name, vis, "--source", ".", "--push", "--remote", "origin",
+        ])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .status()
+        .context("running `gh repo create` (is the gh CLI installed?)")?;
+    if !status.success() {
+        bail!(
+            "`gh repo create` failed — make sure gh is authenticated (`gh auth login`) and the \
+             name `{name}` is free, or set up the remote by hand and run `rosita sync init <url>`"
+        );
+    }
+    // gh pushes, but make sure the branch tracks origin/main so `pull` works.
+    let _ = git(
+        dir,
+        &["branch", "--set-upstream-to=origin/main", "main"],
+        None,
+    );
+    touch_stamp(dir);
+    Ok(())
+}
+
 /// Clone an existing config repo into `dir` (which must be empty or absent), then
 /// ensure a fresh per-machine `local.toml` exists.
 pub fn clone(url: &str, dir: &Path, timeout: Duration) -> Result<()> {

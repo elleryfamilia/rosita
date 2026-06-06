@@ -185,9 +185,11 @@ headless box (a VPS, Proxmox, a container).
 rosita sync init        # or: rosita sync init git@github.com:you/rosita-config.git
 ```
 
-This makes your config dir a git repo, scaffolds a `.gitignore` so `local.toml`
-(your per-machine hostnames / secret-adjacent params) **never syncs**, and pushes.
-With `gh` installed and no URL given, it creates the private repo for you.
+This makes your config dir a git repo and scaffolds a `.gitignore` so `local.toml`
+(your per-machine hostnames / secret-adjacent params) **never syncs**. If you pass
+a URL it wires it as the remote and pushes; if you don't and `gh` is installed, it
+**offers to create the GitHub repo for you** — you pick the name (default
+`rosita-config`) and public vs. private — then pushes.
 
 **Onboard a headless box** — install, then pull your config:
 
