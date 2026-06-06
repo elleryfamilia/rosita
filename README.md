@@ -40,6 +40,18 @@ rosita studio
 rosita run claude
 ```
 
+**4. Use it everywhere** — publish your config once, pull it on any other machine:
+
+```bash
+rosita sync init                 # on this machine: git-back your config + push
+```
+```bash
+rosita sync clone https://github.com/you/rosita-config.git   # on a headless box
+```
+
+After that it's automatic — `rosita run` pulls the latest first. See
+[Sync across machines](#sync-across-machines) for details.
+
 ## The model in 60 seconds
 
 rosita has **three** things you author, and one rule for putting them together.
