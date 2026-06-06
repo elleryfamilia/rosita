@@ -10,7 +10,7 @@ use anyhow::{bail, Context as _, Result};
 
 use crate::cli::{SyncAction, SyncArgs};
 use crate::style::Painter;
-use crate::sync::{self, PullOutcome, PushOutcome};
+use crate::sync::{self, GhCreate, PullOutcome, PushOutcome};
 
 /// Manual sync ops are interactive — the user is waiting — so give them a roomy
 /// timeout. (Auto-pull on the `run` hot path uses the short `[sync] timeout`.)
@@ -20,16 +20,7 @@ pub fn run(_rt: &super::Runtime, args: &SyncArgs) -> Result<()> {
     let dir = sync::config_dir()?;
     let p = Painter::auto();
     match &args.action {
-        Some(SyncAction::Init(a)) => {
-            sync::init(&dir, a.remote.as_deref(), MANUAL_TIMEOUT)
-                .context("setting up the config repo")?;
-            finish_init(&dir, a.remote.is_some(), &p)?;
-            println!(
-                "{}",
-                p.dim("  tracked: config.toml + templates/   ignored: local.toml, generated/, cache/, logs/")
-            );
-            Ok(())
-        }
+        Some(SyncAction::Init(a)) => init_flow(&dir, a.remote.as_deref(), &p),
         Some(SyncAction::Clone(a)) => {
             sync::clone(&a.url, &dir, MANUAL_TIMEOUT).context("cloning the config repo")?;
             println!(
@@ -47,57 +38,120 @@ pub fn run(_rt: &super::Runtime, args: &SyncArgs) -> Result<()> {
     }
 }
 
-/// After a local `sync init` with no remote: offer to create the GitHub repo via
-/// `gh` (interactive), or print manual guidance.
-fn finish_init(dir: &Path, remote_given: bool, p: &Painter) -> Result<()> {
-    if remote_given {
+/// `rosita sync init [url]`: set the config dir up as a synced repo. With a URL,
+/// wire it non-interactively. Without one, offer to create + push a GitHub repo
+/// via `gh` (interactive), or print manual guidance.
+fn init_flow(dir: &Path, remote_arg: Option<&str>, p: &Painter) -> Result<()> {
+    sync::init(dir, remote_arg, MANUAL_TIMEOUT).context("setting up the config repo")?;
+
+    if remote_arg.is_some() {
         println!(
             "{} config repo ready · pushed to {}",
             p.green("✓"),
             p.dim(&sync::remote_name(dir))
         );
+        print_tracked(p);
         return Ok(());
     }
+
+    // No remote given. If one is already wired (e.g. a previous init), there's
+    // nothing to create — just point at `rosita sync`.
+    if sync::is_synced(dir) {
+        println!(
+            "{} already set up · origin {} · run `rosita sync` to publish/pull",
+            p.green("✓"),
+            p.dim(&sync::remote_name(dir))
+        );
+        return Ok(());
+    }
+
     println!("{} config dir is now a git repo.", p.green("✓"));
-    if sync::gh_available() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+    print_tracked(p);
+
+    if sync::gh_available() && interactive() {
         offer_gh(dir, p)
     } else {
         println!(
             "{}",
-            p.dim("  publish it: `rosita sync init <url>`, or with gh:")
-        );
-        println!(
-            "{}",
-            p.dim("    gh repo create rosita-config --private --source . --push   (from your config dir)")
+            p.dim("  publish it: `rosita sync init <url>`  (or: gh repo create <name> --source . --push)")
         );
         Ok(())
     }
 }
 
-/// Interactive `gh repo create` flow (name + visibility) when `gh` is available
-/// and no remote was given.
+/// Interactive `gh repo create` flow: name + visibility, with recovery for a
+/// name collision and GitHub's private-email push rejection.
 fn offer_gh(dir: &Path, p: &Painter) -> Result<()> {
     if !prompt_yes("  Create a GitHub repo with gh and push now?", true)? {
         println!(
             "{}",
-            p.dim("  ok — publish later with `rosita sync init <url>` or `gh repo create … --source . --push`.")
+            p.dim("  ok — publish later with `rosita sync init <url>`.")
         );
         return Ok(());
     }
-    let name = prompt_line("  Repo name", "rosita-config")?;
+
+    // GitHub rejects a push that would publish a private commit email (GH007).
+    // Stamp the config repo's commits with your GitHub noreply address so the
+    // push just works — config-repo commits don't need your real email.
+    if let Some(noreply) = sync::gh_noreply_email() {
+        let _ = sync::set_commit_email(dir, &noreply);
+        let _ = sync::amend_reset_author(dir);
+    }
+
+    let mut name = prompt_line("  Repo name", "rosita-config")?;
     // config.toml is secret-free by design, so public is a safe, zero-auth option.
     let public = prompt_yes(
         "  Make it public? (config.toml carries no secrets; public = no git auth on other boxes)",
         false,
     )?;
-    sync::create_repo_gh(dir, &name, !public)?;
+
+    loop {
+        match sync::gh_create_repo(&name, public, dir, MANUAL_TIMEOUT)? {
+            GhCreate::Created { url } => {
+                let shown = if url.is_empty() { name.clone() } else { url };
+                println!(
+                    "{} created {} repo · pushed · {}",
+                    p.green("✓"),
+                    if public { "public" } else { "private" },
+                    p.dim(&shown)
+                );
+                return Ok(());
+            }
+            GhCreate::NameExists => {
+                println!(
+                    "{} a repo named “{name}” already exists on your account.",
+                    p.yellow("!")
+                );
+                if prompt_yes("  Use it (push into it)?  (No = pick a new name)", true)? {
+                    let url = sync::gh_repo_url(&name, dir)
+                        .ok_or_else(|| anyhow::anyhow!("couldn't resolve the URL for “{name}”"))?;
+                    sync::wire_remote_and_push(dir, &url, MANUAL_TIMEOUT)?;
+                    println!("{} pushed to {}", p.green("✓"), p.dim(&url));
+                    return Ok(());
+                }
+                name = prompt_line("  New repo name", "")?;
+                if name.is_empty() {
+                    bail!("no repo name given");
+                }
+            }
+            GhCreate::Failed(e) => bail!(
+                "gh repo create failed: {e}\n  check `gh auth login`, then retry — \
+                 or set up the remote by hand: `rosita sync init <url>`"
+            ),
+        }
+    }
+}
+
+/// Whether we can prompt (both stdin and stdout are a terminal).
+fn interactive() -> bool {
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
+fn print_tracked(p: &Painter) {
     println!(
-        "{} created {} repo {} · pushed",
-        p.green("✓"),
-        if public { "public" } else { "private" },
-        p.dim(&name)
+        "{}",
+        p.dim("  tracked: config.toml + templates/   ignored: local.toml, generated/, cache/, logs/")
     );
-    Ok(())
 }
 
 /// A yes/no prompt with a default.

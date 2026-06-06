@@ -226,48 +226,6 @@ pub fn init(dir: &Path, remote: Option<&str>, timeout: Duration) -> Result<()> {
     Ok(())
 }
 
-/// Whether the `gh` CLI is available (so we can offer to create the remote).
-pub fn gh_available() -> bool {
-    Command::new("gh")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Create a GitHub repo from the already-initialized local repo at `dir` via
-/// `gh repo create` and push. `name` is the repo (owner defaults to the gh user);
-/// `private` picks visibility. Wires `origin` and sets upstream so a later bare
-/// `rosita sync` can pull.
-pub fn create_repo_gh(dir: &Path, name: &str, private: bool) -> Result<()> {
-    let vis = if private { "--private" } else { "--public" };
-    let status = Command::new("gh")
-        .args([
-            "repo", "create", name, vis, "--source", ".", "--push", "--remote", "origin",
-        ])
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .status()
-        .context("running `gh repo create` (is the gh CLI installed?)")?;
-    if !status.success() {
-        bail!(
-            "`gh repo create` failed — make sure gh is authenticated (`gh auth login`) and the \
-             name `{name}` is free, or set up the remote by hand and run `rosita sync init <url>`"
-        );
-    }
-    // gh pushes, but make sure the branch tracks origin/main so `pull` works.
-    let _ = git(
-        dir,
-        &["branch", "--set-upstream-to=origin/main", "main"],
-        None,
-    );
-    touch_stamp(dir);
-    Ok(())
-}
-
 /// Clone an existing config repo into `dir` (which must be empty or absent), then
 /// ensure a fresh per-machine `local.toml` exists.
 pub fn clone(url: &str, dir: &Path, timeout: Duration) -> Result<()> {
@@ -393,9 +351,7 @@ fn first_line(s: &str) -> &str {
         .trim()
 }
 
-/// Run `git <args>` with the working directory set to `dir` (the repo root). With
-/// `timeout`, the child is killed past the deadline (so a hung network op never
-/// blocks). Auth never prompts interactively — it fails fast instead.
+/// Run `git <args>` with the working directory set to `dir` (the repo root).
 fn git(dir: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
     git_in(dir, args, timeout)
 }
@@ -403,16 +359,30 @@ fn git(dir: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
 /// Like [`git`] but spelled out for callers that run from a *parent* dir (e.g.
 /// `clone`, whose target doesn't exist yet). `args` are passed verbatim.
 fn git_in(cwd: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
-    let mut child = Command::new("git")
-        .args(args)
+    let mut cmd = Command::new("git");
+    cmd.args(args)
         .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0") // never block on a credential prompt
+        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes"); // SSH fails fast, no prompt
+    run_capture(cmd, timeout, "git")
+}
+
+/// Run `gh <args>` in `cwd`. Inherits gh's own auth.
+fn gh_in(cwd: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut> {
+    let mut cmd = Command::new("gh");
+    cmd.args(args).current_dir(cwd);
+    run_capture(cmd, timeout, "gh")
+}
+
+/// Spawn `cmd`, capture stdout/stderr, and — with `timeout` — kill the child past
+/// the deadline so a hung network op never blocks. `stdin` is null (no prompts).
+fn run_capture(mut cmd: Command, timeout: Option<Duration>, name: &str) -> Result<GitOut> {
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
-        .env("GIT_TERMINAL_PROMPT", "0") // never block on a credential prompt
-        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes") // SSH fails fast, no prompt
         .spawn()
-        .with_context(|| "spawning git (is it installed?)".to_string())?;
+        .with_context(|| format!("spawning {name} (is it installed?)"))?;
 
     if let Some(to) = timeout {
         let deadline = Instant::now() + to;
@@ -423,7 +393,7 @@ fn git_in(cwd: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut
             if Instant::now() >= deadline {
                 let _ = child.kill();
                 let _ = child.wait();
-                bail!("git timed out after {}s", to.as_secs());
+                bail!("{name} timed out after {}s", to.as_secs());
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -434,6 +404,122 @@ fn git_in(cwd: &Path, args: &[&str], timeout: Option<Duration>) -> Result<GitOut
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     })
+}
+
+// --- GitHub (`gh`) integration for `rosita sync init` ------------------------
+
+/// Whether the GitHub CLI is available to create a repo for the user.
+pub fn gh_available() -> bool {
+    crate::commands::program_on_path("gh")
+}
+
+/// The authenticated user's GitHub **noreply** email (`<id>+<login>@users.
+/// noreply.github.com`). Setting the config repo's commit email to this avoids
+/// GitHub's "push would publish a private email" (GH007) rejection. `None` if gh
+/// isn't authenticated.
+pub fn gh_noreply_email() -> Option<String> {
+    let out = gh_in(
+        Path::new("."),
+        &["api", "user", "--jq", ".id, .login"],
+        Some(Duration::from_secs(10)),
+    )
+    .ok()?;
+    if !out.ok {
+        return None;
+    }
+    let mut lines = out.stdout.lines().map(str::trim).filter(|l| !l.is_empty());
+    let id = lines.next()?;
+    let login = lines.next()?;
+    Some(format!("{id}+{login}@users.noreply.github.com"))
+}
+
+/// Set the config repo's commit email (and a name, if unset) so its commits push
+/// cleanly — used with the GitHub noreply address.
+pub fn set_commit_email(dir: &Path, email: &str) -> Result<()> {
+    run_ok(dir, &["config", "user.email", email])?;
+    let has_name = git(dir, &["config", "user.name"], None)
+        .map(|o| o.ok && !o.stdout.trim().is_empty())
+        .unwrap_or(false);
+    if !has_name {
+        let _ = git(dir, &["config", "user.name", "rosita"], None);
+    }
+    Ok(())
+}
+
+/// Re-stamp the latest commit with the current identity (after changing the
+/// commit email), so the about-to-be-pushed commit uses it.
+pub fn amend_reset_author(dir: &Path) -> Result<()> {
+    run_ok(dir, &["commit", "--amend", "--reset-author", "--no-edit"])
+}
+
+/// Outcome of `gh repo create`.
+pub enum GhCreate {
+    /// Created and pushed; `url` is the repo's web URL (best-effort).
+    Created { url: String },
+    /// A repo of that name already exists on the account.
+    NameExists,
+    /// gh failed for another reason (message for the user).
+    Failed(String),
+}
+
+/// Create a GitHub repo from the config dir and push, via `gh`.
+pub fn gh_create_repo(name: &str, public: bool, dir: &Path, timeout: Duration) -> Result<GhCreate> {
+    let vis = if public { "--public" } else { "--private" };
+    let out = gh_in(
+        dir,
+        &["repo", "create", name, vis, "--source", ".", "--remote", "origin", "--push"],
+        Some(timeout),
+    )?;
+    if out.ok {
+        // Ensure the branch tracks origin/main so a later bare `rosita sync` pulls.
+        let _ = git(dir, &["branch", "--set-upstream-to=origin/main", "main"], None);
+        touch_stamp(dir);
+        let url = extract_github_url(&out.stdout)
+            .or_else(|| extract_github_url(&out.stderr))
+            .unwrap_or_default();
+        return Ok(GhCreate::Created { url });
+    }
+    let msg = format!("{}\n{}", out.stdout, out.stderr);
+    if msg.to_lowercase().contains("already exists") {
+        return Ok(GhCreate::NameExists);
+    }
+    Ok(GhCreate::Failed(first_line(&msg).to_string()))
+}
+
+/// The web URL of an existing repo on the account (for the "use it" path).
+pub fn gh_repo_url(name: &str, dir: &Path) -> Option<String> {
+    let out = gh_in(
+        dir,
+        &["repo", "view", name, "--json", "url", "--jq", ".url"],
+        Some(Duration::from_secs(10)),
+    )
+    .ok()?;
+    out.ok
+        .then(|| out.stdout.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Wire `url` as `origin` (replacing any) and push — for adopting an existing
+/// empty repo. Fails clearly if the repo already has diverging history.
+pub fn wire_remote_and_push(dir: &Path, url: &str, timeout: Duration) -> Result<()> {
+    let _ = git(dir, &["remote", "remove", "origin"], None);
+    run_ok(dir, &["remote", "add", "origin", url])?;
+    let out = git(dir, &["push", "-u", "origin", "main"], Some(timeout))?;
+    if !out.ok {
+        if out.stderr.contains("rejected") || out.stderr.contains("non-fast-forward") {
+            bail!("that repo isn't empty (its history differs) — pick a new name, or clone it instead");
+        }
+        bail!("git push to {url} failed: {}", first_line(&out.stderr));
+    }
+    touch_stamp(dir);
+    Ok(())
+}
+
+/// Pull the first `https://github.com/...` token out of gh output.
+fn extract_github_url(s: &str) -> Option<String> {
+    s.split_whitespace()
+        .find(|w| w.starts_with("https://github.com/"))
+        .map(|w| w.trim_end_matches(['.', ',']).to_string())
 }
 
 #[cfg(test)]
@@ -626,5 +712,21 @@ mod tests {
             .unwrap();
         // A git repo with no remote isn't "synced".
         assert!(!is_synced(tmp.path()));
+    }
+
+    #[test]
+    fn extract_github_url_from_gh_output() {
+        let s = "✓ Created repository elleryfamilia/rosita-config on github.com\n  \
+                 https://github.com/elleryfamilia/rosita-config\n";
+        assert_eq!(
+            extract_github_url(s).as_deref(),
+            Some("https://github.com/elleryfamilia/rosita-config")
+        );
+        // Trailing punctuation is trimmed; no URL → None.
+        assert_eq!(
+            extract_github_url("see https://github.com/a/b.").as_deref(),
+            Some("https://github.com/a/b")
+        );
+        assert_eq!(extract_github_url("nothing here"), None);
     }
 }
