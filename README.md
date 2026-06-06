@@ -20,6 +20,23 @@ and every tool.
 
 ---
 
+## Quick start
+
+```bash
+# Install the `rosita` binary straight from the repo — no clone needed.
+cargo install --git https://github.com/elleryfamilia/rosita
+
+# Author your context once, in a local web UI: capabilities (reusable
+# chunks of guidance) and the profiles that compose them. Everything is
+# saved as plain TOML you own; the server is ephemeral (Ctrl-C to stop).
+rosita studio
+
+# In any project, launch your agent with the right context injected:
+# rosita detects the stack, picks the profile whose targets match, and
+# wires the overlay in (here, Claude) — your committed files stay untouched.
+rosita run claude
+```
+
 ## The model in 60 seconds
 
 rosita has **three** things you author, and one rule for putting them together.
