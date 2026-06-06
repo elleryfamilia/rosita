@@ -137,7 +137,30 @@ pub fn auto_pull(cfg: &SyncConfig, dir: &Path) -> SyncStatus {
 // --- primitive git operations ------------------------------------------------
 
 /// Fast-forward pull, timeout-bounded. Returns how many commits were pulled.
+///
+/// Robust to a branch with **no upstream tracking** (e.g. a first push that never
+/// completed): it fetches, adopts the remote branch if it exists, or — if the
+/// remote is empty — reports nothing-to-pull so the subsequent push can publish.
 pub fn pull(dir: &Path, timeout: Duration) -> Result<PullOutcome> {
+    let branch = current_branch(dir);
+    if !has_upstream(dir) {
+        let _ = git(dir, &["fetch", "--quiet", "origin"], Some(timeout));
+        if remote_branch_exists(dir, &branch) {
+            let _ = git(
+                dir,
+                &[
+                    "branch",
+                    &format!("--set-upstream-to=origin/{branch}"),
+                    &branch,
+                ],
+                None,
+            );
+        } else {
+            // Origin has no such branch yet — nothing to pull; the push publishes.
+            touch_stamp(dir);
+            return Ok(PullOutcome::Pulled(0));
+        }
+    }
     let before = head(dir);
     let out = git(dir, &["pull", "--ff-only", "--no-rebase"], Some(timeout))?;
     if !out.ok {
@@ -156,7 +179,10 @@ pub fn pull(dir: &Path, timeout: Duration) -> Result<PullOutcome> {
 }
 
 /// Stage tracked changes (the `.gitignore` keeps `local.toml` out), commit if
-/// anything changed, and push. Timeout-bounded; returns what happened.
+/// anything changed, and push. Timeout-bounded; returns what happened. Pushes
+/// with `-u` so it also establishes tracking on a first publish, and recovers
+/// once from GitHub's private-email rejection (GH007) by re-stamping the commit
+/// with your GitHub noreply address.
 pub fn commit_push(dir: &Path, message: &str, timeout: Duration) -> Result<PushOutcome> {
     git(dir, &["add", "-A"], None)?; // respects .gitignore → never stages local.toml
     let staged_clean = git(dir, &["diff", "--cached", "--quiet"], None)?.ok;
@@ -170,14 +196,62 @@ pub fn commit_push(dir: &Path, message: &str, timeout: Duration) -> Result<PushO
     if staged_clean && !has_unpushed(dir) {
         return Ok(PushOutcome::NothingToPush);
     }
-    let out = git(dir, &["push"], Some(timeout))?;
+    let branch = current_branch(dir);
+    let mut out = git(dir, &["push", "-u", "origin", &branch], Some(timeout))?;
+    if !out.ok && is_private_email_rejection(&out.stderr) {
+        if let Some(noreply) = gh_noreply_email() {
+            let _ = set_commit_email(dir, &noreply);
+            let _ = amend_reset_author(dir);
+            out = git(dir, &["push", "-u", "origin", &branch], Some(timeout))?;
+        }
+    }
     if !out.ok {
         if out.stderr.contains("rejected") || out.stderr.contains("non-fast-forward") {
             return Ok(PushOutcome::Diverged);
         }
         bail!("git push failed: {}", first_line(&out.stderr));
     }
+    touch_stamp(dir);
     Ok(PushOutcome::Pushed)
+}
+
+/// The current branch name (or `main` if detached/unknown).
+fn current_branch(dir: &Path) -> String {
+    git(dir, &["rev-parse", "--abbrev-ref", "HEAD"], None)
+        .ok()
+        .filter(|o| o.ok)
+        .map(|o| o.stdout.trim().to_string())
+        .filter(|s| !s.is_empty() && s != "HEAD")
+        .unwrap_or_else(|| "main".to_string())
+}
+
+/// Whether the current branch tracks an upstream.
+fn has_upstream(dir: &Path) -> bool {
+    git(dir, &["rev-parse", "--abbrev-ref", "@{u}"], None)
+        .map(|o| o.ok)
+        .unwrap_or(false)
+}
+
+/// Whether `origin/<branch>` exists locally (after a fetch).
+fn remote_branch_exists(dir: &Path, branch: &str) -> bool {
+    git(
+        dir,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/origin/{branch}"),
+        ],
+        None,
+    )
+    .map(|o| o.ok)
+    .unwrap_or(false)
+}
+
+/// GitHub's GH007 ("your push would publish a private email address").
+fn is_private_email_rejection(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("gh007") || s.contains("private email")
 }
 
 /// Initialize `dir` as the synced config repo: scaffold `.gitignore`, ensure
@@ -467,12 +541,18 @@ pub fn gh_create_repo(name: &str, public: bool, dir: &Path, timeout: Duration) -
     let vis = if public { "--public" } else { "--private" };
     let out = gh_in(
         dir,
-        &["repo", "create", name, vis, "--source", ".", "--remote", "origin", "--push"],
+        &[
+            "repo", "create", name, vis, "--source", ".", "--remote", "origin", "--push",
+        ],
         Some(timeout),
     )?;
     if out.ok {
         // Ensure the branch tracks origin/main so a later bare `rosita sync` pulls.
-        let _ = git(dir, &["branch", "--set-upstream-to=origin/main", "main"], None);
+        let _ = git(
+            dir,
+            &["branch", "--set-upstream-to=origin/main", "main"],
+            None,
+        );
         touch_stamp(dir);
         let url = extract_github_url(&out.stdout)
             .or_else(|| extract_github_url(&out.stderr))
@@ -712,6 +792,48 @@ mod tests {
             .unwrap();
         // A git repo with no remote isn't "synced".
         assert!(!is_synced(tmp.path()));
+    }
+
+    #[test]
+    fn sync_recovers_from_remote_set_but_no_upstream() {
+        // The orphan state from a first push that failed (e.g. GH007): origin is
+        // wired but the branch has no upstream. `pull` must be a graceful no-op,
+        // and `commit_push` must establish tracking and publish.
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = bare(tmp.path());
+        let a = tmp.path().join("a");
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("config.toml"), "x = 1\n").unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .arg(&a)
+            .status()
+            .unwrap();
+        identify(&a);
+        init(&a, None, timeout()).unwrap(); // local repo, no remote yet
+        Command::new("git")
+            .arg("-C")
+            .arg(&a)
+            .args(["remote", "add", "origin", remote.to_str().unwrap()])
+            .status()
+            .unwrap();
+        assert!(is_synced(&a)); // a remote is wired, but no upstream tracking
+
+        // pull: no upstream + empty remote → graceful no-op (not an error).
+        assert!(matches!(
+            pull(&a, timeout()).unwrap(),
+            PullOutcome::Pulled(0)
+        ));
+        // push establishes tracking (`-u`) and publishes.
+        assert!(matches!(
+            commit_push(&a, "first", timeout()).unwrap(),
+            PushOutcome::Pushed
+        ));
+        // now a normal pull works (upstream is set) and is a clean no-op.
+        assert!(matches!(
+            pull(&a, timeout()).unwrap(),
+            PullOutcome::Pulled(0)
+        ));
     }
 
     #[test]

@@ -150,7 +150,9 @@ fn interactive() -> bool {
 fn print_tracked(p: &Painter) {
     println!(
         "{}",
-        p.dim("  tracked: config.toml + templates/   ignored: local.toml, generated/, cache/, logs/")
+        p.dim(
+            "  tracked: config.toml + templates/   ignored: local.toml, generated/, cache/, logs/"
+        )
     );
 }
 
