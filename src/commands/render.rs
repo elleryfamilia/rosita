@@ -16,6 +16,7 @@ pub fn run(rt: &Runtime, args: &RenderArgs) -> crate::Result<()> {
     let agents = resolve_agents(args.agent.as_deref(), &prep.config)?;
     let opts = ApplyOptions {
         codex_override: args.codex_override,
+        codex_no_override: args.codex_no_override,
         force: args.force,
     };
     apply_for_agents(rt, &prep, &agents, &opts)

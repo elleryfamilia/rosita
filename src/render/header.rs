@@ -68,10 +68,13 @@ pub fn build(meta: &HeaderMeta) -> String {
 
 /// Extract the `context=sha256:…` hash from a previously generated file, if any.
 ///
-/// Scans every line for the marker (not just the first) so it also works when
-/// the generated block is inlined inside a larger user-owned file (e.g. the
-/// Codex `AGENTS.override.md`).
+/// Returns the **last** marker found, not the first. A lone generated file has a
+/// single marker (first == last), but when the overlay is inlined into a larger
+/// user-owned file (e.g. the Codex `AGENTS.override.md`) the managed block is
+/// appended *after* the base content — so if that base happens to carry its own
+/// stray rosita marker, the last one is reliably the managed block's.
 pub fn extract_context_hash(content: &str) -> Option<String> {
+    let mut last = None;
     for line in content.lines() {
         let Some(rest) = line.trim_start().strip_prefix(GENERATED_MARKER) else {
             continue;
@@ -81,10 +84,10 @@ pub fn extract_context_hash(content: &str) -> Option<String> {
         };
         let hash: String = token.chars().take_while(|c| !c.is_whitespace()).collect();
         if !hash.is_empty() {
-            return Some(hash);
+            last = Some(hash);
         }
     }
-    None
+    last
 }
 
 #[cfg(test)]
@@ -131,5 +134,22 @@ mod tests {
     fn no_hash_when_absent() {
         assert_eq!(extract_context_hash("# just a file\n"), None);
         assert_eq!(extract_context_hash(""), None);
+    }
+
+    #[test]
+    fn picks_last_marker_when_base_has_a_stray_one() {
+        // Mimics an override file whose base content carries a stray rosita
+        // marker before the appended managed block: the managed block's hash
+        // (last) must win, so freshness tracks the right thing.
+        let content = format!(
+            "{GENERATED_MARKER} context=sha256:stale -->\nbase content\n\
+             <!-- BEGIN rosita (managed) -->\n\
+             {GENERATED_MARKER} context=sha256:fresh -->\noverlay\n\
+             <!-- END rosita (managed) -->\n"
+        );
+        assert_eq!(
+            extract_context_hash(&content).as_deref(),
+            Some("sha256:fresh")
+        );
     }
 }

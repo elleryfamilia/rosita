@@ -31,6 +31,7 @@ pub fn run(rt: &Runtime, args: &RefreshArgs) -> crate::Result<()> {
 
     let opts = ApplyOptions {
         codex_override: args.codex_override,
+        codex_no_override: args.codex_no_override,
         force: args.force,
     };
     super::render::apply_for_agents(rt, &prep, &agents, &opts)

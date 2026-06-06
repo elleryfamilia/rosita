@@ -8,11 +8,13 @@
 //! - **`importer`** set → auto-wire: a managed marker block that `@`-imports the
 //!   overlay into a *local* file (e.g. Claude's `CLAUDE.local.md`). Safe to
 //!   auto-wire because the importer is itself local/gitignored.
-//! - **`override_target`** set + opted in → merge the overlay (inlined) into a
-//!   gitignored override file (e.g. Codex's `AGENTS.override.md`).
-//! - otherwise → **emit-only**: write the gitignored overlay and print a hint on
-//!   how to wire it (committed instruction files like `AGENTS.md` are never
-//!   touched by default).
+//! - **`override_target`** set → auto-wire (default-on): merge the overlay
+//!   (inlined) into a gitignored override file the agent *prefers* over its
+//!   committed instruction file (e.g. Codex reads `AGENTS.override.md` before
+//!   `AGENTS.md`). Opt out with `--no-override` / `[codex] write_override`.
+//! - otherwise (or override opted out) → **emit-only**: write the gitignored
+//!   overlay and print a hint on how to wire it (committed instruction files
+//!   like `AGENTS.md` are never touched).
 //!
 //! New agents are descriptor rows ([`builtin_agents`]) or `[[agents]]` config
 //! entries — not new code.
@@ -103,8 +105,9 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             override_target: Some("AGENTS.override.md".into()),
             override_base: Some("AGENTS.md".into()),
             wire_hint: Some(
-                "Codex reads AGENTS.md; pass --override to also write a (gitignored) \
-                 AGENTS.override.md that merges your AGENTS.md with this overlay."
+                "override writing is OFF — Codex won't see this overlay (it only reads \
+                 AGENTS.md). Drop --no-override (or set [codex] write_override = true) to \
+                 merge it into a gitignored AGENTS.override.md, which Codex prefers."
                     .into(),
             ),
             ..d("codex", "agents.md")
@@ -185,8 +188,10 @@ impl AppContext<'_> {
 /// Knobs controlling how the engine applies.
 #[derive(Debug, Clone, Default)]
 pub struct ApplyOptions {
-    /// Opt-in to writing an override file (in addition to config).
+    /// Force-write the override file even when config has it disabled.
     pub codex_override: bool,
+    /// Suppress the override file (emit-only), overriding config + `--override`.
+    pub codex_no_override: bool,
     /// Re-render even when the context hash is unchanged.
     pub force: bool,
 }
@@ -229,7 +234,8 @@ pub fn apply(
     )?);
 
     // 2. Wiring.
-    let want_override = opts.codex_override || app.config.codex.write_override;
+    let want_override =
+        !opts.codex_no_override && (opts.codex_override || app.config.codex.write_override);
     if let Some(importer) = &d.importer {
         // Auto-wire: managed @import block in a local file.
         let path = app.repo_base().join(importer);
@@ -247,18 +253,37 @@ pub fn apply(
             gitignore_extra.push(importer.clone());
         }
     } else if let (Some(ovr), true) = (&d.override_target, want_override) {
-        // Opt-in: merge the overlay (inlined) into a gitignored override file.
+        // Auto-wire: merge the overlay (inlined) into a gitignored override file
+        // that Codex prefers over the committed AGENTS.md.
         let override_path = app.repo_base().join(ovr);
-        let existing_override = std::fs::read_to_string(&override_path).ok();
-        let seed = match &existing_override {
-            Some(s) => s.clone(),
-            None => d
-                .override_base
-                .as_ref()
-                .and_then(|b| std::fs::read_to_string(app.repo_base().join(b)).ok())
-                .unwrap_or_default(),
-        };
-        let new_content = writer::upsert_marker_block(Some(&seed), &rendered.content);
+        let base = d
+            .override_base
+            .as_ref()
+            .and_then(|b| std::fs::read_to_string(app.repo_base().join(b)).ok());
+        // Re-seed the file body from the live base whenever we (re)write it, so a
+        // changed AGENTS.md is picked up (the freshness hash below forces that
+        // rewrite). Fall back to any existing override, then to empty, when there
+        // is no base. (A hand-edit to the override's base region with no other
+        // change isn't auto-restored — it's a generated file; `refresh --force`
+        // resets it.)
+        let seed = base
+            .clone()
+            .or_else(|| std::fs::read_to_string(&override_path).ok())
+            .unwrap_or_default();
+
+        // Freshness for the override must track BOTH the rosita context and the
+        // base file: a changed AGENTS.md with an unchanged context must still
+        // rewrite. Fold the base content (only — never the existing override,
+        // whose own embedded hash would make this unstable across runs) into the
+        // skip-hash, and re-stamp the inlined overlay so its embedded marker
+        // matches what we compare against next time.
+        let base_for_hash = base.unwrap_or_default();
+        let override_hash =
+            crate::hash::context_hash(&(rendered.context_hash.as_str(), base_for_hash.as_str()));
+        let body = rendered
+            .content
+            .replace(&rendered.context_hash, &override_hash);
+        let new_content = writer::upsert_marker_block(Some(&seed), &body);
 
         let limit = app.config.codex.max_output_kib.saturating_mul(1024) as usize;
         if limit > 0 && new_content.len() > limit {
@@ -273,11 +298,13 @@ pub fn apply(
             force,
             &override_path,
             &new_content,
-            &rendered.context_hash,
+            &override_hash,
         )?);
         gitignore_extra.push(ovr.clone());
         if let Some(base) = &d.override_base {
-            notes.push(format!("{base} left untouched; overlay merged into {ovr}"));
+            notes.push(format!(
+                "{base} left untouched; overlay merged into {ovr} (Codex prefers it)"
+            ));
         }
     } else if let Some(hint) = &d.wire_hint {
         // Emit-only: never touch committed instruction files.

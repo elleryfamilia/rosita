@@ -157,9 +157,12 @@ pub struct RenderArgs {
     /// Agent id to render for, or `all` (defaults to the config default agent).
     #[arg(long)]
     pub agent: Option<String>,
-    /// Also write the opt-in override file (e.g. Codex's `AGENTS.override.md`).
+    /// Force-write Codex's `AGENTS.override.md` even if disabled in config.
     #[arg(long = "override")]
     pub codex_override: bool,
+    /// Skip Codex's `AGENTS.override.md` (emit-only; leaves `AGENTS.md` untouched).
+    #[arg(long = "no-override", conflicts_with = "codex_override")]
+    pub codex_no_override: bool,
     /// Re-render even if the context hash is unchanged.
     #[arg(long)]
     pub force: bool,
@@ -173,9 +176,12 @@ pub struct RunArgs {
     /// Skip the pre-launch render.
     #[arg(long)]
     pub skip_render: bool,
-    /// Also write the opt-in override file during the pre-launch render.
+    /// Force-write Codex's `AGENTS.override.md` even if disabled in config.
     #[arg(long = "override")]
     pub codex_override: bool,
+    /// Skip Codex's `AGENTS.override.md` (emit-only; leaves `AGENTS.md` untouched).
+    #[arg(long = "no-override", conflicts_with = "codex_override")]
+    pub codex_no_override: bool,
     /// Arguments passed through to the agent.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
@@ -198,9 +204,12 @@ pub struct RefreshArgs {
     /// Restrict to an agent id, or `all` (defaults to already-initialized overlays).
     #[arg(long)]
     pub agent: Option<String>,
-    /// Also write the opt-in override file.
+    /// Force-write Codex's `AGENTS.override.md` even if disabled in config.
     #[arg(long = "override")]
     pub codex_override: bool,
+    /// Skip Codex's `AGENTS.override.md` (emit-only; leaves `AGENTS.md` untouched).
+    #[arg(long = "no-override", conflicts_with = "codex_override")]
+    pub codex_no_override: bool,
     /// Re-render even if the context hash is unchanged.
     #[arg(long)]
     pub force: bool,

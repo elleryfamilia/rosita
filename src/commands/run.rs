@@ -94,6 +94,7 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     if rendered {
         let opts = ApplyOptions {
             codex_override: args.codex_override,
+            codex_no_override: args.codex_no_override,
             force: false,
         };
         super::render::apply_for_agents(rt, &prep, &[agent.to_string()], &opts)?;

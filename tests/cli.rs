@@ -268,24 +268,69 @@ fn render_preserves_user_content_in_claude_local() {
 }
 
 #[test]
-fn codex_does_not_touch_agents_md_without_override() {
+fn codex_writes_override_by_default() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write("AGENTS.md", "# Hand-written AGENTS\n\nKeep me.\n");
+
+    // No flag: codex now wires up out of the box (parity with claude).
+    fx.cmd()
+        .args(["render", "--agent", "codex"])
+        .assert()
+        .success();
+
+    assert!(fx.exists("AGENTS.override.md"));
+    let ov = fx.read("AGENTS.override.md");
+    assert!(ov.contains("Keep me.")); // base AGENTS.md content kept
+    assert!(ov.contains("BEGIN rosita (managed)")); // managed block appended
+                                                    // committed AGENTS.md never touched
+    assert_eq!(fx.read("AGENTS.md"), "# Hand-written AGENTS\n\nKeep me.\n");
+}
+
+#[test]
+fn codex_no_override_is_emit_only() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.write("AGENTS.md", "# Hand-written AGENTS\n\nDo not clobber.\n");
 
     fx.cmd()
-        .args(["render", "--agent", "codex"])
+        .args(["render", "--agent", "codex", "--no-override"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--override"));
+        .stdout(predicate::str::contains("override writing is OFF"));
 
-    // AGENTS.md untouched, no override file created.
+    // AGENTS.md untouched, no override file created — only the generated overlay.
     assert_eq!(
         fx.read("AGENTS.md"),
         "# Hand-written AGENTS\n\nDo not clobber.\n"
     );
     assert!(!fx.exists("AGENTS.override.md"));
     assert!(fx.exists(".rosita/generated/agents.md"));
+}
+
+#[test]
+fn codex_override_reseeds_base_when_agents_md_changes() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.write("AGENTS.md", "# Base\n\nfirst marker.\n");
+
+    fx.cmd()
+        .args(["render", "--agent", "codex"])
+        .assert()
+        .success();
+    assert!(fx.read("AGENTS.override.md").contains("first marker."));
+
+    // Change the base; the rosita context is unchanged, but the override must
+    // still re-seed from the new AGENTS.md (no --force needed).
+    fx.write("AGENTS.md", "# Base\n\nsecond marker.\n");
+    fx.cmd()
+        .args(["render", "--agent", "codex"])
+        .assert()
+        .success();
+
+    let ov = fx.read("AGENTS.override.md");
+    assert!(ov.contains("second marker."), "base should be refreshed");
+    assert!(!ov.contains("first marker."), "stale base must be gone");
 }
 
 #[test]
@@ -546,12 +591,14 @@ fn render_all_six_agents_emit_gitignored_overlays() {
     ] {
         assert!(fx.exists(&format!(".rosita/generated/{f}")), "missing {f}");
     }
-    // Emit-only agents never touch committed instruction files.
+    // Committed instruction files are never touched.
     assert!(!fx.exists("AGENTS.md"));
     assert!(!fx.exists("GEMINI.md"));
     assert!(!fx.exists(".github/copilot-instructions.md"));
-    // Only Claude (local-file agent) is auto-wired.
+    // Auto-wired agents: Claude (local @import) and Codex (gitignored override,
+    // created even with no base AGENTS.md so codex still sees the overlay).
     assert!(fx.exists("CLAUDE.local.md"));
+    assert!(fx.exists("AGENTS.override.md"));
 }
 
 #[test]

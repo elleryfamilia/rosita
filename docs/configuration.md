@@ -49,7 +49,7 @@ deny_name_patterns = ["(?i)(secret|token|key|password|credential|auth)"]
 
 ```toml
 [codex]
-write_override = false   # opt-in to AGENTS.override.md (also via `render --override`)
+write_override = true    # auto-write AGENTS.override.md (default; `--no-override` to skip)
 max_output_kib = 32      # warn when generated output exceeds this
 ```
 
@@ -85,7 +85,7 @@ generated_filename = "gemini.md"
 launch = "gemini"                  # program for `rosita run gemini` (omit → render-only)
 template = "overlay"              # body template name (repo/global override → embedded)
 # importer = "GEMINI.local.md"             # auto-wire @import into a LOCAL file
-# override_target = "AGENTS.override.md"   # opt-in merge target (gitignored)
+# override_target = "AGENTS.override.md"   # auto-merge target, gitignored (default-on)
 # override_base   = "AGENTS.md"            # file whose content seeds the override
 # append_prompt_flag = "--append-system-prompt"   # run injects a freshness note via this flag
 wire_hint = "include .rosita/generated/gemini.md from your agent config"
@@ -96,7 +96,7 @@ Built-in defaults:
 | id | generated file | wiring | launch |
 | --- | --- | --- | --- |
 | `claude` | `claude.md` | import → `CLAUDE.local.md` | `claude` |
-| `codex` | `agents.md` | emit-only; `--override` → `AGENTS.override.md` | `codex` |
+| `codex` | `agents.md` | auto → gitignored `AGENTS.override.md` (Codex prefers it); `--no-override` = emit-only | `codex` |
 | `gemini` | `gemini.md` | emit-only | `gemini` |
 | `opencode` | `opencode.md` | emit-only | `opencode` |
 | `copilot` | `copilot.md` | emit-only | — (render-only) |

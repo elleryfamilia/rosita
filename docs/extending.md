@@ -13,9 +13,11 @@ for any descriptor. The wiring it picks:
 
 - `importer` set → managed `@import` block in that (local) file; gitignore it if
   rosita created it.
-- `override_target` set + opted in → merge the overlay into that (gitignored)
-  file, seeded from `override_base`.
-- otherwise → emit-only: write the gitignored overlay + print `wire_hint`.
+- `override_target` set → auto-merge (default-on) into that gitignored file,
+  re-seeded from `override_base` on each (re)write; opt out with `--no-override`
+  / `[codex] write_override = false`.
+- otherwise (or override opted out) → emit-only: write the gitignored overlay +
+  print `wire_hint`.
 
 To add a genuinely new *delivery mechanism* (beyond import / override / emit),
 extend the wiring branch in `adapters::apply()` and add the descriptor field(s).

@@ -65,7 +65,9 @@ pub struct EnvConfig {
 /// Codex adapter configuration.
 #[derive(Debug, Clone, Serialize)]
 pub struct CodexConfig {
-    /// Opt-in to generating/updating `AGENTS.override.md`.
+    /// Write/update the gitignored `AGENTS.override.md` (which Codex prefers over
+    /// `AGENTS.md`) so `rosita run codex` delivers context out of the box.
+    /// Defaults to `true`; set `false` (or pass `--no-override`) to opt out.
     pub write_override: bool,
     /// Warn when generated output exceeds this many KiB.
     pub max_output_kib: u64,
@@ -322,7 +324,7 @@ impl RawConfig {
                 ),
             },
             codex: CodexConfig {
-                write_override: codex.write_override.unwrap_or(false),
+                write_override: codex.write_override.unwrap_or(true),
                 max_output_kib: codex.max_output_kib.unwrap_or(32),
             },
             profiles,
@@ -397,7 +399,7 @@ impl Default for EnvConfig {
 impl Default for CodexConfig {
     fn default() -> Self {
         CodexConfig {
-            write_override: false,
+            write_override: true,
             max_output_kib: 32,
         }
     }
@@ -481,7 +483,7 @@ mod tests {
         let c = Config::defaults();
         assert_eq!(c.default_agent, "claude");
         assert_eq!(c.codex.max_output_kib, 32);
-        assert!(!c.codex.write_override);
+        assert!(c.codex.write_override);
         assert!(c.env.allowlist.contains(&"LANG".to_string()));
         // No shipped profiles and no auto-injected capabilities: a fresh install
         // owns an empty library (the palette is a separate catalog).

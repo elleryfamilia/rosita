@@ -21,8 +21,10 @@ allowlist = ["LANG", "LC_ALL", "TERM", "TZ", "EDITOR", "CI"]
 deny_name_patterns = ["(?i)(secret|token|key|password|credential|auth|session|cookie)"]
 
 [codex]
-# Opt-in to writing AGENTS.override.md. AGENTS.md itself is never overwritten.
-write_override = false
+# Write a gitignored AGENTS.override.md (which Codex reads before AGENTS.md) so
+# `rosita run codex` delivers context out of the box. AGENTS.md is never touched.
+# Defaults to true; set false (or pass --no-override) to opt out.
+write_override = true
 # Warn when generated output exceeds this many KiB.
 max_output_kib = 32
 

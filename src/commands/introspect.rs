@@ -302,8 +302,14 @@ fn profile_row(p: &ProfileConfig, candidate: bool, selected: bool) -> ProfileRow
 pub fn agents(rt: &Runtime, args: &AgentsArgs) -> crate::Result<()> {
     let prep = prepare(rt)?;
 
+    let write_override = prep.config.codex.write_override;
     if args.json {
-        let rows: Vec<_> = prep.config.agents.iter().map(agent_row).collect();
+        let rows: Vec<_> = prep
+            .config
+            .agents
+            .iter()
+            .map(|a| agent_row(a, write_override))
+            .collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(());
     }
@@ -320,18 +326,24 @@ pub fn agents(rt: &Runtime, args: &AgentsArgs) -> crate::Result<()> {
             a.id,
             a.display(),
             launch,
-            delivery_of(a)
+            delivery_of(a, write_override)
         );
     }
     Ok(())
 }
 
-/// How an agent receives the overlay (mirrors `adapters::apply`).
-fn delivery_of(a: &AgentDescriptor) -> String {
+/// How an agent receives the overlay (mirrors `adapters::apply`). `write_override`
+/// is the config default for override-style agents (it can still be flipped per
+/// run via `--override` / `--no-override`).
+fn delivery_of(a: &AgentDescriptor, write_override: bool) -> String {
     if let Some(importer) = &a.importer {
         format!("import → {importer}")
     } else if let Some(ovr) = &a.override_target {
-        format!("override → {ovr} (opt-in)")
+        if write_override {
+            format!("override → {ovr} (auto; --no-override to skip)")
+        } else {
+            format!("override → {ovr} (off; set [codex] write_override = true)")
+        }
     } else {
         "emit-only".to_string()
     }
@@ -345,11 +357,11 @@ struct AgentRow {
     delivery: String,
 }
 
-fn agent_row(a: &AgentDescriptor) -> AgentRow {
+fn agent_row(a: &AgentDescriptor, write_override: bool) -> AgentRow {
     AgentRow {
         id: a.id.clone(),
         display_name: a.display().to_string(),
         launch: a.launch.clone(),
-        delivery: delivery_of(a),
+        delivery: delivery_of(a, write_override),
     }
 }

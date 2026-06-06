@@ -68,8 +68,8 @@ ln -s "$PWD/skills/rosita-migrate" ~/.claude/skills/rosita-migrate
 | Command | What it does |
 | --- | --- |
 | `rosita detect [--json] [--probes]` | Detect and print the current context; `--probes` also runs environment providers (host/toolchain/ai-tools/tailnet/docker). |
-| `rosita render [--agent <id>\|all] [--override] [--force]` | Render the overlay(s) and wire them up. |
-| `rosita run <id> [args…] [--skip-render] [--override]` | Render for a launchable agent, then exec it (args passed through). |
+| `rosita render [--agent <id>\|all] [--no-override] [--force]` | Render the overlay(s) and wire them up. |
+| `rosita run <id> [args…] [--skip-render] [--no-override]` | Render for a launchable agent, then exec it (args passed through). |
 | `rosita explain [--agent <id>\|all] [--json]` | Explain selection, matched rules, and the write plan. |
 | `rosita refresh [--agent <id>\|all] [--force]` | Re-render already-initialized overlays (no-op if context unchanged). |
 | `rosita clean [--agent <id>\|all]` | Remove rosita-generated overlays + managed blocks (never touches committed files). |
@@ -182,17 +182,19 @@ block in a user file), and **freshness**. Built-ins:
 | Agent | rosita writes | Default wiring |
 | --- | --- | --- |
 | `claude` | `.rosita/generated/claude.md` | **auto-wires** a managed `@import` block into `CLAUDE.local.md` (a *local* file) |
-| `codex` | `.rosita/generated/agents.md` | emit-only; `--override` merges into `AGENTS.override.md` (gitignored); never touches `AGENTS.md` |
+| `codex` | `.rosita/generated/agents.md` | **auto-wires** by merging into a gitignored `AGENTS.override.md` (which Codex reads *before* `AGENTS.md`); never touches `AGENTS.md`. `--no-override` for emit-only |
 | `gemini` | `.rosita/generated/gemini.md` | emit-only (Gemini reads `AGENTS.md`/`GEMINI.md`) |
 | `opencode` | `.rosita/generated/opencode.md` | emit-only (add to `opencode.json` `instructions`) |
 | `copilot` | `.rosita/generated/copilot.md` | emit-only (`.github/copilot-instructions.md` / `AGENTS.md`) |
 | `generic` | `.rosita/generated/generic.md` | emit-only; you wire it in |
 
-**The key rule:** rosita auto-wires only agents whose instruction file is itself
-*local* (Claude's `CLAUDE.local.md`). Agents whose only file is **committed and
-shared** (`AGENTS.md`, `GEMINI.md`, `copilot-instructions.md`) are **emit-only by
-default** — rosita writes a gitignored overlay and prints how to wire it, rather
-than injecting machine-specific content into a file your teammates share.
+**The key rule:** rosita auto-wires whenever it can do so through a file that is
+itself *local/gitignored* — Claude's `CLAUDE.local.md` (`@import`) and Codex's
+`AGENTS.override.md` (which Codex prefers over the committed `AGENTS.md`). It
+**never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
+`copilot-instructions.md`); agents with no local-file path (`gemini`, `opencode`,
+`copilot`, `generic`) stay **emit-only** — rosita writes a gitignored overlay and
+prints how to wire it, rather than pushing machine-specific content onto teammates.
 
 Add or override agents in config without code changes:
 
@@ -203,7 +205,7 @@ generated_filename = "gemini.md"
 launch = "gemini"
 template = "overlay"        # body template name (repo/global override → embedded)
 # importer = "GEMINI.local.md"          # auto-wire via @import (only for LOCAL files)
-# override_target = "AGENTS.override.md" # opt-in merge target
+# override_target = "AGENTS.override.md" # auto-merge target (default-on; --no-override to skip)
 wire_hint = "…how to include it…"
 ```
 

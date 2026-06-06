@@ -87,15 +87,16 @@ described by an `AgentDescriptor` along four axes:
 3. **Whose** — rosita-owned file vs a managed marker block in a user file.
 4. **Freshness** — banner ▸ wrapper (`rosita run`) ▸ (no enforced hook).
 
-The decisive rule: **auto-wire only agents whose instruction file is itself
-local** (Claude → `CLAUDE.local.md`). Agents whose only file is committed and
-shared (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`) are
-**emit-only by default** — rosita writes a gitignored overlay and prints how to
-wire it, rather than injecting machine-specific content into a shared file.
+The decisive rule: **auto-wire through local/gitignored files only** — Claude →
+`CLAUDE.local.md` (`@import`), Codex → `AGENTS.override.md` (which Codex reads
+before the committed `AGENTS.md`). rosita **never edits a committed, shared
+instruction file** (`AGENTS.md`, `GEMINI.md`, `.github/copilot-instructions.md`);
+agents with no local-file path are **emit-only** — a gitignored overlay plus a
+hint on how to wire it, rather than machine-specific content in a shared file.
 
-Built-ins: `claude` (import), `codex` (opt-in `AGENTS.override.md` merge),
-`gemini`/`opencode`/`copilot`/`generic` (emit-only). All overridable / extendable
-via `[[agents]]`.
+Built-ins: `claude` (import), `codex` (auto `AGENTS.override.md` merge,
+`--no-override` to skip), `gemini`/`opencode`/`copilot`/`generic` (emit-only).
+All overridable / extendable via `[[agents]]`.
 
 ## Freshness **(implemented)**
 
