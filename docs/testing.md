@@ -1,41 +1,44 @@
 # Testing rosita
 
 Two levels: the **automated suite** (fast, zero side effects) and a **hands-on
-walkthrough** that drives the real CLI in a sandbox. The expected output below is
-real (trimmed; machine-specific values shown as placeholders).
+walkthrough** that drives the real CLI in a sandbox. The output below is real
+(trimmed; machine-specific values shown as placeholders).
 
 ## Level 1 — Automated tests (~30s, no side effects)
 
 ```bash
 git clone https://github.com/elleryfamilia/rosita
 cd rosita
-cargo test                      # → 126 tests passing (94 lib + 32 e2e)
+cargo test                      # → 208 tests passing
 cargo clippy --all-targets      # → no warnings
 cargo fmt --check               # → clean
 ```
 
-`tests/cli.rs` drives the real binary against temp repos; the lib tests cover
-composition, capability-params merge, the providers' pure parsers, the cache TTL,
-and trust. All three green ⇒ the build is sound.
+`tests/cli.rs` drives the real binary against temp repos and `tests/studio.rs`
+drives the studio HTTP handlers; the lib tests cover detection, **pick-one
+selection + the per-project binding**, the comment-preserving **studio
+`toml_edit` write engine** (stage/diff/apply), capability-params merge, the
+providers' pure parsers, the cache TTL, trust, rendering, atomic writes, and
+redaction. All three green ⇒ the build is sound.
 
 ## Level 2 — Hands-on walkthrough (sandboxed)
 
-**Why a sandbox:** rosita writes into the repo it operates on (`.rosita/`,
-`CLAUDE.local.md`, `.gitignore`) and into a global config dir (the trust store
-lives there). To kick the tires without touching your real `~/.config/rosita` or
-any real project, use a throwaway git repo plus an isolated config dir via
+**Why a sandbox:** capabilities and profiles are **global-only**, so rosita
+writes them into your global config dir (`~/.config/rosita`, where the trust
+store also lives); in a repo it writes only the gitignored overlay, the binding,
+and `.gitignore`. To kick the tires without touching your real config or any real
+project, use a throwaway git repo plus an isolated config dir via
 `ROSITA_CONFIG_DIR`.
 
 ### Setup
 
 ```bash
-# Install the published binary onto PATH (tests the repo end-to-end):
+# Install the binary onto PATH (tests the repo end-to-end):
 cargo install --git https://github.com/elleryfamilia/rosita
 #   …or, from a local clone:  cargo install --path .
-#   …or just build:           cargo build --release   (→ ./target/release/rosita)
 
-# Throwaway rust repo + isolated global config (so nothing real is touched):
-export ROSITA_CONFIG_DIR="$(mktemp -d)"      # global layer + trust store sandbox
+# Isolated global config (so nothing real is touched) + a throwaway rust repo:
+export ROSITA_CONFIG_DIR="$(mktemp -d)"          # global library + trust store sandbox
 SB="$(mktemp -d)"; mkdir -p "$SB/src" "$SB/infra/db"
 printf '[package]\nname="demo"\nversion="0.1.0"\n' > "$SB/Cargo.toml"
 printf 'fn main(){}\n' > "$SB/src/main.rs"
@@ -49,166 +52,195 @@ cd "$SB"
 rosita detect
 ```
 ```
+Context
+  cwd        : /tmp/demo
+  name       : demo
+  git        : branch main · 0 remote(s)
   stacks     : rust
   languages  : Rust
   pkg mgrs   : cargo
   commands   :  build cargo build   test cargo test   lint cargo clippy --all-targets
-  git        : branch main · 0 remote(s)
+  system     : <os> / <arch> · host <hostname> · user <you>
 ```
-`rosita detect --json` gives the machine-readable form.
+`rosita detect --json` gives the machine-readable form. The coarse **stack**
+(`rust`) is what a profile's `targets` match against.
 
-### 2. Scaffold config
+### 2. Author your library (global-only)
+
+Capabilities and profiles live in the **global** config, not the repo. (Normally
+you'd do this visually with `rosita studio`; here we write the file directly.)
 
 ```bash
-rosita init
-```
-Creates `.rosita/config.toml` (public), `.rosita/local.toml` (private,
-gitignored), a template, and a `.gitignore`.
+cat > "$ROSITA_CONFIG_DIR/config.toml" <<'TOML'
+[[capabilities]]
+id = "rust-conventions"
+tags = ["stack"]
+guidance = "Build with cargo, lint with clippy; prefer ?/Result over unwrap()."
 
-### 3. Explain the composition (dry — writes nothing)
+[[capabilities]]
+id = "terse-comms"
+tags = ["comms"]
+guidance = "Be terse: lead with the result and what changed."
+
+[[capabilities]]                          # self-gates: only contributes under infra/
+id = "infra-caution"
+risk = "caution"
+tags = ["safety"]
+when = [{ field = "path", op = "starts_with", value = "infra/" }]
+guidance = "Infrastructure path — prefer plans; confirm before touching shared state."
+
+[[capabilities]]                          # dynamic: live output embedded at render
+id = "host-info"
+provider = "host"
+guidance = "Running on {{ provider.output }}"
+
+[[profiles]]
+name = "rust"
+targets = ["rust"]
+capabilities = ["rust-conventions", "terse-comms", "infra-caution", "host-info"]
+TOML
+```
+
+### 3. Explain the selection (dry — writes nothing)
 
 ```bash
 rosita explain
 ```
 ```
+Detected targets: [rust]
 Profile selection → rust
-  composing: rust + default
-Active capabilities
-  • rust-conventions   … via profile 'rust' (Stack equals "rust")
-  • baseline           … via profile 'default' (fallback profile (no rules))
-```
-This is the heart of the design: **both** `rust` and the always-on `default`
-match, so their capabilities **layer** instead of one winning.
 
-### 4. Render the overlay and inspect it
+Active capabilities
+  • rust-conventions   capability 'rust-conventions' via profile 'rust'
+  • terse-comms        capability 'terse-comms' via profile 'rust'
+  • host-info          capability 'host-info' via profile 'rust'
+
+Profiles considered
+  → rust           targets [rust] match
+```
+**One profile per context.** `rust` is the only profile whose `targets` match, so
+it's auto-selected (no prompt). `infra-caution` is absent here — its own `when`
+self-gate (`path starts_with "infra/"`) doesn't match the repo root.
+
+### 4. Within-profile gating in a subdirectory
+
+```bash
+rosita --cwd "$SB/infra/db" explain
+```
+```
+Active capabilities
+  • rust-conventions
+  • terse-comms
+  • infra-caution [⚠️ caution]
+  • host-info
+```
+Same profile, but now `infra-caution` contributes — its `when` matches the
+`infra/` path. Gating happens **inside** the chosen profile (per-capability
+`when`), not by composing extra profiles. (`--cwd` runs as if invoked there.)
+
+### 5. Render the overlay and inspect it
 
 ```bash
 rosita render --agent claude
 cat .rosita/generated/claude.md
 ```
-You'll see a self-healing banner, the detected context, then composed guidance:
+```
+claude  ·  profile rust  ·  sha256:…
+  created       .rosita/generated/claude.md
+  created       CLAUDE.local.md        (a gitignored @import of the overlay)
+  created       .gitignore
+```
+The overlay carries a self-healing banner, the detected context, then the
+profile's composed guidance — including the **live** `host-info` output:
 ```
 ## Profile guidance — rust
-### Rust conventions
-Rust project. Build with cargo … clippy … Prefer `?`/`Result` over `unwrap()` …
-### Baseline
-Follow the repository's existing conventions and keep changes minimal …
+### rust-conventions
+Build with cargo, lint with clippy; prefer ?/Result over unwrap().
+### terse-comms
+Be terse: lead with the result and what changed.
+### host-info
+Running on <hostname> — <os>/<arch>, user <you>
 ```
-It also created `CLAUDE.local.md` (a gitignored `@import` of the overlay) and
-added `.gitignore` entries. Committed files like `AGENTS.md` are never touched.
+Committed files like `AGENTS.md` are never touched.
 
-### 5. Introspect the resolved sets
+### 6. Introspect the resolved sets
 
 ```bash
 rosita capabilities          # ● = active here, · = available but inactive
-rosita capabilities show rust-conventions
-rosita profiles              # → marks profiles matching this context
-rosita agents                # delivery mode per agent (import / override / emit-only)
+rosita profiles              # marks which match, and the selected one
+```
+```
+Capabilities (4 in library, 3 active for this context)
+  ● rust-conventions — rust-conventions  (tags: stack)
+  ● terse-comms — terse-comms  (tags: comms)
+  · infra-caution — infra-caution  (⚠️ caution; tags: safety)
+  ● host-info — host-info  (provider: host)
+
+Profiles (1 configured; selected: rust)
+  → rust             targets [rust]
+        capabilities: rust-conventions, terse-comms, infra-caution, host-info
 ```
 
-### 6. See additive layering in a subdirectory
+### 7. Global-only enforcement
+
+Capabilities and profiles declared in a **repo** are ignored — `rosita doctor`
+flags the mistake instead of silently honoring it:
 
 ```bash
-rosita --cwd "$SB/infra/db" explain
+mkdir -p .rosita
+printf '[[capabilities]]\nid="repo-cap"\nguidance="x"\n' > .rosita/config.toml
+rosita doctor | grep "global-only"
+# → ⚠ .rosita/config.toml declares capabilities — these are global-only and are
+#   ignored here; move them to ~/.config/rosita/config.toml
+rm .rosita/config.toml
 ```
-Now **three** profiles compose — `infra` (path `infra/`) + `rust` + `default` —
-and the overlay gains the ⚠️ caution capability. (`--cwd` runs as if invoked
-from there.)
 
-### 7. Native environment probes (opt-in)
+### 8. Dynamic capabilities, providers & trust
+
+`host-info` above is a built-in **provider** — always safe, no trust needed.
+Providers (`host`/`toolchain`/`ai-tools`/`tailnet`/`docker`) probe the live
+environment; their (redacted) output lands only in the gitignored overlay and is
+kept out of the context hash. A bare `detect` never probes; `rosita detect
+--probes` opts in:
 
 ```bash
-rosita detect --probes
+rosita detect --probes        # host/toolchain/ai-tools/(tailnet/docker if present)
 ```
-```
-Probes
-  host       : <hostname> — <os>/<arch>, user <you>
-  toolchain  : installed: git …, cargo …, node …, docker …
-  ai-tools   : claude …, codex …
-  docker     : N running container(s) …   (if docker is up)
-```
-A bare `detect` never spawns subprocesses; `--probes` is opt-in.
 
-### 8. Dynamic capabilities + the trust gate
+The generic escape hatch is a capability `command` (any shell command, redacted
+stdout embedded). A command is **trust-gated by where it's authored**: ones in
+your global config are trusted (you wrote them); `rosita allow` / `deny` /
+`trust` manage per-repo trust for command authorship. Because repo-declared caps
+are ignored entirely (§7), the common path is: author commands globally, and they
+just run.
 
-The security-relevant part. Add a provider-backed cap and a command-backed cap:
+### 9. Freshness lifecycle
 
 ```bash
-cat >> .rosita/config.toml <<'TOML'
-
-[[capabilities]]
-id = "machine"
-provider = "host"
-guidance = "Running on {{ provider.output }}"
-
-[[capabilities]]
-id = "greet"
-command = "echo hello-from-rosita"
-
-[[profiles]]
-name = "dyn"
-priority = 90
-capabilities = ["machine", "greet"]
-TOML
-
-rosita render --agent claude
-grep -E "Running on|hello-from|skipped" .rosita/generated/claude.md
-```
-**Before trusting**, the provider runs but the repo-authored command is refused:
-```
-Running on <hostname> — <os>/<arch> …
-> [rosita] skipped untrusted command — run `rosita allow` to enable
-```
-Now trust the repo and re-render:
-```bash
-rosita trust          # → status: untrusted
-rosita allow          # → trusted …
-rosita render --agent claude
-grep hello-from .rosita/generated/claude.md     # → hello-from-rosita
-```
-Then prove trust **re-locks** when the config changes (so a command can't be
-slipped in after approval):
-```bash
-echo '# any edit' >> .rosita/config.toml
-rosita render --agent claude
-grep skipped .rosita/generated/claude.md        # → skipped again
-rosita deny           # revoke
-```
-
-### 9. Public/private split + leak lint
-
-```bash
-printf '\n[host_classes]\nwork = ["*.corp.example.com"]\n' >> .rosita/config.toml
-rosita doctor | grep "looks private"
-# → ⚠ .rosita/config.toml: "*.corp.example.com" looks private — move to local.toml
-```
-The fix it nudges you toward: put machine-specific values in `.rosita/local.toml`
-(gitignored) instead of the shareable `config.toml`.
-
-### 10. Freshness lifecycle
-
-```bash
-rosita refresh        # static overlay unchanged → reports "unchanged" (idempotent)
-rosita doctor         # → "claude: up to date", config/agent/template health
+rosita refresh    # re-render initialized overlays
+rosita doctor     # → ✓ claude: up to date  + config/agent/template health
 rosita run claude --dry-run -- chat --model sonnet
-# → "would exec: claude --append-system-prompt … chat --model sonnet"  (no launch)
-rosita clean          # removes the generated overlay + CLAUDE.local.md; never touches AGENTS.md
+# → "dry run — no files will be written" + "would update …"  (no launch)
+rosita clean      # removes the overlay + CLAUDE.local.md; never touches AGENTS.md
 ```
-(`rosita run claude` with no `--dry-run` actually launches the `claude` CLI if
-it's installed, passing your args through.)
+A **static** overlay is idempotent — re-rendering an unchanged context is a
+no-op. An overlay with a **dynamic** capability (like `host-info`) re-probes, so
+`refresh` rewrites it. (`rosita run claude` without `--dry-run` launches the
+`claude` CLI if installed, passing your args through.)
 
 ### Teardown
 
 ```bash
 cd ~ && rm -rf "$SB" "$ROSITA_CONFIG_DIR" && unset ROSITA_CONFIG_DIR
 ```
-Because the global layer and trust store were isolated under `ROSITA_CONFIG_DIR`,
-nothing touched your real `~/.config/rosita`, and the only repo affected was the
-throwaway one.
+Because the global library and trust store were isolated under
+`ROSITA_CONFIG_DIR`, nothing touched your real `~/.config/rosita`, and the only
+repo affected was the throwaway one.
 
 ## What "passing" looks like
 
-- **Level 1:** green tests / clippy / fmt (126 tests).
-- **Level 2:** additive composition in `explain`; both capabilities rendered in
-  the overlay; the command **refused before `allow`** and **running after**;
-  trust **re-locking** on a config edit; and the leak lint firing on the domain.
+- **Level 1:** green tests / clippy / fmt (208 tests).
+- **Level 2:** `rust` auto-selected as the **one** profile; `infra-caution`
+  gated in only under `infra/`; the dynamic `host-info` output rendered into the
+  overlay; a repo-declared capability flagged as **ignored** (global-only); and
+  `clean` removing only the generated artifacts.

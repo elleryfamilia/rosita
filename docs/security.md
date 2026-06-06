@@ -53,22 +53,25 @@ gitignore management is skipped entirely outside a git repo (no stray
 
 ## Command-execution trust model **(implemented)**
 
-Dynamic capabilities can run code at render time. That's a real supply-chain
-surface, so rosita follows **direnv's trust model**:
+Dynamic capabilities can run code at render time, so rosita gates it
+direnv-style:
 
-- **Built-in providers** (`host`, `tailnet`, `docker`, `toolchain`, `ai-tools`)
-  are rosita-controlled and allowed from any config layer.
-- **Generic `command` providers** are arbitrary code. They are honored **only
-  from trusted layers** — your global / global-local config, which you authored.
-- A **repo-layer** `command` provider (i.e. from a cloned repo's `.rosita/`) is
-  **refused until you explicitly `rosita allow`** it. `allow` records a hash of
-  the repo's `.rosita` config in a global trust store; if the config changes, it
-  must be re-allowed. `rosita deny` / `rosita trust status` manage it.
-- Provider output is treated as sensitive (see the split above): local/gitignored
-  only, redacted, never committed.
+- **Built-in providers** (`host`, `toolchain`, `ai-tools`, `tailnet`, `docker`)
+  are rosita-controlled probes — always allowed, no trust needed.
+- **`command`-backed capabilities** run an arbitrary shell command. One is
+  honored only from a **trusted-authorship** layer — your global / global-local
+  config, which you wrote — or from a repo you've explicitly `rosita allow`-ed.
+  `allow` records a hash of the repo's `.rosita` bundle in a global trust store;
+  a config change re-locks it; `rosita deny` / `rosita trust status` manage it.
+- **Repo-declared capabilities and profiles are ignored entirely** under the
+  global-only model (see [configuration](configuration.md)). A cloned repo can't
+  inject guidance *or* commands into your overlay at all; the command-authorship
+  trust gate is the defense-in-depth backstop on top of that.
+- Provider/command output is treated as sensitive (see the split above):
+  local/gitignored only, redacted, never committed.
 
-This means `rosita render` in an untrusted cloned repo can read its profiles and
-*static* guidance, but cannot execute anything it defines.
+So `rosita render` in a cloned repo composes only *your* global library — it
+never reads or runs what the repo itself declares.
 
 ## Threat model summary
 
