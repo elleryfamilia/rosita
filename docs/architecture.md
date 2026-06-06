@@ -76,7 +76,8 @@ cwd ──► repo_base ──► Config::load ──► detect_context ──�
   `~/.gemini/settings.json` `context.fileName`), and Copilot's gitignored overlay
   (pointed at via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` by `rosita run`) are wired
   automatically; rosita never edits a committed shared file. Agents with no wiring
-  path (`opencode`, `generic`, …) are emit-only.
+  path (only `generic`, plus any custom agent) are emit-only. (opencode registers
+  the overlay path in `~/.config/opencode/opencode.json` `instructions`.)
 - **Derived artifacts are gitignored, never committed** — `.rosita/generated/`,
   `.rosita/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (when rosita
   created it). gitignore management is skipped entirely outside a repo.

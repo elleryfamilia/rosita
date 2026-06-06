@@ -184,7 +184,7 @@ block in a user file), and **freshness**. Built-ins:
 | `claude` | `.rosita/generated/claude.md` | **auto-wires** a managed `@import` block into `CLAUDE.local.md` (a *local* file) |
 | `codex` | `.rosita/generated/agents.md` | **auto-wires** by merging into a gitignored `AGENTS.override.md` (which Codex reads *before* `AGENTS.md`); never touches `AGENTS.md`. `--no-override` for emit-only |
 | `gemini` | `.rosita/generated/gemini.md` | **auto-wires** a gitignored `GEMINI.local.md` (`@import`) and registers it in `~/.gemini/settings.json` `context.fileName` so Gemini loads it alongside `GEMINI.md`; never touches `GEMINI.md` |
-| `opencode` | `.rosita/generated/opencode.md` | emit-only (add to `opencode.json` `instructions`) |
+| `opencode` | `.rosita/generated/opencode.md` | **auto-wires**: registers the overlay path in the global `~/.config/opencode/opencode.json` `instructions` (resolved per-project); never touches a committed `opencode.json` |
 | `copilot` | `.rosita/generated/copilot/.github/instructions/rosita.instructions.md` | **auto-wires** at launch: `rosita run copilot` points the Copilot CLI at the gitignored overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (inlined as a custom instruction); never touches `.github/copilot-instructions.md` |
 | `generic` | `.rosita/generated/generic.md` | emit-only; you wire it in |
 
@@ -195,9 +195,10 @@ supports: Claude → `CLAUDE.local.md` (`@import`); Codex → `AGENTS.override.m
 (which it prefers over `AGENTS.md`); Gemini → a gitignored `GEMINI.local.md`
 (`@import`) registered once in `~/.gemini/settings.json`; Copilot → the gitignored
 overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` at launch (it has no persistent
-local hook). The rest (`opencode`, `generic`) stay **emit-only** — rosita writes a
-gitignored overlay and prints how to wire it, rather than pushing machine-specific
-content onto teammates.
+local hook); opencode → the overlay path registered in `~/.config/opencode/opencode.json`
+`instructions`. Only `generic` stays **emit-only** — rosita writes a gitignored
+overlay and prints how to wire it, rather than pushing machine-specific content
+onto teammates.
 
 Add or override agents in config without code changes:
 

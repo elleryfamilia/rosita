@@ -100,8 +100,9 @@ how to wire it, not content in a shared file.
 Built-ins: `claude` (import), `codex` (auto `AGENTS.override.md` merge,
 `--no-override` to skip), `gemini` (auto `GEMINI.local.md` @import + registers it
 in `~/.gemini/settings.json`), `copilot` (`rosita run` sets
-`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → the gitignored overlay),
-`opencode`/`generic` (emit-only). All overridable / extendable via `[[agents]]`.
+`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → the gitignored overlay), `opencode` (registers
+the overlay path in `~/.config/opencode/opencode.json` `instructions`), `generic`
+(emit-only). All overridable / extendable via `[[agents]]`.
 
 ## Freshness **(implemented)**
 

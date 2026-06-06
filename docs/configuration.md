@@ -98,7 +98,7 @@ Built-in defaults:
 | `claude` | `claude.md` | import → `CLAUDE.local.md` | `claude` |
 | `codex` | `agents.md` | auto → gitignored `AGENTS.override.md` (Codex prefers it); `--no-override` = emit-only | `codex` |
 | `gemini` | `gemini.md` | auto → gitignored `GEMINI.local.md` (`@import`) + registers it in `~/.gemini/settings.json` `context.fileName` | `gemini` |
-| `opencode` | `opencode.md` | emit-only | `opencode` |
+| `opencode` | `opencode.md` | registers overlay path in `~/.config/opencode/opencode.json` `instructions` | `opencode` |
 | `copilot` | `copilot/.github/instructions/rosita.instructions.md` | `rosita run` sets `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `.rosita/generated/copilot` | `copilot` |
 | `generic` | `generic.md` | emit-only | — |
 
