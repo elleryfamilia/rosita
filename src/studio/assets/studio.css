@@ -257,7 +257,7 @@ body {
 .cap-group:last-child { margin-bottom: 0; }
 .cap-group-head { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
 .cap-group-count { font-size: 11px; font-weight: 600; color: var(--faint); background: var(--panel-2); border-radius: 999px; padding: 1px 8px; letter-spacing: 0; }
-.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 12px; }
+.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr)); gap: 12px; }
 .cap-card { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: var(--r); background: var(--panel-2); cursor: pointer; transition: border-color .12s; }
 .cap-card:hover { border-color: var(--accent-line); }
 .cap-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
