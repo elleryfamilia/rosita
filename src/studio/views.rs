@@ -31,30 +31,6 @@ const TARGETS: &[&str] = &[
 /// Script interpreters offered in the fragment dialog.
 const SCRIPT_LANGS: &[(&str, &str)] = &[("bash", "Bash"), ("python", "Python"), ("sh", "POSIX sh")];
 
-/// The curated icon set a fragment can pick from.
-const FRAGMENT_ICONS: &[&str] = &[
-    "box",
-    "bolt",
-    "terminal",
-    "code",
-    "git-branch",
-    "database",
-    "server",
-    "cloud",
-    "package",
-    "wrench",
-    "flask",
-    "rocket",
-    "book",
-    "file",
-    "folder",
-    "gear",
-    "globe",
-    "cpu",
-    "lock",
-    "shield",
-];
-
 // --- icons -------------------------------------------------------------------
 
 /// A 16px feather-style inline SVG icon (1.5px stroke, `currentColor`). Matched
@@ -198,14 +174,9 @@ fn theme_toggle() -> Markup {
     }
 }
 
-/// The icon to show for a fragment (its chosen icon, else a kind default).
-fn fragment_icon_name(c: &FragmentView) -> &str {
-    match &c.icon {
-        Some(name) => name,
-        None if c.kind == "command" => "terminal",
-        None if c.kind == "provider" => "bolt",
-        None => "box",
-    }
+/// The glyph for a fragment row, derived from its content type.
+fn fragment_icon_name(c: &FragmentView) -> &'static str {
+    crate::studio::state::type_glyph(c.kind, c.script_lang.as_deref())
 }
 
 // --- markdown ----------------------------------------------------------------
@@ -528,10 +499,7 @@ pub fn profile_detail_fragment(d: &ProfileDetail) -> String {
 /// summary row that, when opened, reveals the fragment's rendered-markdown
 /// guidance (the prominent content) plus an "Edit fragment" action.
 fn preview_fragment_card(c: &PreviewCap, profile: &str, expand: Expand) -> Markup {
-    let glyph = c
-        .icon
-        .as_deref()
-        .unwrap_or(if c.dynamic { "bolt" } else { "box" });
+    let glyph = c.glyph;
     // Cards start collapsed on a passive view (the user opens what they care
     // about), but a just-run fragment stays open so its fresh output is visible.
     // `has_output`/`prompt` pick what the body shows once expanded: live output
@@ -927,11 +895,8 @@ pub fn fragment_dialog(
                     div class="modal-body" {
                         @if !is_new { input type="hidden" name="id" value=(id); }
                         @if let Some(rp) = return_profile { input type="hidden" name="return_profile" value=(rp); }
-                        div class="title-row" {
-                            (icon_picker(cap.and_then(|c| c.icon.as_deref())))
-                            label class="field grow" { span class="field-label" { "title" }
-                                input type="text" name="name" value=(cap.and_then(|c| c.description.as_deref()).unwrap_or(id)) placeholder="Rust conventions" required;
-                            }
+                        label class="field grow" { span class="field-label" { "title" }
+                            input type="text" name="name" value=(cap.and_then(|c| c.description.as_deref()).unwrap_or(id)) placeholder="Rust conventions" required;
                         }
                         div class="seg" {
                             input type="radio" name="kind" id="kind-md" value="markdown" checked[!is_script];
@@ -1064,39 +1029,6 @@ pub fn script_tryout_empty() -> String {
 
 fn close_btn() -> Markup {
     html! { button class="icon-btn" type="button" title="Close" aria-label="Close" hx-get="/close" hx-target="#modal" { (icon("x")) } }
-}
-
-/// The curated icon picker as a dropdown: a trigger showing the current icon
-/// that reveals a floating grid of radio options (collapsed by default).
-fn icon_picker(selected: Option<&str>) -> Markup {
-    html! {
-        div class="field icon-field" {
-            span class="field-label" { "icon" }
-            details class="icon-dd" {
-                summary {
-                    span class="icon-dd-trigger" {
-                        span class="icon-cell-sel" { @match selected { Some(n) => (icon(n)), None => (icon("x")) } }
-                        span class="dd-label" { "Choose" }
-                        span class="dd-chev" { (icon("chevron-down")) }
-                    }
-                }
-                div class="icon-dd-panel" {
-                    div class="icon-grid" {
-                        label class="icon-opt none-opt" title="No icon" {
-                            input type="radio" name="icon" value="" checked[selected.is_none()];
-                            span class="icon-cell" { (icon("x")) }
-                        }
-                        @for name in FRAGMENT_ICONS {
-                            label class="icon-opt" title=(name) {
-                                input type="radio" name="icon" value=(name) checked[selected == Some(*name)];
-                                span class="icon-cell" { (icon(name)) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Location control: a hidden, preserved `scope` (repo/global) + shared/private.
@@ -1400,7 +1332,6 @@ mod tests {
             summary: None,
             kind: "static",
             category: category.map(str::to_string),
-            icon: None,
             script_lang: None,
             private: false,
             active: false,

@@ -62,10 +62,6 @@ pub struct Fragment {
     /// Human-readable summary; doubles as the rendered section heading.
     #[serde(default)]
     pub description: Option<String>,
-    /// Optional icon name from studio's curated set (e.g. `box`, `bolt`). Purely
-    /// cosmetic — surfaced in studio, never in the rendered overlay.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
     /// Optional human-friendly category that groups this fragment in studio's
     /// tree (e.g. `Operating Style`, `Local Environment`). `skip_serializing_if`
     /// keeps the freshness fingerprint of an uncategorized fragment unchanged.
@@ -160,7 +156,6 @@ impl Fragment {
             provider: None,
             command: None,
             script_lang: None,
-            icon: None,
             allow_exec: true,
             cache: None,
             origin: Layer::default(),
@@ -180,13 +175,12 @@ impl Fragment {
 /// resolves a profile's fragment refs against your *own* library only, so a
 /// profile that names a palette id you haven't duplicated renders nothing for it.
 pub fn palette() -> Vec<Fragment> {
-    // Build a static (markdown) palette fragment: a curated icon + a friendly
-    // category + templated guidance.
-    fn frag(id: &str, description: &str, icon: &str, category: &str, guidance: &str) -> Fragment {
+    // Build a static (markdown) palette fragment: a friendly category +
+    // templated guidance. The studio glyph is derived from content type.
+    fn frag(id: &str, description: &str, category: &str, guidance: &str) -> Fragment {
         Fragment {
             id: id.to_string(),
             description: Some(description.to_string()),
-            icon: Some(icon.to_string()),
             category: Some(category.to_string()),
             when: Vec::new(),
             requires: Vec::new(),
@@ -207,7 +201,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "baseline",
             "Follow repo conventions",
-            "box",
             "Operating Style",
             "Follow the repository's existing conventions and keep changes minimal, \
              focused, and well-tested. Match the surrounding code's style and naming \
@@ -217,7 +210,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "terse-comms",
             "Terse communication",
-            "bolt",
             "Operating Style",
             "Be terse: lead with the result and what changed; skip preamble. For \
              non-trivial decisions, briefly note the reasoning, the tradeoffs, and the \
@@ -227,7 +219,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "rust-conventions",
             "Rust conventions",
-            "code",
             "Stack Conventions",
             "Rust project. Build with cargo, format with rustfmt, lint with clippy \
              (`cargo clippy --all-targets`). Prefer `?`/`Result` over `unwrap()` or \
@@ -236,7 +227,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "node-conventions",
             "Node.js conventions",
-            "code",
             "Stack Conventions",
             "Node.js project. Use pnpm for scripts and dependencies, and prefer \
              TypeScript over plain JavaScript. Keep the type-checker and linter clean \
@@ -245,7 +235,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "nextjs-conventions",
             "Next.js conventions",
-            "code",
             "Stack Conventions",
             "Next.js app. Respect the existing app/pages router convention and keep \
              server/client component boundaries explicit. Use pnpm for scripts and \
@@ -254,7 +243,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "go-conventions",
             "Go conventions",
-            "code",
             "Stack Conventions",
             "Go project. Use the standard toolchain (`go build`, `go test`, `go vet`, \
              `gofmt`); add golangci-lint for stricter checks. Handle errors explicitly \
@@ -263,7 +251,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "python-conventions",
             "Python conventions",
-            "code",
             "Stack Conventions",
             "Python project. Use uv for environments and dependencies, ruff for \
              linting and formatting, and pytest for tests.",
@@ -272,7 +259,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "conventional-commits",
             "Conventional commits",
-            "git-branch",
             "Dev Workflow",
             "Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, …). \
              Imperative subject ≤72 chars; the body explains *why* when it is \
@@ -281,7 +267,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "commit-checkpoints",
             "Commit at checkpoints",
-            "git-branch",
             "Dev Workflow",
             "Commit at logical checkpoints with clear, descriptive messages rather \
              than one giant commit at the end — don't wait to be told.",
@@ -289,7 +274,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "plan-nontrivial",
             "Plan non-trivial work",
-            "book",
             "Dev Workflow",
             "For non-trivial work, sketch a short plan before implementing: the \
              objective, the approach, and the risks. Skip the ceremony for typos and \
@@ -298,7 +282,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "experimental-iteration",
             "Spike fast on a throwaway branch",
-            "rocket",
             "Dev Workflow",
             "Experimental branch — optimize for iteration speed. Throwaway spikes are \
              fine; keep changes scoped to this branch and don't wire them into shared \
@@ -308,7 +291,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "validate-before-done",
             "Build, test, and lint before done",
-            "terminal",
             "Quality",
             "Before declaring work done, run the build, the tests, and the linter, and \
              report the results honestly. If something failed or was skipped, say so \
@@ -317,7 +299,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "testing-discipline",
             "Cover changes with tests",
-            "flask",
             "Quality",
             "Add or update tests to match the change: unit or integration tests for \
              logic, end-to-end tests for user-facing behavior. If a real harness is \
@@ -327,7 +308,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "branch-discipline",
             "Never commit to main",
-            "git-branch",
             "Safety",
             "Never commit or push directly to the main/master branch — always work on \
              a branch and open a pull request instead of pushing to shared branches.",
@@ -335,7 +315,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "ask-before-risky",
             "Ask before risky actions",
-            "shield",
             "Safety",
             "Confirm before destructive or hard-to-reverse actions (`rm -rf`, database \
              drops, bulk deletes, file overwrites, history rewrites). Prefer a dry run \
@@ -344,7 +323,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "infra-caution",
             "Be conservative with infrastructure",
-            "server",
             "Safety",
             "This is infrastructure code. Be conservative: prefer plans over direct \
              mutation, never apply changes to shared/remote state without explicit \
@@ -354,7 +332,6 @@ pub fn palette() -> Vec<Fragment> {
         frag(
             "secrets-hygiene",
             "Never commit or log secrets",
-            "lock",
             "Security",
             "Never print, log, or commit secrets, credentials, tokens, or `.env` \
              files. Keep sensitive values out of code and out of command output.",
@@ -373,13 +350,7 @@ mod tests {
         for c in &frags {
             assert!(ids.insert(c.id.clone()), "duplicate fragment id {}", c.id);
             assert!(!c.guidance.trim().is_empty(), "{} has empty guidance", c.id);
-            // Every shipped fragment carries a curated icon and a category so the
-            // studio tree renders a glyph and groups it.
-            assert!(
-                c.icon.as_deref().is_some_and(|i| !i.is_empty()),
-                "{} has no icon",
-                c.id
-            );
+            // Every shipped fragment carries a category so the studio tree groups it.
             assert!(
                 c.category.as_deref().is_some_and(|i| !i.is_empty()),
                 "{} has no category",

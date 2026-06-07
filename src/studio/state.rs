@@ -128,8 +128,8 @@ pub struct PreviewOutcome {
 pub struct PreviewCap {
     pub id: String,
     pub title: String,
-    /// The fragment's curated icon, if any (else the card uses a default).
-    pub icon: Option<String>,
+    /// Glyph derived from the fragment's content type (markdown/script/provider).
+    pub glyph: &'static str,
     /// Rendered guidance markdown (or the skip note).
     pub markdown: String,
     /// Resolved a dynamic provider/command.
@@ -154,8 +154,6 @@ pub struct FragmentView {
     pub kind: &'static str,
     /// Primary category for grouping the library.
     pub category: Option<String>,
-    /// Optional curated icon name.
-    pub icon: Option<String>,
     /// Interpreter for a script cap (`bash`/`sh`/`python`); drives the badge.
     pub script_lang: Option<String>,
     /// True when authored in a `*local.toml` layer (private / gitignored).
@@ -299,8 +297,8 @@ pub fn render_profile_config(
     // cap that resolves to nothing in ReadOnly (its provider/command doesn't run
     // and there's no cache) is dropped from the overlay, which would hide its
     // card. Such caps get a "runs at render" placeholder so the preview still
-    // lists — and can open/edit — them. Each cap's icon/editability is looked up
-    // from the staged library (inline/synthetic caps fall back to a default).
+    // lists — and can open/edit — them. Each cap's glyph is derived from its
+    // content type; editability is looked up from the staged library.
     let rendered: std::collections::HashMap<&str, _> =
         out.fragments.iter().map(|c| (c.id.as_str(), c)).collect();
     let caps: Vec<PreviewCap> = composition
@@ -310,11 +308,14 @@ pub fn render_profile_config(
         .filter_map(|rc| {
             let cap = &rc.fragment;
             let owned = cfg.fragments.iter().find(|x| x.id == cap.id);
-            let icon = owned.and_then(|x| x.icon.clone());
             let editable = owned.is_some();
+            let glyph = type_glyph(
+                kind_of(cap.command.is_some(), cap.provider.is_some()),
+                cap.script_lang.as_deref(),
+            );
             if let Some(c) = rendered.get(cap.id.as_str()) {
                 Some(PreviewCap {
-                    icon,
+                    glyph,
                     editable,
                     id: c.id.clone(),
                     title: c.title.clone(),
@@ -325,7 +326,7 @@ pub fn render_profile_config(
                 })
             } else if cap.is_dynamic() {
                 Some(PreviewCap {
-                    icon,
+                    glyph,
                     editable,
                     id: cap.id.clone(),
                     title: cap.title().to_string(),
@@ -447,7 +448,6 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             active: active_ids.contains(&c.id),
             title: c.title().to_string(),
             summary: fragment_summary(c),
-            icon: c.icon.clone(),
             script_lang: c.script_lang.clone(),
             private: matches!(c.origin, Layer::RepoLocal | Layer::GlobalLocal),
             id: c.id.clone(),
@@ -482,7 +482,6 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             active: false,
             title: c.title().to_string(),
             summary: fragment_summary(c),
-            icon: c.icon.clone(),
             script_lang: c.script_lang.clone(),
             private: false,
             id: c.id.clone(),
@@ -695,6 +694,21 @@ fn kind_of(has_command: bool, has_provider: bool) -> &'static str {
         "provider"
     } else {
         "static"
+    }
+}
+
+/// The studio glyph for a fragment, derived from its content type rather than a
+/// user-chosen icon: a document for static markdown, a terminal for shell
+/// scripts, `code` for Python, and a bolt for a live provider. (Bash vs POSIX
+/// `sh` is distinguished by the separate script-lang badge.)
+pub(crate) fn type_glyph(kind: &str, script_lang: Option<&str>) -> &'static str {
+    match kind {
+        "provider" => "bolt",
+        "command" => match script_lang {
+            Some("python") => "code",
+            _ => "terminal",
+        },
+        _ => "file",
     }
 }
 
@@ -925,7 +939,6 @@ pub fn fragment_from_form(
     Ok(Fragment {
         id,
         description: name.or_else(|| base.and_then(|c| c.description.clone())),
-        icon: opt(value_of(pairs, "icon")),
         category,
         when: base.map(|c| c.when.clone()).unwrap_or_default(),
         requires: base.map(|c| c.requires.clone()).unwrap_or_default(),
@@ -991,7 +1004,6 @@ pub fn inline_fragment_from_form(pairs: &[(String, String)]) -> Option<(Fragment
     let cap = Fragment {
         id,
         description: Some(name),
-        icon: None,
         category: None,
         when: Vec::new(),
         requires: Vec::new(),

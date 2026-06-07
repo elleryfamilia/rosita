@@ -453,9 +453,6 @@ fn fragment_table(c: &Fragment) -> Result<Table> {
     if let Some(d) = &c.description {
         t["description"] = value(d.as_str());
     }
-    if let Some(ic) = &c.icon {
-        t["icon"] = value(ic.as_str());
-    }
     if let Some(cat) = &c.category {
         t["category"] = value(cat.as_str());
     }
@@ -585,7 +582,6 @@ mod tests {
             provider: None,
             command: None,
             script_lang: None,
-            icon: None,
             allow_exec: true,
             cache: None,
             origin: Layer::default(),

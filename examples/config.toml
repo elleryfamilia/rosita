@@ -37,7 +37,7 @@ max_output_kib = 32
 # *palette* you can copy from (`rosita fragments`, or duplicate in studio),
 # but a profile only renders fragments that physically live in your config.
 # Fields:
-#   id (required); description, icon, category,
+#   id (required); description, category,
 #   when (self-gate rules), requires (other fragment ids), params (table),
 #   agents (restrict to specific agent ids), guidance (templated markdown).
 #   `category` groups the fragment in studio's tree. Dynamic: provider (built-in:

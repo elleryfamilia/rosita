@@ -513,7 +513,6 @@ mod tests {
             provider: None,
             command: None,
             script_lang: None,
-            icon: None,
             allow_exec: true,
             cache: None,
             origin: crate::fragment::Layer::default(),
