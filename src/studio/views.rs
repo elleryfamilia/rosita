@@ -332,7 +332,10 @@ pub fn profiles_tab(
             aside class="profile-rail" {
                 div class="rail-head" {
                     h1 { "Profiles" }
-                    button class="btn btn-primary btn-sm" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "New" }
+                    div class="rail-head-actions" {
+                        button class="btn btn-ghost btn-sm" hx-get="/packs" hx-target="#main" { (icon("grid")) "Starter packs" }
+                        button class="btn btn-primary btn-sm" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "New" }
+                    }
                 }
                 @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
                 @if lib.profiles.is_empty() {
@@ -591,7 +594,6 @@ pub fn fragments_tab(lib: &LibraryView, flash: Option<&str>) -> Markup {
                 h1 { "Fragments" }
                 div class="head-actions" {
                     (legend())
-                    button class="btn btn-ghost" hx-get="/packs" hx-target="#main" { (icon("grid")) "Add from packs" }
                     button class="btn btn-primary" hx-get="/fragments/new" hx-target="#modal" { (icon("plus")) "New fragment" }
                 }
             }
@@ -599,10 +601,9 @@ pub fn fragments_tab(lib: &LibraryView, flash: Option<&str>) -> Markup {
             @if lib.yours.is_empty() {
                 div class="empty-card" {
                     p { "No fragments yet." }
-                    p class="muted" { "A fragment is a reusable chunk of guidance (or a script) that profiles compose. The quickest start is a pack." }
+                    p class="muted" { "A fragment is a reusable chunk of guidance (or a script) that profiles compose. Write one here, or apply a Starter pack from the Profiles tab to get a curated set plus a ready-made profile." }
                     div class="empty-actions" {
-                        button class="btn btn-primary" hx-get="/packs" hx-target="#main" { (icon("grid")) "Browse starter packs" }
-                        button class="btn btn-ghost" hx-get="/fragments/new" hx-target="#modal" { (icon("plus")) "Write your first fragment" }
+                        button class="btn btn-primary" hx-get="/fragments/new" hx-target="#modal" { (icon("plus")) "Write your first fragment" }
                     }
                 }
             } @else {

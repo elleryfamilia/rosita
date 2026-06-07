@@ -622,7 +622,7 @@ fn handle_profile_new(state: &Arc<Mutex<StudioState>>) -> Resp {
 // --- starter packs -----------------------------------------------------------
 
 /// `GET /packs` — the starter-pack gallery (swapped into `#main`). Reachable from
-/// the welcome screen and the Fragments tab's "Add from packs" button.
+/// the welcome screen and the Profiles tab's "Starter packs" button.
 fn handle_packs(state: &Arc<Mutex<StudioState>>) -> Resp {
     let snap = state.lock().unwrap().snapshot();
     match state::pack_views(&snap) {

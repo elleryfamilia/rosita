@@ -202,8 +202,9 @@ body {
 .tab-profiles { display: grid; grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr); gap: 22px; align-items: start; }
 
 .profile-rail { position: sticky; top: 0; align-self: start; max-height: calc(100vh - 97px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-.rail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .rail-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.rail-head-actions { display: flex; gap: 6px; }
 .rail-empty { margin: 0; padding: 16px; border: 1px dashed var(--border-strong); border-radius: var(--r); }
 .rail-list { display: flex; flex-direction: column; gap: 6px; }
 .rail-item { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: var(--r); background: var(--panel-2); cursor: pointer; transition: border-color .12s, background .12s; }
