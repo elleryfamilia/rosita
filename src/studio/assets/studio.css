@@ -360,32 +360,9 @@ body {
 .confirm-msg { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
 .confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
-/* icon picker dropdown */
-.icon-field { flex: none; display: flex; flex-direction: column; gap: 5px; }
-.icon-dd { position: relative; }
-.icon-dd > summary { list-style: none; cursor: pointer; }
-.icon-dd > summary::-webkit-details-marker { display: none; }
-.icon-dd-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--panel-2); }
-.icon-dd > summary:hover .icon-dd-trigger, .icon-dd[open] > summary .icon-dd-trigger { border-color: var(--accent-line); }
-.icon-cell-sel { display: inline-flex; color: var(--accent); }
-.icon-cell-sel .icon { width: 18px; height: 18px; }
-.dd-label { font-size: 12.5px; color: var(--muted); }
-.dd-chev { color: var(--faint); display: inline-flex; margin-left: 2px; }
-.dd-chev .icon { width: 14px; height: 14px; }
-.icon-dd[open] .dd-chev { transform: rotate(180deg); }
-.icon-dd-panel { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 268px; padding: 8px; background: var(--elevated); border: 1px solid var(--border-strong); border-radius: var(--r); box-shadow: 0 14px 36px rgba(0, 0, 0, .55); }
-.icon-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.icon-opt input { position: absolute; opacity: 0; pointer-events: none; }
-.icon-cell { display: grid; place-items: center; aspect-ratio: 1; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); cursor: pointer; }
-.icon-opt:hover .icon-cell { border-color: var(--accent-line); color: var(--fg); }
-.icon-opt input:checked + .icon-cell { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.icon-opt input:focus-visible + .icon-cell { outline: 2px solid var(--accent); outline-offset: 1px; }
-.none-opt .icon-cell { color: var(--faint); }
-
 /* --- forms (shared by dialog + editor) ------------------------------------- */
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field.grow { flex: 1; }
-.title-row { display: flex; gap: 12px; align-items: flex-end; }
 .meta-row { display: flex; gap: 12px; align-items: flex-end; }
 .meta-row .field.grow { flex: 1; }
 .fragment-form select {
@@ -406,7 +383,10 @@ input[type="text"]:focus, textarea:focus { outline: none; border-color: var(--ac
 input[readonly] { color: var(--muted); background: var(--panel); cursor: not-allowed; }
 input::placeholder, textarea::placeholder { color: var(--faint); }
 
-.seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
+/* `flex: none` so the segmented control never gets shrunk to a sliver by the
+   modal-body flex column when the form overflows (overflow:hidden otherwise
+   zeroes its flex min-height, collapsing it and making the labels unclickable). */
+.seg { display: inline-flex; flex: none; align-self: flex-start; border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg .seg-opt { padding: 5px 14px; }
 .seg-sm .seg-opt { padding: 4px 10px; font-size: 11.5px; }
