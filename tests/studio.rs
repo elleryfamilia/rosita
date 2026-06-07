@@ -146,7 +146,7 @@ fn studio_binds_and_serves_secured_spine() {
         "shell → 200; got head:\n{}",
         head(&shell)
     );
-    assert!(shell.contains("rosita studio"), "shell renders the page");
+    assert!(shell.contains("Rosita studio"), "shell renders the page");
     assert!(
         shell.contains("Profiles") && shell.contains("Fragments"),
         "shell renders the Profiles/Fragments tabs"

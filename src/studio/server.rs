@@ -1210,7 +1210,7 @@ mod tests {
         let r = route(&st, &req("GET", "/", "", &[HOST, COOKIE], ""));
         assert_eq!(r.status, 200);
         let body = String::from_utf8(r.body).unwrap();
-        assert!(body.contains("rosita studio"));
+        assert!(body.contains("Rosita studio"));
         // The shell renders the Profiles tab (dashboard) by default.
         assert!(body.contains("Profiles"));
         assert!(body.contains("Fragments"));
@@ -1225,7 +1225,7 @@ mod tests {
         let r = route(&st, &req("GET", "/tab/profiles", "", &[HOST, COOKIE], ""));
         assert_eq!(r.status, 200);
         let body = String::from_utf8(r.body).unwrap();
-        assert!(body.contains("Welcome to rosita studio"), "welcome missing");
+        assert!(body.contains("Welcome to Rosita studio"), "welcome missing");
         // The welcome embeds the starter-pack gallery; the detected stack's pack
         // is the recommended one with an Apply action.
         assert!(
@@ -1358,6 +1358,11 @@ mod tests {
             &req("GET", "/assets/studio.css", "", &[HOST, COOKIE], ""),
         );
         assert_eq!(r.status, 200);
+        // The embedded stylesheet carries the light theme palette + the toggle
+        // glyph rules (guards against a stale/empty embed).
+        let css = String::from_utf8(r.body).unwrap();
+        assert!(css.contains(r#"[data-theme="light"]"#));
+        assert!(css.contains(".theme-toggle"));
     }
 
     #[test]

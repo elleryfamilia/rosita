@@ -255,10 +255,59 @@
     });
   }
 
+  // --- theme toggle ----------------------------------------------------------
+  // Preference (auto/light/dark) lives in localStorage; the inline <head> script
+  // already stamped <html data-theme/-pref> to avoid a flash. Here we cycle the
+  // preference on click, persist it, and (in auto mode) re-resolve when the OS
+  // setting flips. CSS keys the visible glyph off data-theme-pref.
+  var THEME_KEY = "rosita-theme";
+  var THEME_ORDER = ["auto", "light", "dark"];
+
+  function applyTheme(pref) {
+    var sysLight =
+      window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches;
+    var eff = pref === "auto" ? (sysLight ? "light" : "dark") : pref;
+    var root = document.documentElement;
+    root.dataset.theme = eff;
+    root.dataset.themePref = pref;
+    try { localStorage.setItem(THEME_KEY, pref); } catch (e) { /* private mode */ }
+    var btn = document.getElementById("theme-toggle");
+    if (btn) {
+      btn.title =
+        "Theme: " + pref + (pref === "auto" ? " (" + eff + ")" : "");
+    }
+  }
+
+  function wireTheme() {
+    var btn = document.getElementById("theme-toggle");
+    if (btn && !btn.dataset.themeBound) {
+      btn.dataset.themeBound = "1";
+      btn.addEventListener("click", function () {
+        var cur = document.documentElement.dataset.themePref || "auto";
+        var next = THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length];
+        applyTheme(next);
+      });
+    }
+    // Re-resolve on OS theme change while the preference is "auto".
+    if (window.matchMedia) {
+      var mq = matchMedia("(prefers-color-scheme: light)");
+      var onChange = function () {
+        if ((document.documentElement.dataset.themePref || "auto") === "auto") {
+          applyTheme("auto");
+        }
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    }
+    // Sync the button tooltip with whatever the inline init resolved.
+    applyTheme(document.documentElement.dataset.themePref || "auto");
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     process(document.body);
     wireActiveGroups();
     wireIconPicker();
+    wireTheme();
     enhanceCode(document.body);
   });
 })();

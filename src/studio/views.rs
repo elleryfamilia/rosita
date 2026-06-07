@@ -63,6 +63,13 @@ const FRAGMENT_ICONS: &[&str] = &[
 fn icon(name: &str) -> Markup {
     let body: &str = match name {
         "plus" => r#"<path d="M12 5v14M5 12h14"/>"#,
+        "sun" => {
+            r#"<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>"#
+        }
+        "moon" => r#"<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>"#,
+        "monitor" => {
+            r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>"#
+        }
         "copy" => {
             r#"<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>"#
         }
@@ -167,6 +174,30 @@ fn brand_mark() -> Markup {
     )
 }
 
+/// Inline `<head>` script that resolves the stored theme preference
+/// (`auto`/`light`/`dark`) against the system `prefers-color-scheme` and stamps
+/// `<html data-theme>` (resolved) + `<html data-theme-pref>` (preference) before
+/// the stylesheet paints — preventing a dark→light flash on load.
+const THEME_INIT_JS: &str = "(function(){try{var p=localStorage.getItem('rosita-theme')||'auto';\
+var m=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches;\
+var e=p==='auto'?(m?'light':'dark'):p;var r=document.documentElement;\
+r.dataset.theme=e;r.dataset.themePref=p;}catch(_){}})();";
+
+/// The theme toggle: one button cycling auto → light → dark. All three glyphs are
+/// rendered; CSS shows the one matching `<html data-theme-pref>`, and `studio.js`
+/// flips the preference + persists it on click. Defaults to the auto (monitor)
+/// glyph until JS/the inline init sets the preference.
+fn theme_toggle() -> Markup {
+    html! {
+        button id="theme-toggle" type="button" class="icon-btn theme-toggle"
+            title="Theme: auto" aria-label="Switch color theme" {
+            span class="ti ti-auto" { (icon("monitor")) }
+            span class="ti ti-light" { (icon("sun")) }
+            span class="ti ti-dark" { (icon("moon")) }
+        }
+    }
+}
+
 /// The icon to show for a fragment (its chosen icon, else a kind default).
 fn fragment_icon_name(c: &FragmentView) -> &str {
     match &c.icon {
@@ -223,15 +254,20 @@ pub fn shell(main: Markup, staged: usize, active_tab: &str) -> String {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "rosita studio" }
+                // No-flash theme init: resolve the stored preference (auto/light/
+                // dark) against the system setting and stamp <html> before the
+                // stylesheet paints, so there's no dark→light flicker on load.
+                script { (PreEscaped(THEME_INIT_JS)) }
+                title { "Rosita studio" }
                 link rel="stylesheet" href="/assets/studio.css";
                 script src="/assets/studio.js" defer {}
             }
             body {
                 header class="topbar" {
-                    div class="brand" { span class="brand-mark" { (brand_mark()) } span class="brand-name" { "rosita" } }
+                    div class="brand" { span class="brand-mark" { (brand_mark()) } span class="brand-name" { "Rosita" } }
                     (tab_bar(active_tab))
                     div id="staged" class="staged-wrap" { (staged_indicator(staged)) }
+                    (theme_toggle())
                 }
                 main class="main" id="main" { (main) }
                 div id="modal" class="modal-root" {}
@@ -357,7 +393,7 @@ fn studio_welcome(o: &Onboarding, packs: &[PackView]) -> Markup {
         div class="welcome" {
             div class="welcome-head" {
                 span class="welcome-wave" { "👋" }
-                h1 { "Welcome to rosita studio" }
+                h1 { "Welcome to Rosita studio" }
             }
             div class="welcome-detect" {
                 span class="muted small" { "rosita detected" }
@@ -1216,7 +1252,7 @@ pub fn error_fragment(msg: &str) -> String {
 
 /// A minimal full-page error (when the shell itself can't be assembled).
 pub fn error_page(msg: &str) -> String {
-    html! { (DOCTYPE) html { head { title { "rosita studio — error" } } body { pre class="error" { (msg) } } } }.into_string()
+    html! { (DOCTYPE) html { head { title { "Rosita studio — error" } } body { pre class="error" { (msg) } } } }.into_string()
 }
 
 /// `GET /fs-status` — the light external-edit poll banner.
@@ -1309,6 +1345,37 @@ mod tests {
             risk: Risk::Info,
             active: false,
         }
+    }
+
+    #[test]
+    fn shell_has_capitalized_brand_and_theme_toggle() {
+        let html = shell(maud::html! {}, 0, "fragments");
+        // Wordmark + page title are capitalized; the lowercase command name is
+        // not what the chrome shows.
+        assert!(html.contains(r#"<span class="brand-name">Rosita</span>"#));
+        assert!(html.contains("Rosita studio"));
+        // Theme toggle button with all three preference glyphs present.
+        assert!(html.contains(r#"id="theme-toggle""#));
+        assert!(html.contains("ti-auto"));
+        assert!(html.contains("ti-light"));
+        assert!(html.contains("ti-dark"));
+    }
+
+    #[test]
+    fn shell_inlines_no_flash_theme_init() {
+        let html = shell(maud::html! {}, 0, "fragments");
+        // The inline head script must set the resolved theme + preference before
+        // the stylesheet link, so there's no dark→light flash on load. (The
+        // attribute is set at runtime via `dataset.theme`; it isn't in the SSR
+        // markup, so assert on the script's own tokens instead.)
+        assert!(html.contains("dataset.theme"));
+        assert!(html.contains("prefers-color-scheme"));
+        let init = html.find("rosita-theme").expect("theme init present");
+        let css = html.find("studio.css").expect("stylesheet link present");
+        assert!(
+            init < css,
+            "theme init must run before the stylesheet paints"
+        );
     }
 
     #[test]

@@ -20,6 +20,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --bg: #0d0f14;
   --panel: #14171f;
   --panel-2: #1b1f2a;
@@ -40,6 +41,22 @@
   --danger: #e0626b;
   --ok: #7fd6a0;
 
+  /* Role tints + hovers (themed so light mode isn't half-painted). */
+  --hover: #283042;
+  --accent-hover: #8fb0f8;
+  --danger-soft: rgba(224, 98, 107, 0.13);
+  --danger-line: rgba(224, 98, 107, 0.45);
+  --caution-soft: rgba(224, 168, 90, 0.12);
+  --caution-line: rgba(224, 168, 90, 0.4);
+  --error-fg: #ffc9cd;
+
+  /* Bash syntax-highlight palette (script editor). */
+  --code-s: #9ece6a;
+  --code-v: #7aa2f7;
+  --code-k: #bb9af7;
+  --code-b: #e0af68;
+  --code-n: #ff9e64;
+
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --brand: "Sail", cursive;
@@ -47,6 +64,47 @@
   --r-sm: 6px;
   --r: 8px;
   --r-lg: 12px;
+}
+
+/* Light theme. The effective theme is resolved in JS (preference auto/light/dark
+   → resolved light/dark via prefers-color-scheme) and set on <html data-theme>,
+   so the CSS only needs the two concrete palettes. The no-flash inline head
+   script sets data-theme before first paint. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #eef1f6;
+  --elevated: #e6eaf1;
+  --border: #e2e6ed;
+  --border-strong: #ccd2de;
+
+  --fg: #1b1e27;
+  --muted: #5b6273;
+  --faint: #8b91a1;
+
+  --accent: #3a63d8;
+  --accent-soft: rgba(58, 99, 216, 0.12);
+  --accent-line: #aebff0;
+  --on-accent: #ffffff;
+
+  --caution: #b06f1f;
+  --danger: #cf3b46;
+  --ok: #2f9e63;
+
+  --hover: #e3e7ee;
+  --accent-hover: #2f56c6;
+  --danger-soft: rgba(207, 59, 70, 0.1);
+  --danger-line: rgba(207, 59, 70, 0.42);
+  --caution-soft: rgba(176, 111, 31, 0.13);
+  --caution-line: rgba(176, 111, 31, 0.42);
+  --error-fg: #b3261e;
+
+  --code-s: #2f7a1f;
+  --code-v: #2f56c6;
+  --code-k: #7c3aed;
+  --code-b: #b45309;
+  --code-n: #c2410c;
 }
 
 * { box-sizing: border-box; }
@@ -68,7 +126,7 @@ body {
   height: 52px; padding: 0 16px;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 10px; }
+.brand { display: flex; align-items: center; gap: 4px; }
 .brand-mark { display: inline-flex; }
 .brand-mark .rose { width: 28px; height: 28px; display: block; }
 .brand-name { font-family: var(--brand); font-size: 30px; font-weight: 400; line-height: 1; letter-spacing: .5px; padding-bottom: 2px; }
@@ -85,6 +143,17 @@ body {
 .tab.active { background: var(--accent-soft); color: var(--accent); }
 
 .staged-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* Theme toggle: one button cycling auto → light → dark. The three glyphs are all
+   rendered; CSS shows the one matching the current preference (set on <html
+   data-theme-pref>), so no JS DOM-building is needed. */
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; }
+.theme-toggle .ti { display: none; }
+.theme-toggle .ti .icon { vertical-align: 0; }
+:root[data-theme-pref="auto"] .theme-toggle .ti-auto,
+:root[data-theme-pref="light"] .theme-toggle .ti-light,
+:root[data-theme-pref="dark"] .theme-toggle .ti-dark,
+:root:not([data-theme-pref]) .theme-toggle .ti-auto { display: inline-flex; }
 .staged-count { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .staged-count .icon { color: var(--accent); }
 
@@ -98,16 +167,16 @@ body {
   background: var(--elevated); color: var(--fg); cursor: pointer;
   transition: background .12s, border-color .12s; white-space: nowrap;
 }
-.btn:hover { border-color: var(--accent-line); background: #283042; }
+.btn:hover { border-color: var(--accent-line); background: var(--hover); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn .icon { width: 15px; height: 15px; }
 .btn-sm { padding: 4px 9px; font-size: 12px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-.btn-primary:hover { background: #8fb0f8; border-color: #8fb0f8; }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-ghost { background: transparent; }
 .btn-ghost:hover { background: var(--panel-2); }
 .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
-.btn-danger:hover { background: rgba(224, 98, 107, .12); }
+.btn-danger:hover { background: var(--danger-soft); }
 
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -115,7 +184,7 @@ body {
   background: transparent; color: var(--muted); cursor: pointer;
 }
 .icon-btn:hover { background: var(--elevated); color: var(--fg); }
-.icon-btn.danger:hover { background: rgba(224, 98, 107, .14); color: var(--danger); }
+.icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .dash-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
@@ -148,7 +217,7 @@ body {
 .tag { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: var(--r-sm); color: var(--muted); background: var(--elevated); }
 .tag .icon { width: 11px; height: 11px; }
 .bound-tag { color: var(--accent); background: var(--accent-soft); }
-.off-tag { color: var(--caution); background: rgba(224, 168, 90, .12); }
+.off-tag { color: var(--caution); background: var(--caution-soft); }
 .script-tag { color: var(--accent); background: var(--accent-soft); }
 .target-chip { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 6px; }
 .target-chip.muted { font-family: var(--sans); font-style: italic; color: var(--faint); }
@@ -197,7 +266,7 @@ body {
 .chip-none { color: var(--faint); }
 /* Static, non-interactive label for the agent a profile detail is rendered for. */
 .chip-agent { color: var(--muted); font-family: var(--mono); font-weight: 500; }
-.chip-ambiguous { color: var(--caution); border-color: rgba(224, 168, 90, .4); background: rgba(224, 168, 90, .1); }
+.chip-ambiguous { color: var(--caution); border-color: var(--caution-line); background: var(--caution-soft); }
 
 .provenance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 6px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); }
 .prov-node { font-family: var(--mono); }
@@ -379,11 +448,11 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .code-edit-wrap.code-live textarea.code-edit::selection { background: var(--accent-soft); color: transparent; }
 /* Token colors (dark-theme palette). */
 .code-hl .t-c { color: var(--faint); font-style: italic; }
-.code-hl .t-s { color: #9ece6a; }
-.code-hl .t-v { color: #7aa2f7; }
-.code-hl .t-k { color: #bb9af7; font-weight: 600; }
-.code-hl .t-b { color: #e0af68; }
-.code-hl .t-n { color: #ff9e64; }
+.code-hl .t-s { color: var(--code-s); }
+.code-hl .t-v { color: var(--code-v); }
+.code-hl .t-k { color: var(--code-k); font-weight: 600; }
+.code-hl .t-b { color: var(--code-b); }
+.code-hl .t-n { color: var(--code-n); }
 .code-hl .t-o { color: var(--muted); }
 
 /* Roomier fragment editor — script editing needs space. */
@@ -473,9 +542,9 @@ legend { padding: 0 6px; font-size: 12px; font-weight: 600; display: flex; gap: 
 .banner-body { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.5; }
 .banner-body p { margin: 0; }
 .banner-body .btn { align-self: flex-start; margin-top: 2px; }
-.banner.warn { border-color: rgba(224, 168, 90, .4); background: rgba(224, 168, 90, .08); }
+.banner.warn { border-color: var(--caution-line); background: var(--caution-soft); }
 .banner.warn .banner-icon { color: var(--caution); }
-.banner.error { border-color: rgba(224, 98, 107, .45); background: rgba(224, 98, 107, .1); color: #ffc9cd; }
+.banner.error { border-color: var(--danger-line); background: var(--danger-soft); color: var(--error-fg); }
 .banner.error .banner-icon { color: var(--danger); }
 .ok-line { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ok); font-size: 12.5px; }
 .ok-line .icon { color: var(--ok); }
@@ -487,7 +556,7 @@ legend { padding: 0 6px; font-size: 12px; font-weight: 600; display: flex; gap: 
 .diff-body { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; background: var(--bg); }
 
 .fs-clean { color: var(--faint); font-size: 12px; }
-pre.error { color: #ffc9cd; padding: 16px; font-family: var(--mono); white-space: pre-wrap; }
+pre.error { color: var(--error-fg); padding: 16px; font-family: var(--mono); white-space: pre-wrap; }
 
 /* --- starter packs + legend ------------------------------------------------ */
 .head-actions { display: flex; align-items: center; gap: 8px; }
