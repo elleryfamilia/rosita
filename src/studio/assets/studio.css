@@ -221,7 +221,6 @@ body {
 .tag .icon { width: 11px; height: 11px; }
 .bound-tag { color: var(--accent); background: var(--accent-soft); }
 .off-tag { color: var(--caution); background: var(--caution-soft); }
-.script-tag { color: var(--accent); background: var(--accent-soft); }
 .target-chip { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 6px; }
 .target-chip.muted { font-family: var(--sans); font-style: italic; color: var(--faint); }
 .atoms { display: flex; flex-wrap: wrap; gap: 4px; }

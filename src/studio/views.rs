@@ -529,7 +529,6 @@ fn preview_fragment_card(c: &PreviewCap, profile: &str, expand: Expand) -> Marku
                     }
                 }
                 @if c.skipped { span class="tag off-tag" { (icon("shield")) "exec off" } }
-                @else if c.dynamic { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
                 span class="fragment-chev" { (icon("chevron-down")) }
             }
             div class="fragment-detail-body" {
@@ -734,12 +733,12 @@ fn fragment_card(c: &FragmentView) -> Markup {
                 @if let Some(s) = &c.summary { span class="fragment-summary" { (s) } }
                 span class="fragment-id" { (id) }
             }
-            div class="fragment-tags" {
-                @if let Some(lang) = &c.script_lang { span class="tag script-tag" { (icon("terminal")) (lang) } }
-                @else if c.kind == "command" { span class="tag script-tag" { (icon("terminal")) "script" } }
-                @else if c.kind == "provider" { span class="tag script-tag" { (icon("bolt")) "dynamic" } }
-                @if c.private { span class="tag" { (icon("lock")) "private" } }
-                @else { span class="tag" { "shared" } }
+            // The glyph already conveys the type; only flag the exceptions —
+            // a private (local.toml) fragment. Shared is the unmarked default.
+            @if c.private {
+                div class="fragment-tags" {
+                    span class="tag" { (icon("lock")) "private" }
+                }
             }
         }
     }
@@ -747,19 +746,19 @@ fn fragment_card(c: &FragmentView) -> Markup {
 
 // --- starter packs + legend --------------------------------------------------
 
-/// A compact, collapsible key to studio's visual language: fragment kind badges
-/// and the profile/pack atom-dot states.
+/// A compact, collapsible key to studio's visual language: the type glyphs, the
+/// private flag, and the profile/pack atom-dot states.
 fn legend() -> Markup {
     html! {
         details class="legend" {
             summary { (icon("eye")) "Legend" }
             div class="legend-body" {
                 div class="legend-group" {
-                    span class="legend-head" { "Kind" }
-                    span class="legend-row" { span class="tag" { "shared" } "config.toml" }
+                    span class="legend-head" { "Type" }
+                    span class="legend-row" { span class="fragment-glyph" { (icon("file")) } "markdown" }
+                    span class="legend-row" { span class="fragment-glyph" { (icon("terminal")) } "script" }
+                    span class="legend-row" { span class="fragment-glyph" { (icon("bolt")) } "live provider" }
                     span class="legend-row" { span class="tag" { (icon("lock")) "private" } "local.toml" }
-                    span class="legend-row" { span class="tag script-tag" { (icon("terminal")) "script" } "runs at render" }
-                    span class="legend-row" { span class="tag script-tag" { (icon("bolt")) "dynamic" } "live provider" }
                 }
                 div class="legend-group" {
                     span class="legend-head" { "Fragment dots" }
