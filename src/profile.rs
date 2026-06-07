@@ -158,6 +158,20 @@ pub struct ResolvedFragment {
     pub inline: bool,
 }
 
+/// A fragment id a profile referenced but that isn't in the library. Recorded
+/// during composition (rather than warned about inline) so the caller decides
+/// how to surface it: most commands warn and continue, while `rosita run`
+/// prompts interactively (ignore / open studio / quit).
+#[derive(Debug, Clone)]
+pub struct MissingFragment {
+    /// The referenced id with no matching fragment.
+    pub id: String,
+    /// Human-readable provenance, e.g. "via profile 'machine'" or "required by 'x'".
+    pub provenance: String,
+    /// The profile that pulled it in (directly or transitively via `requires`).
+    pub via_profile: String,
+}
+
 /// The outcome of composing the selected profile: its name, the ordered/deduped
 /// fragments it contributes, and human-readable reasons. Default (`profile:
 /// None`, empty caps) is the "no profile applies" overlay.
@@ -169,6 +183,9 @@ pub struct Composition {
     pub fragments: Vec<ResolvedFragment>,
     /// Provenance lines (one per contributing fragment).
     pub reasons: Vec<String>,
+    /// Referenced fragment ids that weren't in the library, in encounter order.
+    /// Empty for the no-profile overlay. Callers decide how to surface these.
+    pub missing: Vec<MissingFragment>,
 }
 
 impl Composition {
@@ -346,6 +363,7 @@ pub fn compose_profile(
         profile: Some(profile.name.clone()),
         fragments: acc.resolved,
         reasons: acc.reasons,
+        missing: acc.missing,
     }
 }
 
@@ -362,6 +380,7 @@ struct Accumulator {
     resolved: Vec<ResolvedFragment>,
     added: HashSet<String>,
     reasons: Vec<String>,
+    missing: Vec<MissingFragment>,
 }
 
 impl Accumulator {
@@ -386,7 +405,14 @@ impl Accumulator {
         }
         let outcome = match cx.lib.get(id) {
             None => {
-                crate::warn_user!("unknown fragment '{id}' ({provenance})");
+                // Record rather than warn: the caller decides how to surface it
+                // (warn-and-continue for most commands; an interactive prompt in
+                // `rosita run`). Without this, the id is silently dropped.
+                self.missing.push(MissingFragment {
+                    id: id.to_string(),
+                    provenance: provenance.to_string(),
+                    via_profile: via_profile.to_string(),
+                });
                 None
             }
             Some(cap) if !fragment_applies(cx.ctx, cap) => None, // `when` not satisfied
@@ -750,11 +776,18 @@ mod tests {
     }
 
     #[test]
-    fn compose_unknown_fragment_is_skipped() {
+    fn compose_unknown_fragment_is_skipped_and_recorded() {
         let caps = vec![cap("real", "R")];
         let p = prof("p", &["rust"], &["does-not-exist", "real"]);
         let c = compose_t(&sample_context(), &p, &caps);
         assert_eq!(ids(&c), vec!["real"]);
+        // The dangling ref is recorded (with provenance) so callers can surface
+        // it — `rosita run` prompts; other commands warn.
+        assert_eq!(c.missing.len(), 1);
+        let m = &c.missing[0];
+        assert_eq!(m.id, "does-not-exist");
+        assert_eq!(m.via_profile, "p");
+        assert!(m.provenance.contains("via profile 'p'"));
     }
 
     #[test]

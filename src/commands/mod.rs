@@ -87,6 +87,16 @@ pub enum Choice {
     Skip,
 }
 
+/// What [`prepare_with`] does with fragment ids a profile references but that
+/// aren't in the library (they would otherwise be silently dropped). Most
+/// commands `Warn`; `rosita run` uses `Defer` so it can prompt interactively.
+pub enum MissingPolicy {
+    /// Emit a `warning:` line per missing fragment, then continue.
+    Warn,
+    /// Emit nothing — the caller inspects [`Prepared::composition`]`.missing`.
+    Defer,
+}
+
 /// The default non-interactive chooser: warns and applies no profile when a
 /// project matches 2+ profiles. Used by every command except `run`.
 pub struct SkipChooser;
@@ -107,12 +117,17 @@ impl ProfileChooser for SkipChooser {
 /// Load config, detect context, select a profile, and compose its fragments
 /// for `rt` (non-interactively — see [`prepare_with`] to supply a chooser).
 pub fn prepare(rt: &Runtime) -> crate::Result<Prepared> {
-    prepare_with(rt, &SkipChooser)
+    prepare_with(rt, &SkipChooser, MissingPolicy::Warn)
 }
 
 /// Like [`prepare`] but resolves an ambiguous selection via `chooser` (which may
-/// prompt and persist the choice as a [`Binding`]).
-pub fn prepare_with(rt: &Runtime, chooser: &dyn ProfileChooser) -> crate::Result<Prepared> {
+/// prompt and persist the choice as a [`Binding`]) and lets the caller choose
+/// how missing-fragment references are surfaced via `missing`.
+pub fn prepare_with(
+    rt: &Runtime,
+    chooser: &dyn ProfileChooser,
+    missing: MissingPolicy,
+) -> crate::Result<Prepared> {
     let repo_base = context::repo_base_for(&rt.cwd);
     let config = Config::load(&repo_base).context("loading configuration")?;
     let context = context::detect_context(&rt.cwd, &config).context("detecting context")?;
@@ -127,6 +142,11 @@ pub fn prepare_with(rt: &Runtime, chooser: &dyn ProfileChooser) -> crate::Result
         &config.fragments,
         &config.fragment_params,
     );
+    if let MissingPolicy::Warn = missing {
+        for m in &composition.missing {
+            crate::warn_user!("unknown fragment '{}' ({})", m.id, m.provenance);
+        }
+    }
     Ok(Prepared {
         repo_base,
         config,

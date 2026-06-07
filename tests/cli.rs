@@ -570,6 +570,27 @@ fn run_dry_run_reports_would_exec_without_launching() {
 }
 
 #[test]
+fn run_missing_fragment_non_tty_warns_and_continues() {
+    // The active profile references a fragment id that isn't in the library.
+    // `run` would normally prompt (ignore / open studio / quit), but with no
+    // terminal it must fall back to a warning and still launch — CI never blocks.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.author(
+        "[[fragments]]\nid = \"present\"\nguidance = \"hi\"\n\
+         \n[[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"present\", \"gone\"]\n",
+    );
+
+    fx.cmd()
+        .args(["--dry-run", "run", "claude"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("unknown fragment 'gone'"))
+        // …and the launch is not blocked.
+        .stdout(predicate::str::contains("would exec: claude"));
+}
+
+#[test]
 fn doctor_runs_and_reports() {
     let fx = Fixture::new();
     fx.rust_project();

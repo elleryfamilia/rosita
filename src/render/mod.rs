@@ -410,6 +410,7 @@ mod tests {
             profile: Some(profile.into()),
             fragments: caps,
             reasons: vec![],
+            missing: vec![],
         }
     }
 

@@ -23,9 +23,9 @@ use anyhow::anyhow;
 
 use std::time::Duration;
 
-use super::{now_rfc3339, prepare_with, Choice, ProfileChooser, Runtime};
+use super::{now_rfc3339, prepare_with, Choice, MissingPolicy, ProfileChooser, Runtime};
 use crate::adapters::{self, AgentDescriptor, ApplyOptions, ApplyResult};
-use crate::cli::RunArgs;
+use crate::cli::{RunArgs, StudioArgs};
 use crate::context::Context;
 use crate::hash;
 use crate::profile::ProfileConfig;
@@ -87,6 +87,79 @@ impl ProfileChooser for StdinChooser {
     }
 }
 
+/// The user's answer to the missing-fragment prompt.
+enum MissingChoice {
+    /// Launch anyway; the referenced fragment(s) stay out of this overlay.
+    Continue,
+    /// Open `rosita studio` to fix the library — a handoff (the launch does not
+    /// resume; the user re-runs after fixing).
+    OpenStudio,
+    /// Don't launch.
+    Quit,
+}
+
+/// Prompt about fragment ids the active profile references but that aren't in
+/// the library. Non-interactive runs (CI/piped) can't prompt, so they fall back
+/// to the prior behavior — warn per missing id, then continue — and never block.
+/// EOF (Ctrl-D) also continues, matching that pre-prompt default.
+fn resolve_missing(prep: &super::Prepared, p: &Painter) -> crate::Result<MissingChoice> {
+    let missing = &prep.composition.missing;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        for m in missing {
+            crate::warn_user!("unknown fragment '{}' ({})", m.id, m.provenance);
+        }
+        return Ok(MissingChoice::Continue);
+    }
+
+    println!();
+    for m in missing {
+        println!(
+            "  {} missing fragment {} {}",
+            p.yellow("⚠"),
+            p.bold(&format!("'{}'", m.id)),
+            p.dim(&format!("({})", m.provenance)),
+        );
+    }
+    let it = if missing.len() == 1 { "it" } else { "they" };
+    println!(
+        "  {}",
+        p.dim(&format!("{it} won't be included in this launch's context."))
+    );
+    println!();
+    println!("  how would you like to proceed?");
+    println!("    1) ignore once and launch anyway");
+    println!("    2) open rosita studio to fix it");
+    println!("    3) quit");
+
+    loop {
+        print!("  ❯ ");
+        std::io::stdout().flush().ok();
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line)? == 0 {
+            return Ok(MissingChoice::Continue); // EOF — preserve the prior default.
+        }
+        match line.trim() {
+            "1" => return Ok(MissingChoice::Continue),
+            "2" => return Ok(MissingChoice::OpenStudio),
+            "3" => return Ok(MissingChoice::Quit),
+            _ => println!("  please enter 1, 2, or 3."),
+        }
+    }
+}
+
+/// Launch `rosita studio` so the user can fix the library, then stop. studio's
+/// server blocks until Ctrl-C, so this is a clean handoff: rosita does not
+/// resume the launch — the user re-runs `rosita run <agent>` after fixing.
+fn open_studio_handoff(rt: &Runtime, agent: &str) -> crate::Result<()> {
+    println!();
+    println!("Opening rosita studio — fix the fragment, then re-run `rosita run {agent}`.");
+    let args = StudioArgs {
+        port: 7777,
+        no_open: false,
+    };
+    crate::studio::serve(rt, &args)
+}
+
 /// Entry point for `rosita run`.
 pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     let agent = args.agent.as_str();
@@ -98,7 +171,28 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     let sync_status = sync_before_render(rt);
     print_sync_step(&p, &sync_status);
 
-    let prep = prepare_with(rt, &StdinChooser)?;
+    let prep = prepare_with(rt, &StdinChooser, MissingPolicy::Defer)?;
+
+    // A profile that references a fragment id not in the library would silently
+    // drop it from the overlay. Interrupt here — before any render/launch work —
+    // and let the user decide: ignore once, open studio to fix it, or quit.
+    if !prep.composition.missing.is_empty() {
+        match resolve_missing(&prep, &p)? {
+            MissingChoice::Continue => {}
+            MissingChoice::OpenStudio => return open_studio_handoff(rt, agent),
+            MissingChoice::Quit => {
+                println!(
+                    "  {} {}",
+                    p.yellow("✗"),
+                    p.dim(&format!(
+                        "aborted — fix the fragment, then re-run `rosita run {agent}`"
+                    ))
+                );
+                return Ok(());
+            }
+        }
+    }
+
     let descriptor = adapters::descriptor(&prep.config, agent)
         .ok_or_else(|| anyhow!("unknown agent '{agent}'"))?
         .clone();
