@@ -135,6 +135,7 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("GET", "/fs-status") => handle_fs_status(state),
         ("GET", "/diff") => handle_diff(state),
         ("POST", "/apply") => handle_apply(state),
+        ("POST", "/discard") => handle_discard(state),
         ("GET", "/fragments/new") => {
             Resp::html(views::fragment_dialog(None, Layer::Global, true, None, &[]))
         }
@@ -882,6 +883,13 @@ fn handle_diff(state: &Arc<Mutex<StudioState>>) -> Resp {
     Resp::html(views::diff_view(&diffs, &leaks, &fs_changed, staged))
 }
 
+fn handle_discard(state: &Arc<Mutex<StudioState>>) -> Resp {
+    if let Err(e) = state.lock().unwrap().session.discard() {
+        return Resp::html(views::error_fragment(&format!("discard failed: {e}")));
+    }
+    profiles_tab_resp(state, None, Some("discarded staged changes"), true)
+}
+
 fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
     // Apply mutates + writes atomically; it's the one serialized operation, so
     // holding the lock across its (brief, small-file) I/O is correct here.
@@ -1463,6 +1471,72 @@ mod tests {
         // Baseline reset: nothing staged now.
         let diff2 = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
         assert!(diff2.contains("No staged changes"));
+    }
+
+    #[test]
+    fn discard_clears_staged_without_writing_disk() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+
+        // Stage a new fragment, then throw it away with Discard.
+        let saved = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/fragments",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "name=rc&kind=markdown&guidance=Use+clippy&scope=repo&visibility=public",
+            ),
+        ));
+        assert!(saved.contains("staged fragment"));
+        assert!(!st.lock().unwrap().session.ops().is_empty());
+
+        let discarded = body_of(route(
+            &st,
+            &req("POST", "/discard", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        assert!(discarded.contains("discarded staged changes"));
+        // Staged ops are gone and nothing was written to disk.
+        assert!(st.lock().unwrap().session.ops().is_empty());
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff.contains("No staged changes"));
+        assert!(!std::path::Path::new(&global_config_path(d.path())).exists());
+    }
+
+    #[test]
+    fn discard_is_csrf_guarded() {
+        // A mutating POST without an Origin header is rejected (no clearing).
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+        let r = route(&st, &req("POST", "/discard", "", &[HOST, COOKIE], ""));
+        assert_eq!(r.status, 403);
+    }
+
+    #[test]
+    fn dynamic_fragment_card_starts_collapsed() {
+        // A script/dynamic fragment used to auto-open in the profile detail; now
+        // every card starts collapsed (no `open` attribute).
+        let cfg = "[[fragments]]\n\
+             id = \"deploy\"\n\
+             description = \"Deploy status\"\n\
+             command = \"echo green\"\n\
+             \n\
+             [[profiles]]\n\
+             name = \"rust\"\n\
+             targets = [\"rust\"]\n\
+             fragments = [\"deploy\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let body = body_of(route(
+            &st,
+            &req("GET", "/profiles/rust/select", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(body.contains("fragment-detail"), "renders the card");
+        assert!(
+            !body.contains(" open>"),
+            "fragment cards must start collapsed"
+        );
     }
 
     #[test]

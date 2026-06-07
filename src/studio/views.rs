@@ -293,6 +293,8 @@ pub fn staged_indicator(staged: usize) -> Markup {
         @if staged > 0 {
             span class="staged-count" { (icon("layers")) (staged) " staged" }
             button class="btn btn-ghost btn-sm" hx-get="/diff" hx-target="#main" { "Review" }
+            button class="btn btn-ghost btn-sm" hx-post="/discard" hx-target="#main"
+                hx-confirm="Discard all staged changes? Your config files won't be modified." { (icon("x")) "Discard" }
             button class="btn btn-primary btn-sm" hx-post="/apply" hx-target="#main"
                 hx-confirm="Apply staged changes to your config files?" { (icon("check")) "Apply" }
         } @else {
@@ -523,14 +525,16 @@ fn preview_fragment_card(c: &PreviewCap, profile: &str) -> Markup {
         .icon
         .as_deref()
         .unwrap_or(if c.dynamic { "bolt" } else { "box" });
-    // A dynamic cap that has produced real output (ran, or was cached) opens by
-    // default so the live context is visible; a not-yet-run one also opens, to
-    // show the centered "Run" prompt instead of a bare placeholder line.
+    // Every fragment starts collapsed (the user opens the ones they care about).
+    // `has_output`/`prompt` still pick what the body shows once expanded: live
+    // output for a dynamic cap that ran, or a centered "Run" prompt for one that
+    // hasn't. A dynamic cap can still be run from the summary's corner button
+    // without expanding.
     let has_output = c.dynamic && !c.pending && !c.skipped;
     let prompt = c.dynamic && c.pending;
     let run_url = format!("/fragments/{}/run?profile={}", enc(&c.id), enc(profile));
     html! {
-        details class=(format!("fragment-detail {}", risk_class(c.risk))) open[has_output || prompt] {
+        details class=(format!("fragment-detail {}", risk_class(c.risk))) {
             summary class="fragment-detail-head" {
                 span class="fragment-glyph" { (icon(glyph)) }
                 span class="fragment-detail-title" { (c.title) }
@@ -1212,6 +1216,8 @@ pub fn diff_view(
                 @for d in diffs { (file_diff(d)) }
                 div class="form-buttons" {
                     button type="button" class="btn btn-ghost" hx-get="/tab/profiles" hx-target="#main" { "Back" }
+                    button type="button" class="btn btn-danger discard-left" hx-post="/discard" hx-target="#main"
+                        hx-confirm="Discard all staged changes? Your config files won't be modified." { (icon("x")) "Discard all" }
                     button class="btn btn-primary" hx-post="/apply" hx-target="#main" hx-confirm="Apply staged changes to your config files?" { (icon("check")) "Apply " (staged) " change(s)" }
                 }
             }

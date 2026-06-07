@@ -417,7 +417,12 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .seg input:checked + .seg-opt { background: var(--accent); color: var(--on-accent); }
 .seg input:focus-visible + .seg-opt { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.fragment-form { gap: 14px; }
+/* The editor form is the modal's flex column: the head and foot stay put while
+   the body scrolls, so a tall script editor never pushes the Save button out of
+   the clipped (overflow:hidden) modal. */
+.fragment-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 0; }
+.fragment-form .modal-body { flex: 1 1 auto; min-height: 0; }
+.fragment-form .modal-head, .fragment-form .modal-foot { flex: none; }
 .kind-md { display: flex; flex-direction: column; gap: 10px; }
 .kind-sc { display: none; flex-direction: column; gap: 10px; }
 .fragment-form:has(#kind-sc:checked) .kind-md { display: none; }
@@ -507,6 +512,7 @@ legend { padding: 0 6px; font-size: 12px; font-weight: 600; display: flex; gap: 
 .hint.small { font-size: 11.5px; }
 .hint code, .field-hint code { font-family: var(--mono); font-size: .92em; background: var(--elevated); padding: 0 4px; border-radius: 4px; }
 .form-buttons { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+.form-buttons .discard-left { margin-right: auto; }
 
 /* --- profile editor (full view) -------------------------------------------- */
 .profile-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }

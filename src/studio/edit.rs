@@ -163,6 +163,17 @@ impl Session {
         &self.ops
     }
 
+    /// Throw away every staged op, reloading each layer from disk so the working
+    /// documents match the current on-disk state. The inverse of [`apply`], minus
+    /// the writing — nothing on disk is touched.
+    pub fn discard(&mut self) -> Result<()> {
+        for lf in &mut self.layers {
+            lf.reread()?;
+        }
+        self.ops.clear();
+        Ok(())
+    }
+
     /// The staged text of every open layer, `(layer, path, text)`, for in-memory
     /// assembly via [`Config::from_layer_strs`].
     pub fn staged_layer_texts(&self) -> Vec<(Layer, PathBuf, String)> {
