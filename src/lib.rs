@@ -46,6 +46,7 @@ pub mod style;
 pub mod sync;
 pub mod target;
 pub mod templates;
+pub mod tui;
 pub mod writer;
 
 /// Crate-wide result alias built on [`anyhow`].

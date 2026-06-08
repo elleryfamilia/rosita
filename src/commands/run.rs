@@ -58,30 +58,27 @@ impl ProfileChooser for StdinChooser {
             "rosita › this {langs} project matches {} profiles:",
             candidates.len()
         );
-        for (i, p) in candidates.iter().enumerate() {
-            println!("   {}) {}", i + 1, p.name);
-        }
-        let none_choice = candidates.len() + 1;
-        println!("   {none_choice}) none (don't apply rosita here)");
+        println!("  ↑/↓ to move · Enter to select · or press a number");
 
-        loop {
-            print!(" ❯ ");
-            std::io::stdout().flush().ok();
-            let mut line = String::new();
-            if std::io::stdin().read_line(&mut line)? == 0 {
-                return Ok(Choice::Skip); // EOF — don't decide.
+        // The navigable list: each candidate, then a final "none" row.
+        let none_idx = candidates.len();
+        let mut items: Vec<String> = candidates.iter().map(|p| p.name.clone()).collect();
+        items.push("none (don't apply rosita here)".to_string());
+
+        match crate::tui::select(&items)? {
+            Some(i) if i == none_idx => {
+                println!("rosita › remembered: no rosita profile here.");
+                Ok(Choice::None)
             }
-            match line.trim().parse::<usize>() {
-                Ok(n) if (1..=candidates.len()).contains(&n) => {
-                    let name = candidates[n - 1].name.clone();
-                    println!("rosita › bound \"{name}\" → remembered for this project; launching…");
-                    return Ok(Choice::Profile(name));
-                }
-                Ok(n) if n == none_choice => {
-                    println!("rosita › remembered: no rosita profile here.");
-                    return Ok(Choice::None);
-                }
-                _ => println!("  please enter a number between 1 and {none_choice}."),
+            Some(i) => {
+                let name = candidates[i].name.clone();
+                println!("rosita › bound \"{name}\" → remembered for this project; launching…");
+                Ok(Choice::Profile(name))
+            }
+            // Cancelled (Ctrl-C / q / Esc / EOF) — don't decide, don't remember.
+            None => {
+                println!("rosita › no choice made — applying none for now.");
+                Ok(Choice::Skip)
             }
         }
     }
