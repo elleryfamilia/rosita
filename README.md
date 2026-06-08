@@ -1,6 +1,5 @@
-# rosita
+# Rosita - Dynamic global context for your AI coding agents
 
-**Inject global context into your AI coding agents.**
 
 Author reusable guidance once, globally — conventions, preferences, safety rules —
 and `rosita` delivers it into whichever agent you use (Claude, Codex, Gemini,
