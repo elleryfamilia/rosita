@@ -426,6 +426,11 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .kind-sc { display: none; flex-direction: column; gap: 10px; }
 .fragment-form:has(#kind-sc:checked) .kind-md { display: none; }
 .fragment-form:has(#kind-sc:checked) .kind-sc { display: flex; }
+/* Target editor: toggle the "file exists" vs "file contains" field group. */
+.kind-fe { display: flex; flex-direction: column; gap: 10px; }
+.kind-fc { display: none; flex-direction: column; gap: 10px; }
+.fragment-form:has(#tkind-fc:checked) .kind-fe { display: none; }
+.fragment-form:has(#tkind-fc:checked) .kind-fc { display: flex; }
 
 /* Script editor with a syntax-highlight backdrop: a <pre> mirror sits behind a
    transparent-text <textarea>. Both share identical metrics so glyphs line up.

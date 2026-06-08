@@ -27,6 +27,7 @@ use toml_edit::{value, Array, ArrayOfTables, DocumentMut, InlineTable, Item, Tab
 use crate::config::{self, Config};
 use crate::fragment::{palette, Fragment, Layer};
 use crate::profile::ProfileConfig;
+use crate::target::TargetDef;
 use crate::writer::{atomic_write, AtomicWriter, Writer, WrittenFile};
 
 /// A typed, replayable staged edit. Each carries the [`Layer`] it targets.
@@ -58,6 +59,19 @@ pub enum StagedOp {
     /// Copy a shipped palette fragment into a layer to own it (the only way to
     /// "edit" a palette item). Re-resolved from the palette on replay.
     DuplicatePaletteItem { id: String, to_layer: Layer },
+    /// Add a new custom target to a layer.
+    CreateTarget {
+        layer: Layer,
+        target: Box<TargetDef>,
+    },
+    /// Replace the target with this id in a layer (created if absent).
+    EditTarget {
+        layer: Layer,
+        id: String,
+        target: Box<TargetDef>,
+    },
+    /// Remove the target with this id from a layer.
+    DeleteTarget { layer: Layer, id: String },
 }
 
 impl StagedOp {
@@ -69,7 +83,10 @@ impl StagedOp {
             | StagedOp::DeleteFragment { layer, .. }
             | StagedOp::CreateProfile { layer, .. }
             | StagedOp::EditProfile { layer, .. }
-            | StagedOp::DeleteProfile { layer, .. } => *layer,
+            | StagedOp::DeleteProfile { layer, .. }
+            | StagedOp::CreateTarget { layer, .. }
+            | StagedOp::EditTarget { layer, .. }
+            | StagedOp::DeleteTarget { layer, .. } => *layer,
             StagedOp::DuplicatePaletteItem { to_layer, .. } => *to_layer,
         }
     }
@@ -208,6 +225,14 @@ impl Session {
         self.layers
             .iter()
             .find(|lf| has_entry(&lf.staged, "profiles", "name", name))
+            .map(|lf| lf.layer)
+    }
+
+    /// Which open layer currently holds the custom target with this id (staged).
+    pub fn target_layer(&self, id: &str) -> Option<Layer> {
+        self.layers
+            .iter()
+            .find(|lf| has_entry(&lf.staged, "targets", "id", id))
             .map(|lf| lf.layer)
     }
 
@@ -397,6 +422,15 @@ fn apply_op(doc: &mut DocumentMut, op: &StagedOp) -> Result<()> {
             // Duplicating an existing id replaces it (you own the copy now).
             upsert(aot_mut(doc, "fragments"), "id", id, fragment_table(&cap)?);
         }
+        StagedOp::CreateTarget { target, .. } => {
+            aot_mut(doc, "targets").push(target_table(target)?);
+        }
+        StagedOp::EditTarget { id, target, .. } => {
+            upsert(aot_mut(doc, "targets"), "id", id, target_table(target)?);
+        }
+        StagedOp::DeleteTarget { id, .. } => {
+            remove(aot_mut(doc, "targets"), "id", id);
+        }
     }
     Ok(())
 }
@@ -510,6 +544,22 @@ fn profile_table(p: &ProfileConfig) -> Result<Table> {
         t["disabled"] = value(true);
     }
     Ok(t)
+}
+
+/// Build a clean array-of-tables entry for a custom target. The `rule` is an
+/// inline table (`rule = { kind = "file_exists", path = "deno.json" }`).
+fn target_table(t: &TargetDef) -> Result<Table> {
+    let mut tbl = Table::new();
+    tbl["id"] = value(t.id.as_str());
+    if let Some(d) = &t.description {
+        tbl["description"] = value(d.as_str());
+    }
+    let rule = toml::Value::try_from(&t.rule).context("serializing target rule")?;
+    tbl["rule"] = Item::Value(to_edit_value(&rule));
+    if t.disabled {
+        tbl["disabled"] = value(true);
+    }
+    Ok(tbl)
 }
 
 fn str_array(items: &[String]) -> Item {

@@ -140,6 +140,8 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         }
         ("POST", "/fragments") => handle_fragment_save(state, req),
         ("POST", "/fragments/try") => handle_fragment_try(req),
+        ("GET", "/targets/new") => Resp::html(views::target_dialog(None, Layer::Global)),
+        ("POST", "/targets") => handle_target_save(state, req),
         ("GET", "/packs") => handle_packs(state),
         ("GET", "/onboarding/welcome") => handle_onboarding_welcome(state),
         ("POST", "/onboarding/quickstart") => handle_quickstart(state),
@@ -152,6 +154,7 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
             None => Resp::not_found(),
         },
         (_, p) if p.starts_with("/fragments/") => handle_fragment_param(state, req),
+        (_, p) if p.starts_with("/targets/") => handle_target_param(state, req),
         (_, p) if p.starts_with("/profiles/") => handle_profile_param(state, req),
         (_, p) if p.starts_with("/packs/") => handle_pack_param(state, req),
         _ => Resp::not_found(),
@@ -604,6 +607,96 @@ fn handle_fragment_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
         Ok(lib) => Resp::html(views::fragment_result(&lib, &msg)),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
+}
+
+// --- custom targets ----------------------------------------------------------
+
+fn handle_target_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let (id, action) = id_and_action(&req.path, "/targets/");
+    match (req.method.as_str(), action) {
+        ("GET", "edit") => handle_target_edit(state, &id),
+        ("DELETE", "") => handle_target_delete(state, &id),
+        _ => Resp::not_found(),
+    }
+}
+
+/// Re-render the Targets tab (with a flash) after a staged change.
+fn target_result(state: &Arc<Mutex<StudioState>>, flash: &str) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    Resp::html(views::target_result(&state::targets_view(&snap), flash))
+}
+
+fn handle_target_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let pairs = state::parse_pairs(&req.body);
+    let snap = state.lock().unwrap().snapshot();
+    let cfg = match state::staged_config(&snap) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    // Existing target when editing (its id is fixed); None for a new one.
+    let base = state::editor_target_id(&pairs)
+        .and_then(|id| cfg.targets.iter().find(|t| t.id == id).cloned());
+    let target = match state::target_from_form(base.as_ref(), &pairs) {
+        Ok(t) => t,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    if base.is_none() {
+        // A new target can't claim a built-in/reserved id, nor an existing id.
+        if crate::target::reserved_target_ids().contains(&target.id) {
+            return Resp::html(views::error_fragment(&format!(
+                "“{}” is a built-in target — choose a different name",
+                target.id
+            )));
+        }
+        if cfg.targets.iter().any(|t| t.id == target.id) {
+            return Resp::html(views::error_fragment(&format!(
+                "a target “{}” already exists",
+                target.id
+            )));
+        }
+    }
+    let layer = state::layer_from_form(&pairs);
+    let id = target.id.clone();
+    let res = state.lock().unwrap().session.stage(StagedOp::EditTarget {
+        layer,
+        id: id.clone(),
+        target: Box::new(target),
+    });
+    if let Err(e) = res {
+        return Resp::html(views::error_fragment(&e.to_string()));
+    }
+    target_result(state, &format!("staged target “{id}”"))
+}
+
+fn handle_target_edit(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let cfg = match state::staged_config(&snap) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    match cfg.targets.iter().find(|t| t.id == id) {
+        Some(t) => Resp::html(views::target_dialog(Some(t), t.origin)),
+        None => Resp::html(views::error_fragment(&format!("unknown target '{id}'"))),
+    }
+}
+
+fn handle_target_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let res = (|| -> crate::Result<()> {
+        let mut s = state.lock().unwrap();
+        let Some(layer) = s.session.target_layer(id) else {
+            return Err(anyhow!(
+                "“{id}” isn't one of your custom targets — built-ins can't be deleted"
+            ));
+        };
+        s.session.stage(StagedOp::DeleteTarget {
+            layer,
+            id: id.to_string(),
+        })
+    })();
+    if let Err(e) = res {
+        return Resp::html(views::error_fragment(&e.to_string()));
+    }
+    target_result(state, &format!("staged removal of target “{id}”"))
 }
 
 fn handle_fragment_duplicate(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
@@ -1485,6 +1578,56 @@ mod tests {
         assert!(body.contains("machine"), "lists the machine scope");
         // In a Rust repo, the rust target matches.
         assert!(body.contains("matches here"), "flags a detected target");
+    }
+
+    #[test]
+    fn create_custom_target_stages_and_applies() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+        // Author a "deno" target via the editor form.
+        let r = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/targets",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "name=Deno&kind=file_exists&paths=deno.json&visibility=public",
+            ),
+        ));
+        assert!(r.contains("staged target"), "save flash: got {r}");
+        assert!(r.contains("deno"), "the new target shows in the tab");
+        // Apply it; the [[targets]] entry lands in the global config.
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(global_config_path(d.path())).unwrap();
+        assert!(
+            on_disk.contains("id = \"deno\""),
+            "target written: {on_disk}"
+        );
+        assert!(on_disk.contains("deno.json"), "rule written");
+    }
+
+    #[test]
+    fn reserved_target_id_is_rejected() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+        let r = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/targets",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "name=rust&kind=file_exists&paths=x",
+            ),
+        ));
+        assert!(
+            r.contains("built-in target"),
+            "must refuse a built-in id: {r}"
+        );
     }
 
     #[test]

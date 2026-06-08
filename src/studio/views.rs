@@ -22,6 +22,7 @@ use crate::studio::state::{
     AtomDot, AtomState, FragmentView, LibraryView, Onboarding, PackView, PreviewCap,
     PreviewOutcome, ProfileView, TargetView, TargetsView,
 };
+use crate::target::{TargetDef, TargetRule};
 
 /// Language/platform targets a profile can declare.
 const TARGETS: &[&str] = &[
@@ -638,14 +639,18 @@ pub fn fragments_tab_fragment(lib: &LibraryView, flash: Option<&str>) -> String 
 /// The Targets tab: the list of targets rosita can detect, each with the rule
 /// that makes it work. Built-ins are read-only; the rule text is the answer to
 /// "how does rosita decide a repo is this target?".
-pub fn targets_tab(view: &TargetsView) -> Markup {
+pub fn targets_tab(view: &TargetsView, flash: Option<&str>) -> Markup {
     html! {
         div class="tab-targets" {
             div class="dash-head" {
                 h1 { "Targets" }
+                div class="head-actions" {
+                    button class="btn btn-primary" hx-get="/targets/new" hx-target="#modal" { (icon("plus")) "New target" }
+                }
             }
+            @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
             p class="muted targets-lead" {
-                "A " strong { "target" } " is a label rosita attaches to a project by detecting it (a Rust repo, a Next.js app, …). A profile applies to a repo when one of its targets matches. These are the built-in targets and how each is detected; "
+                "A " strong { "target" } " is a label rosita attaches to a project by detecting it (a Rust repo, a Next.js app, …). A profile applies to a repo when one of its targets matches. Built-in targets are read-only; add your own to recognize a project kind rosita doesn't yet. "
                 span class="tag rec-tag" { (icon("check")) "matches here" }
                 " marks the ones that match the repo studio is running in."
             }
@@ -657,10 +662,22 @@ pub fn targets_tab(view: &TargetsView) -> Markup {
 }
 
 pub fn targets_tab_fragment(view: &TargetsView) -> String {
-    targets_tab(view).into_string()
+    targets_tab(view, None).into_string()
 }
 
-/// One row in the Targets list: id, what it is, and the detection rule.
+/// Re-render the Targets tab after a staged edit: the tab (with a flash), close
+/// the modal, and refresh the staged-changes indicator.
+pub fn target_result(view: &TargetsView, flash: &str) -> String {
+    html! {
+        (targets_tab(view, Some(flash)))
+        (modal_close())
+        (staged_refresh())
+    }
+    .into_string()
+}
+
+/// One row in the Targets list: id, what it is, and the detection rule. Custom
+/// (editable) targets carry an edit affordance; built-ins are read-only.
 fn target_row(t: &TargetView) -> Markup {
     html! {
         div class="target-row" {
@@ -675,8 +692,125 @@ fn target_row(t: &TargetView) -> Markup {
                 @if let Some(d) = &t.description { span class="target-desc" { (d) } }
                 span class="target-rule" { (icon("eye")) "Detected when " code class="rule-code" { (t.rule_summary) } }
             }
+            @if t.editable {
+                button class="btn btn-ghost btn-sm target-edit"
+                    hx-get=(format!("/targets/{}/edit", enc(&t.id))) hx-target="#modal"
+                    title="Edit target" { (icon("pencil")) }
+            }
         }
     }
+}
+
+/// The simple-editor field values for a rule, or `None` when the rule is too
+/// rich for the two-shape form (a script, an all-of, or a nested composite) and
+/// must be hand-edited as TOML.
+fn target_form_fields(rule: &TargetRule) -> Option<(&'static str, String, String, String)> {
+    match rule {
+        TargetRule::FileExists { path } => {
+            Some(("file_exists", path.clone(), String::new(), String::new()))
+        }
+        TargetRule::AnyOf { rules }
+            if !rules.is_empty()
+                && rules
+                    .iter()
+                    .all(|r| matches!(r, TargetRule::FileExists { .. })) =>
+        {
+            let paths = rules
+                .iter()
+                .filter_map(|r| match r {
+                    TargetRule::FileExists { path } => Some(path.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(("file_exists", paths, String::new(), String::new()))
+        }
+        TargetRule::FileContains { path, value, .. } => {
+            Some(("file_contains", String::new(), path.clone(), value.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// The custom-target editor modal (create or edit). Built-in targets are never
+/// passed here (they're read-only). A target whose rule the simple form can't
+/// represent gets a "hand-edit as TOML" notice instead.
+pub fn target_dialog(target: Option<&TargetDef>, layer: Layer) -> String {
+    let is_new = target.is_none();
+    let id = target.map(|t| t.id.as_str()).unwrap_or("");
+    let fields = target.map(|t| target_form_fields(&t.rule));
+    // Editing a rule the simple form can't show: send the user to the TOML.
+    if let Some(None) = fields {
+        return html! {
+            div class="modal-backdrop" hx-get="/close" hx-target="#modal" {}
+            div class="modal" {
+                div class="modal-head" { h2 { "Advanced target" } (close_btn()) }
+                div class="modal-body" {
+                    p class="hint" { "“" (id) "” uses a rule the quick editor can't show (a script or a composite). Edit it directly in your config TOML." }
+                }
+                div class="modal-foot" { button class="btn btn-ghost" hx-get="/close" hx-target="#modal" { "Close" } }
+            }
+        }
+        .into_string();
+    }
+    let (kind, paths, cpath, cvalue) =
+        fields
+            .flatten()
+            .unwrap_or(("file_exists", String::new(), String::new(), String::new()));
+    let desc = target.and_then(|t| t.description.as_deref()).unwrap_or("");
+    html! {
+        div class="modal-backdrop" hx-get="/close" hx-target="#modal" {}
+        div class="modal" {
+            form class="fragment-form" hx-post="/targets" hx-target="#main" {
+                div class="modal-head" {
+                    h2 { (if is_new { "New target" } else { "Edit target" }) }
+                    (close_btn())
+                }
+                div class="modal-body" {
+                    @if !is_new { input type="hidden" name="id" value=(id); }
+                    label class="field grow" { span class="field-label" { "name" span class="field-hint" { "the label profiles target, e.g. deno" } }
+                        input type="text" name="name" value=(if is_new { "" } else { id }) placeholder="deno" required[is_new] readonly[!is_new];
+                    }
+                    label class="field grow" { span class="field-label" { "description" span class="field-hint" { "optional" } }
+                        input type="text" name="description" value=(desc) placeholder="a Deno project";
+                    }
+                    div class="seg" {
+                        input type="radio" name="kind" id="tkind-fe" value="file_exists" checked[kind != "file_contains"];
+                        label class="seg-opt" for="tkind-fe" { "File exists" }
+                        input type="radio" name="kind" id="tkind-fc" value="file_contains" checked[kind == "file_contains"];
+                        label class="seg-opt" for="tkind-fc" { "File contains" }
+                    }
+                    div class="kind-fe" {
+                        label class="field" { span class="field-label" { "file(s)" span class="field-hint" { "comma-separated; matches if any exists" } }
+                            input type="text" name="paths" value=(paths) placeholder="deno.json, deno.jsonc";
+                        }
+                    }
+                    div class="kind-fc" {
+                        label class="field" { span class="field-label" { "file" }
+                            input type="text" name="contains_path" value=(cpath) placeholder="pyproject.toml";
+                        }
+                        label class="field" { span class="field-label" { "contains text" }
+                            input type="text" name="contains_value" value=(cvalue) placeholder="django";
+                        }
+                    }
+                    (lives_in(layer))
+                    p class="hint small" { "Detected against each repo at render. A profile whose targets include this id applies wherever it matches." }
+                }
+                div class="modal-foot" {
+                    @if !is_new {
+                        button type="button" class="btn btn-danger delete-left"
+                            hx-delete=(format!("/targets/{}", enc(id))) hx-target="#main"
+                            hx-confirm=(format!("Delete target “{id}”? This stages its removal.")) {
+                            (icon("trash")) "Delete"
+                        }
+                    }
+                    button type="button" class="btn btn-ghost" hx-get="/close" hx-target="#modal" { "Cancel" }
+                    button type="submit" class="btn btn-primary" { (icon("check")) "Save" }
+                }
+            }
+        }
+    }
+    .into_string()
 }
 
 /// Order known categories sensibly; unknown categories fall after them

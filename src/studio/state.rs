@@ -992,6 +992,82 @@ pub fn editor_fragment_id(pairs: &[(String, String)]) -> Option<String> {
     opt(value_of(pairs, "name")).map(|n| slug(&n))
 }
 
+/// The target id an editor submission targets (readonly `id` when editing,
+/// else the slug of `name`).
+pub fn editor_target_id(pairs: &[(String, String)]) -> Option<String> {
+    if let Some(id) = opt(value_of(pairs, "id")) {
+        return Some(id);
+    }
+    opt(value_of(pairs, "name")).map(|n| slug(&n))
+}
+
+/// Build a [`TargetDef`](crate::target::TargetDef) from the target editor form.
+/// `base` is the existing target when editing (its id is kept). The form offers
+/// the two common declarative shapes: "file exists" (one or more paths; multiple
+/// become an any-of) and "file contains" (a path + substring). `origin` is left
+/// default and re-tagged by layer when the staged config is assembled.
+pub fn target_from_form(
+    base: Option<&crate::target::TargetDef>,
+    pairs: &[(String, String)],
+) -> crate::Result<crate::target::TargetDef> {
+    use crate::target::{TargetDef, TargetRule};
+    let id = match base {
+        Some(t) => t.id.clone(),
+        None => {
+            let n = opt(value_of(pairs, "name"))
+                .ok_or_else(|| anyhow::anyhow!("a name is required"))?;
+            let s = slug(&n);
+            if s.is_empty() {
+                anyhow::bail!("name must contain letters or digits");
+            }
+            s
+        }
+    };
+    let description = opt(value_of(pairs, "description"));
+    let rule = match value_of(pairs, "kind") {
+        Some("file_contains") => {
+            let path = opt(value_of(pairs, "contains_path"))
+                .ok_or_else(|| anyhow::anyhow!("“file contains” needs a file path"))?;
+            let value = opt(value_of(pairs, "contains_value"))
+                .ok_or_else(|| anyhow::anyhow!("“file contains” needs text to look for"))?;
+            TargetRule::FileContains {
+                path,
+                op: crate::profile::Op::Contains,
+                value,
+            }
+        }
+        _ => {
+            // "file exists": one or more comma/newline-separated paths.
+            let paths: Vec<String> = value_of(pairs, "paths")
+                .unwrap_or("")
+                .split([',', '\n'])
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            match paths.len() {
+                0 => anyhow::bail!("“file exists” needs at least one path"),
+                1 => TargetRule::FileExists {
+                    path: paths.into_iter().next().unwrap(),
+                },
+                _ => TargetRule::AnyOf {
+                    rules: paths
+                        .into_iter()
+                        .map(|p| TargetRule::FileExists { path: p })
+                        .collect(),
+                },
+            }
+        }
+    };
+    Ok(TargetDef {
+        id,
+        description,
+        rule,
+        disabled: base.map(|b| b.disabled).unwrap_or(false),
+        origin: Layer::default(),
+    })
+}
+
 /// Slugify a display name into a stable fragment id (lowercase, alphanumeric
 /// runs joined by single hyphens). Used to derive a new fragment's id.
 pub fn slug(s: &str) -> String {
