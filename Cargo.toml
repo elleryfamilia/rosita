@@ -55,3 +55,8 @@ predicates = "3"
 [profile.release]
 strip = true
 lto = "thin"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

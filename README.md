@@ -169,8 +169,24 @@ side-effect-free until you Apply.
 
 ## Install
 
-Requires a stable Rust toolchain (1.85+) and the `git` CLI (used for repo
-detection — no libgit2 build dependency).
+**Prebuilt binary** (no Rust toolchain needed) — fetches the latest
+[GitHub Release](https://github.com/elleryfamilia/rosita/releases):
+
+```bash
+# macOS / Linux
+curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.sh | sh
+
+# Windows (PowerShell)
+irm https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.ps1 | iex
+```
+
+Builds are published for macOS (Apple Silicon + Intel), Linux (x86_64 + ARM64),
+and Windows (x86_64). The installer drops `rosita` on your `PATH` and supports
+`rosita` self-update via the same script. *(These links resolve once the first
+release is tagged — until then, use the from-source path below.)*
+
+**From source** — requires a stable Rust toolchain (1.85+) and the `git` CLI
+(used for repo detection; no libgit2 build dependency):
 
 ```bash
 cargo install --git https://github.com/elleryfamilia/rosita
