@@ -22,11 +22,13 @@ and every tool.
 
 ## Quick start
 
-**1. Install** — straight from the repo, no clone needed:
+**1. Install** — prebuilt binary, no Rust toolchain needed (macOS + Linux):
 
 ```bash
-cargo install --git https://github.com/elleryfamilia/rosita
+curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.sh | sh
 ```
+
+Or from source: `cargo install --git https://github.com/elleryfamilia/rosita`.
 
 **2. Author your context** — reusable fragments and profiles, in a local web UI:
 
