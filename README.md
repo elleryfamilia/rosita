@@ -1,4 +1,4 @@
-## <img src="docs/rosita-mark.svg" alt="" height="32" align="top"> Rosita — Dynamic global context for your AI coding agents
+## <img src="docs/rosita-mark.svg" alt="" height="32" align="top"> Rosita — Dynamic global context AI coding agents
 
 Author reusable guidance once, globally — conventions, preferences, safety rules —
 and `rosita` delivers it into whichever agent you use (Claude, Codex, Gemini,
