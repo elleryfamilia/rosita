@@ -215,6 +215,35 @@ pub fn builtin_targets() -> Vec<TargetDef> {
     ]
 }
 
+/// Ids a custom target may not claim: the built-in stacks (read-only, detected
+/// in Rust) and the `machine` scope (derived, not file-detected).
+pub fn reserved_target_ids() -> std::collections::HashSet<String> {
+    builtin_targets()
+        .into_iter()
+        .map(|t| t.id)
+        .chain(std::iter::once("machine".to_string()))
+        .collect()
+}
+
+/// Evaluate the user's `custom` targets against `repo_base`, returning the ids
+/// that matched (deduped, in declaration order). Disabled targets and any whose
+/// id is reserved (a built-in stack or `machine`) are skipped — built-ins are
+/// detected in Rust and are not overridable. Only the **declarative** rules are
+/// evaluated here; script predicates are resolved on the live render path.
+pub fn detect_custom(custom: &[TargetDef], repo_base: &Path) -> Vec<String> {
+    let reserved = reserved_target_ids();
+    let mut matched: Vec<String> = Vec::new();
+    for t in custom {
+        if t.disabled || reserved.contains(&t.id) || matched.contains(&t.id) {
+            continue;
+        }
+        if t.rule.declarative_match(repo_base) {
+            matched.push(t.id.clone());
+        }
+    }
+    matched
+}
+
 /// A plain-language, one-line summary of a detection rule — the studio's "how
 /// this target works" text.
 pub fn rule_summary(rule: &TargetRule) -> String {
@@ -355,6 +384,31 @@ mod tests {
             }],
         };
         assert!(scripted.has_script());
+    }
+
+    #[test]
+    fn detect_custom_matches_and_filters() {
+        let d = tmp();
+        fs::write(d.path().join("deno.json"), "{}").unwrap();
+        let mk = |id: &str, disabled: bool| TargetDef {
+            id: id.to_string(),
+            description: None,
+            rule: TargetRule::FileExists {
+                path: "deno.json".into(),
+            },
+            disabled,
+            origin: Layer::Global,
+        };
+        let targets = vec![
+            mk("deno", false),    // matches
+            mk("rust", false),    // reserved built-in id → ignored
+            mk("machine", false), // reserved scope → ignored
+            mk("off", true),      // disabled → ignored
+        ];
+        assert_eq!(detect_custom(&targets, d.path()), vec!["deno".to_string()]);
+        // No matching file → nothing detected.
+        let empty = tmp();
+        assert!(detect_custom(&targets, empty.path()).is_empty());
     }
 
     #[test]

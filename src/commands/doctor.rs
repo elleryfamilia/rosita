@@ -287,7 +287,7 @@ fn check_repo_global_only(c: &mut Checks, repo_base: &Path) {
 }
 
 /// What global-only tables (if any) a repo TOML file declares. `None` when the
-/// file is absent, unparseable, or declares neither.
+/// file is absent, unparseable, or declares none.
 fn repo_declares_caps_or_profiles(path: &Path) -> Option<&'static str> {
     let text = std::fs::read_to_string(path).ok()?;
     let val: toml::Value = toml::from_str(&text).ok()?;
@@ -296,11 +296,16 @@ fn repo_declares_caps_or_profiles(path: &Path) -> Option<&'static str> {
             .and_then(|v| v.as_array())
             .is_some_and(|a| !a.is_empty())
     };
-    match (has("fragments"), has("profiles")) {
-        (true, true) => Some("fragments and profiles"),
-        (true, false) => Some("fragments"),
-        (false, true) => Some("profiles"),
-        (false, false) => None,
+    // `&'static` message per combination of the global-only tables present.
+    match (has("fragments"), has("profiles"), has("targets")) {
+        (true, true, true) => Some("fragments, profiles, and targets"),
+        (true, true, false) => Some("fragments and profiles"),
+        (true, false, true) => Some("fragments and targets"),
+        (false, true, true) => Some("profiles and targets"),
+        (true, false, false) => Some("fragments"),
+        (false, true, false) => Some("profiles"),
+        (false, false, true) => Some("targets"),
+        (false, false, false) => None,
     }
 }
 

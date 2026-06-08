@@ -669,6 +669,7 @@ fn target_row(t: &TargetView) -> Markup {
                 span class="target-top" {
                     span class="target-id" { (t.id) }
                     @if t.builtin { span class="tag" { "built-in" } }
+                    @if t.private { span class="tag" { (icon("lock")) "private" } }
                     @if t.detected { span class="tag rec-tag" { (icon("check")) "matches here" } }
                 }
                 @if let Some(d) = &t.description { span class="target-desc" { (d) } }

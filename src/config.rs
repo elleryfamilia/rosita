@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::adapters::AgentDescriptor;
 use crate::fragment::Fragment;
 use crate::profile::ProfileConfig;
+use crate::target::TargetDef;
 
 /// Fully-resolved configuration used by the rest of the program.
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +41,11 @@ pub struct Config {
     /// id across layers). The shipped [`palette`](crate::fragment::palette) is
     /// a separate read-only catalog and is **not** included here.
     pub fragments: Vec<Fragment>,
+    /// Your custom detection targets (the `[[targets]]` you authored, merged by
+    /// id across layers). The built-in targets
+    /// ([`builtin_targets`](crate::target::builtin_targets)) are a separate
+    /// read-only catalog and are **not** included here.
+    pub targets: Vec<TargetDef>,
     /// Per-fragment `params` overrides keyed by fragment id, deep-merged
     /// across layers. The private (`local.toml`) place for sensitive values
     /// a public fragment's guidance references.
@@ -175,10 +181,34 @@ impl Config {
             for cap in &mut parsed.fragments {
                 cap.origin = layer;
             }
+            for t in &mut parsed.targets {
+                t.origin = layer;
+            }
             raw.merge(parsed);
             sources.push(path);
         }
         Ok(raw.finalize(sources))
+    }
+
+    /// The built-in target descriptors plus your custom targets, keyed by id.
+    /// Custom ids that collide with a built-in stack or the reserved `machine`
+    /// scope are ignored — built-ins are read-only and not overridable. This is
+    /// for display (studio's Targets tab); custom-target *detection* reads
+    /// `self.targets` directly.
+    pub fn effective_targets(&self) -> Vec<TargetDef> {
+        let builtins = crate::target::builtin_targets();
+        let reserved: std::collections::HashSet<String> = builtins
+            .iter()
+            .map(|t| t.id.clone())
+            .chain(std::iter::once("machine".to_string()))
+            .collect();
+        let mut out = builtins;
+        for t in &self.targets {
+            if !reserved.contains(&t.id) {
+                out.push(t.clone());
+            }
+        }
+        out
     }
 }
 
@@ -191,6 +221,9 @@ impl Config {
 fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
     if !layer.contributes_fragments() {
         parsed.fragments.clear();
+        // Targets are a library concept like fragments, and a script-predicate
+        // target would run code — so a repo layer must never contribute one.
+        parsed.targets.clear();
     }
     if !layer.contributes_profiles() {
         parsed.profiles.clear();
@@ -210,6 +243,8 @@ struct RawConfig {
     profiles: Vec<ProfileConfig>,
     #[serde(default)]
     fragments: Vec<Fragment>,
+    #[serde(default)]
+    targets: Vec<TargetDef>,
     #[serde(default)]
     fragment_params: BTreeMap<String, toml::Value>,
     #[serde(default)]
@@ -324,6 +359,13 @@ impl RawConfig {
                 None => self.fragments.push(cap),
             }
         }
+        // Later-layer targets replace earlier ones of the same id.
+        for t in other.targets {
+            match self.targets.iter_mut().find(|e| e.id == t.id) {
+                Some(existing) => *existing = t,
+                None => self.targets.push(t),
+            }
+        }
         // Fragment params deep-merge across layers (later wins per key), so a
         // private layer can supply just the sensitive values.
         for (id, params) in other.fragment_params {
@@ -357,6 +399,7 @@ impl RawConfig {
         // catalog you pick from; it is never composed and never lands here.
         let profiles = self.profiles;
         let fragments = self.fragments;
+        let targets = self.targets;
 
         // Built-in agents form the base; user `[[agents]]` override by id.
         let mut agents = crate::adapters::builtin_agents();
@@ -382,6 +425,7 @@ impl RawConfig {
             },
             profiles,
             fragments,
+            targets,
             fragment_params: self.fragment_params,
             agents,
             host_classes: self.host_classes,
@@ -814,5 +858,39 @@ mod tests {
         assert!(c.profiles.iter().any(|p| p.name == "p"));
         assert!(!c.fragments.iter().any(|x| x.id == "repo-cap"));
         assert!(!c.profiles.iter().any(|p| p.name == "repo-prof"));
+    }
+
+    #[test]
+    fn custom_targets_global_honored_repo_stripped() {
+        use crate::fragment::Layer;
+        let c = Config::from_layer_strs(vec![
+            (
+                Layer::Global,
+                PathBuf::from("/g/config.toml"),
+                "[[targets]]\nid = \"deno\"\nrule = { kind = \"file_exists\", path = \"deno.json\" }\n"
+                    .to_string(),
+            ),
+            (
+                Layer::Repo,
+                PathBuf::from("/r/.rosita/config.toml"),
+                "[[targets]]\nid = \"evil\"\nrule = { kind = \"file_exists\", path = \"x\" }\n"
+                    .to_string(),
+            ),
+        ])
+        .unwrap();
+        // The global custom target is honored; a repo-declared one is stripped
+        // (targets are global-only, like fragments — a script target would run code).
+        assert!(
+            c.targets.iter().any(|t| t.id == "deno"),
+            "global target kept"
+        );
+        assert!(
+            !c.targets.iter().any(|t| t.id == "evil"),
+            "repo target stripped"
+        );
+        // effective_targets shows built-ins plus the custom one.
+        let eff: Vec<String> = c.effective_targets().into_iter().map(|t| t.id).collect();
+        assert!(eff.contains(&"rust".to_string()), "built-ins present");
+        assert!(eff.contains(&"deno".to_string()), "custom present");
     }
 }

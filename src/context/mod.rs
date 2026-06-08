@@ -35,6 +35,13 @@ pub struct Context {
     pub stacks: Vec<String>,
     /// Detected package managers (`cargo`, `pnpm`, `uv`, …).
     pub package_managers: Vec<String>,
+    /// Custom targets (user-defined labels) that matched this project. Fed into
+    /// [`Context::selection_targets`] alongside `stacks`, but kept separate so
+    /// the built-in stack→commands mapping never sees an arbitrary label.
+    /// Skipped from the serialized form when empty, so a repo with no custom
+    /// targets fingerprints (and renders) exactly as before the field existed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub custom_targets: Vec<String>,
     /// Discovered project commands.
     pub commands: ProjectCommands,
     /// OS / arch / host / user / caller.
@@ -127,6 +134,7 @@ impl Context {
             languages: Vec::new(),
             stacks: Vec::new(),
             package_managers: Vec::new(),
+            custom_targets: Vec::new(),
             commands: ProjectCommands::default(),
             system: SystemContext {
                 os: std::env::consts::OS.to_string(),
@@ -150,9 +158,11 @@ impl Context {
     }
 
     /// The coarse language/platform tags a profile's `targets` are matched
-    /// against: the detected stacks, plus `machine` when not in a repo (§4/§5).
+    /// against: the detected stacks, then any matched custom targets, plus
+    /// `machine` when not in a repo.
     pub fn selection_targets(&self) -> Vec<String> {
         let mut tags = self.stacks.clone();
+        tags.extend(self.custom_targets.iter().cloned());
         if self.scope() == Scope::Machine {
             tags.push("machine".to_string());
         }
@@ -182,6 +192,7 @@ impl Context {
         dedup_preserving(&mut self.stacks);
         dedup_preserving(&mut self.package_managers);
         dedup_preserving(&mut self.languages);
+        dedup_preserving(&mut self.custom_targets);
     }
 }
 
@@ -307,5 +318,33 @@ mod tests {
         a.stacks = vec!["rust".into()];
         b.stacks = vec!["go".into()];
         assert_ne!(a.compute_hash(), b.compute_hash());
+    }
+
+    #[test]
+    fn selection_targets_includes_custom_targets() {
+        let mut ctx = test_support::sample_context();
+        ctx.git = None; // off-repo → `machine` is appended
+        ctx.stacks = vec!["rust".into()];
+        ctx.custom_targets = vec!["monorepo".into()];
+        let tags = ctx.selection_targets();
+        assert!(tags.contains(&"rust".to_string()), "stacks still included");
+        assert!(
+            tags.contains(&"monorepo".to_string()),
+            "custom target included"
+        );
+        assert!(
+            tags.contains(&"machine".to_string()),
+            "machine still appended"
+        );
+    }
+
+    #[test]
+    fn hash_tracks_custom_targets() {
+        // A custom target appearing must invalidate the overlay; an empty
+        // custom_targets must hash identically to before the field existed.
+        let base = test_support::sample_context();
+        let mut with = base.clone();
+        with.custom_targets = vec!["monorepo".into()];
+        assert_ne!(base.compute_hash(), with.compute_hash());
     }
 }

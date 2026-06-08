@@ -205,6 +205,10 @@ pub struct TargetView {
     pub detected: bool,
     /// Detection runs a script predicate (vs a pure declarative rule).
     pub is_script: bool,
+    /// A user-authored target you can edit/delete (vs a read-only built-in).
+    pub editable: bool,
+    /// Authored in a `local.toml` layer (private / gitignored).
+    pub private: bool,
 }
 
 /// The Targets tab snapshot: built-in targets, the synthetic `machine` scope,
@@ -561,16 +565,41 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
 /// descriptor rule.
 pub fn targets_view(snap: &Snapshot) -> TargetsView {
     let ctx = &snap.base_context;
+    let cfg = staged_config(snap).ok();
     let stacks: std::collections::HashSet<&str> = ctx.stacks.iter().map(String::as_str).collect();
-    let mut targets: Vec<TargetView> = crate::target::builtin_targets()
+    // Which custom targets match the *real* repo (declarative rules only;
+    // script predicates resolve on the live render path).
+    let custom_matched: std::collections::HashSet<String> = cfg
+        .as_ref()
+        .map(|c| {
+            crate::target::detect_custom(&c.targets, &ctx.repo_base)
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+    let effective = cfg
+        .as_ref()
+        .map(|c| c.effective_targets())
+        .unwrap_or_else(crate::target::builtin_targets);
+    let mut targets: Vec<TargetView> = effective
         .into_iter()
-        .map(|t| TargetView {
-            detected: stacks.contains(t.id.as_str()),
-            is_script: t.rule.has_script(),
-            rule_summary: crate::target::rule_summary(&t.rule),
-            builtin: true,
-            id: t.id,
-            description: t.description,
+        .map(|t| {
+            let builtin = t.origin == Layer::BuiltIn;
+            let detected = if builtin {
+                stacks.contains(t.id.as_str())
+            } else {
+                custom_matched.contains(&t.id)
+            };
+            TargetView {
+                detected,
+                is_script: t.rule.has_script(),
+                rule_summary: crate::target::rule_summary(&t.rule),
+                builtin,
+                editable: !builtin,
+                private: matches!(t.origin, Layer::GlobalLocal),
+                id: t.id,
+                description: t.description,
+            }
         })
         .collect();
     // `machine` is a scope, not a file-detected stack: it applies off-repo.
@@ -581,6 +610,8 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
         builtin: true,
         detected: ctx.git.is_none(),
         is_script: false,
+        editable: false,
+        private: false,
     });
     TargetsView { targets }
 }
