@@ -19,7 +19,7 @@ use crate::fragment::{Fragment, Layer};
 use crate::profile::ProfileConfig;
 use crate::studio::edit::FileDiff;
 use crate::studio::state::{
-    AtomDot, AtomState, BindingState, FragmentView, LibraryView, Onboarding, PackView, PreviewCap,
+    AtomDot, AtomState, FragmentView, LibraryView, Onboarding, PackView, PreviewCap,
     PreviewOutcome, ProfileView,
 };
 
@@ -422,16 +422,12 @@ fn profile_rail_item(p: &ProfileView, active: bool) -> Markup {
     if p.disabled {
         cls.push_str(" disabled");
     }
-    if p.selected {
-        cls.push_str(" bound");
-    }
     html! {
         div class=(cls) role="button" tabindex="0" data-profile=(name)
             hx-get=(format!("/profiles/{e}/select")) hx-target="#profile-main" {
             span class="rail-top" {
                 span class="rail-name" { (name) }
-                @if p.selected { span class="tag bound-tag" { (icon("arrow-right")) "bound" } }
-                @else if p.disabled { span class="tag off-tag" { "off" } }
+                @if p.disabled { span class="tag off-tag" { "off" } }
             }
             @if p.targets.is_empty() {
                 span class="rail-targets" { span class="target-chip muted" { "no targets" } }
@@ -821,7 +817,7 @@ fn pack_card(p: &PackView) -> Markup {
             div class="pack-head" {
                 span class="pack-glyph" { (icon(&p.icon)) }
                 span class="pack-name" { (p.name) }
-                @if p.recommended { span class="tag bound-tag" { (icon("check")) "recommended" } }
+                @if p.recommended { span class="tag rec-tag" { (icon("check")) "recommended" } }
             }
             p class="pack-desc" { (p.description) }
             div class="pack-foot" {
@@ -1262,7 +1258,7 @@ pub fn profile_editor(
                 }
             }
             aside class="editor-preview-col" {
-                div class="preview-head" { span class="preview-title" { (icon("eye")) "Live preview" } (binding_chip(&preview.binding)) }
+                div class="preview-head" { span class="preview-title" { (icon("eye")) "Live preview" } }
                 div id="editor-preview" { (editor_preview(preview)) }
             }
         }
@@ -1408,21 +1404,6 @@ pub fn fs_status_fragment(changed: &[std::path::PathBuf]) -> String {
 }
 
 // --- shared bits -------------------------------------------------------------
-
-/// A status chip for whether the previewed profile would be auto-selected in the
-/// context it's rendered for. Names nothing (the surrounding view already names
-/// the profile), so it reads as a state, not a label.
-fn binding_chip(b: &BindingState) -> Markup {
-    match b {
-        BindingState::Bound(_) => {
-            html! { span class="chip chip-bound" title="binds in this context" { (icon("arrow-right")) "binds here" } }
-        }
-        BindingState::None => html! { span class="chip chip-none" { "not selected here" } },
-        BindingState::Ambiguous(n) => {
-            html! { span class="chip chip-ambiguous" { (icon("alert")) (n) " match" } }
-        }
-    }
-}
 
 fn atom_dot(a: &AtomDot) -> Markup {
     let (cls, tip) = match a.state {

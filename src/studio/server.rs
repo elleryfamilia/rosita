@@ -28,9 +28,7 @@ use crate::pack::Pack;
 use crate::profile::ProfileConfig;
 use crate::studio::assets;
 use crate::studio::edit::{Session, StagedOp};
-use crate::studio::state::{
-    self, BindingState, LibraryView, PreviewOutcome, Simulated, StudioState,
-};
+use crate::studio::state::{self, LibraryView, PreviewOutcome, Simulated, StudioState};
 use crate::studio::views;
 
 /// The sole route reachable without the session cookie (carries the token).
@@ -392,7 +390,6 @@ fn empty_preview(name: &str, note: String) -> PreviewOutcome {
     PreviewOutcome {
         agent: String::new(),
         profile_label: name.to_string(),
-        binding: BindingState::None,
         context_summary: String::new(),
         fragment_count: 0,
         overlay: String::new(),
@@ -937,7 +934,6 @@ fn profile_preview_or_empty(
         PreviewOutcome {
             agent: agent.to_string(),
             profile_label: profile.name.clone(),
-            binding: BindingState::None,
             context_summary: String::new(),
             fragment_count: 0,
             overlay: String::new(),

@@ -92,28 +92,13 @@ pub struct Snapshot {
     pub layer_texts: Vec<(Layer, PathBuf, String)>,
 }
 
-/// How the simulated context resolved to a profile — the binding chip's three
-/// states. Named `BindingState` (not `Binding`) to avoid colliding with the
-/// on-disk [`crate::binding::Binding`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BindingState {
-    /// Exactly one profile applies (its name).
-    Bound(String),
-    /// No profile applies to this context.
-    None,
-    /// 2+ profiles match and none is bound (how many).
-    Ambiguous(usize),
-}
-
 /// The result of a ReadOnly preview render.
 pub struct PreviewOutcome {
     /// Agent the overlay was rendered for.
     pub agent: String,
     /// Selected profile label (`none` when no profile applies). Retained for the
-    /// `profile {label}` text in the overlay head; the chip uses `binding`.
+    /// `profile {label}` text in the overlay head.
     pub profile_label: String,
-    /// Structured selection state for the binding chip.
-    pub binding: BindingState,
     /// Short human summary of the simulated context, e.g. `rust · repo`.
     pub context_summary: String,
     /// How many fragments actually render for `agent` (after agent gating) —
@@ -382,11 +367,6 @@ fn render_profile_in_config(
     Ok(PreviewOutcome {
         agent: agent_id,
         profile_label: profile.name.clone(),
-        binding: if profile.disabled {
-            BindingState::None
-        } else {
-            BindingState::Bound(profile.name.clone())
-        },
         context_summary: context_summary(&ctx),
         fragment_count,
         overlay: out.content,

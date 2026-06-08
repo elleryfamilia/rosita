@@ -210,7 +210,6 @@ body {
 .rail-item { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: var(--r); background: var(--panel-2); cursor: pointer; transition: border-color .12s, background .12s; }
 .rail-item:hover { border-color: var(--accent-line); }
 .rail-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.rail-item.bound { border-left-color: var(--accent); }
 .rail-item.active { border-color: var(--accent); border-left-color: var(--accent); background: var(--elevated); }
 .rail-item.disabled { opacity: .55; }
 .rail-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
@@ -220,7 +219,7 @@ body {
 
 .tag { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: var(--r-sm); color: var(--muted); background: var(--elevated); }
 .tag .icon { width: 11px; height: 11px; }
-.bound-tag { color: var(--accent); background: var(--accent-soft); }
+.rec-tag { color: var(--accent); background: var(--accent-soft); }
 .off-tag { color: var(--caution); background: var(--caution-soft); }
 .target-chip { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 6px; }
 .target-chip.muted { font-family: var(--sans); font-style: italic; color: var(--faint); }
@@ -275,11 +274,8 @@ body {
 
 .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border-strong); }
 .chip .icon { width: 13px; height: 13px; }
-.chip-bound { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.chip-none { color: var(--faint); }
 /* Static, non-interactive label for the agent a profile detail is rendered for. */
 .chip-agent { color: var(--muted); font-family: var(--mono); font-weight: 500; }
-.chip-ambiguous { color: var(--caution); border-color: var(--caution-line); background: var(--caution-soft); }
 
 .provenance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 6px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); }
 .prov-node { font-family: var(--mono); }
