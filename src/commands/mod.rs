@@ -155,26 +155,22 @@ pub fn prepare_with_live(
         context::detect_context_with(&rt.cwd, &config, live).context("detecting context")?;
 
     let remembered = binding::read(&context);
-    let selection = profile::select_with_default(
-        &context,
-        &config.profiles,
-        remembered.as_ref(),
-        config.default_profile.as_deref(),
-    );
+    let selection = profile::select(&context, &config.profiles, remembered.as_ref());
     // On a real render (not a read-only inspection), tell the user when nothing
-    // matched — either falling back to the default profile, or noting the empty
-    // overlay and how to fix it. An explicit opt-out (a `None` binding) stays
-    // silent: that's a deliberate choice, not a gap.
+    // matched — either falling back to a no-targets default profile, or noting
+    // the empty overlay and how to fix it. An explicit opt-out (a `None` binding)
+    // stays silent: that's a deliberate choice, not a gap.
     if live {
         match &selection {
             Selection::Default(p) => crate::warn_user!(
-                "no profile targets this project ({}); using the default profile '{}'.",
+                "no profile targets this project ({}); using the default profile '{}' \
+                 (it declares no targets).",
                 detected_summary(&context),
                 p.name
             ),
             Selection::None if !matches!(remembered, Some(Binding::None)) => crate::warn_user!(
                 "no profile targets this project ({}) — overlay is empty. Create a profile \
-                 or set a fallback (`[defaults] profile = \"…\"`, or in `rosita studio`).",
+                 (one with no targets becomes the default).",
                 detected_summary(&context)
             ),
             _ => {}

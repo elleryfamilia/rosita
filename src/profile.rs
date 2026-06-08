@@ -223,9 +223,9 @@ pub enum Selection {
     /// 2+ profiles match and there is no remembered choice — the caller must
     /// prompt the user and then persist the answer as a [`Binding`].
     Ambiguous(Vec<ProfileConfig>),
-    /// Nothing matched, but a configured default/fallback profile applies (see
-    /// [`select_with_default`]). Composes like [`Selection::Use`]; the distinct
-    /// variant lets callers say "defaulting to X". Never persisted as a binding.
+    /// Nothing targeted matched, so a no-targets "catch-all" profile applies as
+    /// the default. Composes like [`Selection::Use`]; the distinct variant lets
+    /// callers say "defaulting to X". Never persisted as a binding.
     Default(ProfileConfig),
 }
 
@@ -277,37 +277,24 @@ pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Bindin
         .collect();
 
     match candidates.len() {
-        0 => Selection::None,
         1 => Selection::Use(candidates.into_iter().next().unwrap()),
-        _ => Selection::Ambiguous(candidates),
-    }
-}
-
-/// Like [`select`], but when nothing matched (and the project wasn't explicitly
-/// opted out via a `None` binding) fall back to the configured `default_profile`
-/// if it exists and is enabled — returning [`Selection::Default`]. An explicit
-/// opt-out is honored (no fallback). Any other outcome (a real match, an
-/// ambiguity) is returned unchanged.
-pub fn select_with_default(
-    ctx: &Context,
-    profiles: &[ProfileConfig],
-    binding: Option<&Binding>,
-    default_profile: Option<&str>,
-) -> Selection {
-    let sel = select(ctx, profiles, binding);
-    if !matches!(sel, Selection::None) {
-        return sel;
-    }
-    // Don't override a deliberate opt-out.
-    if matches!(binding, Some(Binding::None)) {
-        return sel;
-    }
-    match default_profile {
-        Some(name) => match profiles.iter().find(|p| p.name == name && !p.disabled) {
-            Some(p) => Selection::Default(p.clone()),
-            None => sel, // configured default missing/disabled → no fallback
-        },
-        None => sel,
+        n if n >= 2 => Selection::Ambiguous(candidates),
+        // Nothing targeted matched → fall back to the catch-all tier: enabled
+        // profiles that declare no targets. One ⇒ the default; several ⇒ let the
+        // user pick (same as any ambiguity). A profile with no targets is thus
+        // the implicit "applies everywhere nothing else does" default.
+        _ => {
+            let defaults: Vec<ProfileConfig> = profiles
+                .iter()
+                .filter(|p| !p.disabled && p.targets.is_empty())
+                .cloned()
+                .collect();
+            match defaults.len() {
+                0 => Selection::None,
+                1 => Selection::Default(defaults.into_iter().next().unwrap()),
+                _ => Selection::Ambiguous(defaults),
+            }
+        }
     }
 }
 
@@ -619,41 +606,39 @@ mod tests {
     }
 
     #[test]
-    fn select_with_default_falls_back_only_when_unmatched() {
+    fn select_falls_back_to_a_no_targets_profile() {
         let mut ctx = sample_context();
-        ctx.stacks = vec!["rust".into()];
         let profs = [prof("rust", &["rust"], &["x"]), prof("base", &[], &["y"])];
 
-        // A real match wins — the default is ignored.
-        match select_with_default(&ctx, &profs, None, Some("base")) {
+        // A targeted match wins — the no-targets default is not consulted.
+        ctx.stacks = vec!["rust".into()];
+        match select(&ctx, &profs, None) {
             Selection::Use(p) => assert_eq!(p.name, "rust"),
             other => panic!("expected Use(rust), got {other:?}"),
         }
 
-        // Nothing matches (go repo) → fall back to the default profile.
+        // Nothing targeted matches (go repo) → fall back to the no-targets "base".
         ctx.stacks = vec!["go".into()];
-        match select_with_default(&ctx, &profs, None, Some("base")) {
+        match select(&ctx, &profs, None) {
             Selection::Default(p) => assert_eq!(p.name, "base"),
             other => panic!("expected Default(base), got {other:?}"),
         }
 
-        // No default configured → stays None.
-        assert!(matches!(
-            select_with_default(&ctx, &profs, None, None),
-            Selection::None
-        ));
-
-        // Default names a missing profile → no fallback.
-        assert!(matches!(
-            select_with_default(&ctx, &profs, None, Some("ghost")),
-            Selection::None
-        ));
-
         // An explicit opt-out is honored — the default never overrides it.
         assert!(matches!(
-            select_with_default(&ctx, &profs, Some(&Binding::None), Some("base")),
+            select(&ctx, &profs, Some(&Binding::None)),
             Selection::None
         ));
+
+        // Two no-targets profiles → ambiguous, so the user picks one.
+        let two = [prof("a", &[], &["x"]), prof("b", &[], &["y"])];
+        match select(&ctx, &two, None) {
+            Selection::Ambiguous(c) => assert_eq!(c.len(), 2),
+            other => panic!("expected Ambiguous, got {other:?}"),
+        }
+
+        // No profiles at all → still None.
+        assert!(matches!(select(&ctx, &[], None), Selection::None));
     }
 
     #[test]
