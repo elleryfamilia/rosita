@@ -223,6 +223,10 @@ pub enum Selection {
     /// 2+ profiles match and there is no remembered choice — the caller must
     /// prompt the user and then persist the answer as a [`Binding`].
     Ambiguous(Vec<ProfileConfig>),
+    /// Nothing matched, but a configured default/fallback profile applies (see
+    /// [`select_with_default`]). Composes like [`Selection::Use`]; the distinct
+    /// variant lets callers say "defaulting to X". Never persisted as a binding.
+    Default(ProfileConfig),
 }
 
 /// Whether `profile` is a selection candidate for the given context `tags`
@@ -279,9 +283,38 @@ pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Bindin
     }
 }
 
-/// Compose the chosen `selection` into a [`Composition`]. Only [`Selection::Use`]
-/// produces fragments; `None`/`Ambiguous` yield the empty overlay (the caller
-/// resolves an `Ambiguous` to a concrete profile or `None` before this point).
+/// Like [`select`], but when nothing matched (and the project wasn't explicitly
+/// opted out via a `None` binding) fall back to the configured `default_profile`
+/// if it exists and is enabled — returning [`Selection::Default`]. An explicit
+/// opt-out is honored (no fallback). Any other outcome (a real match, an
+/// ambiguity) is returned unchanged.
+pub fn select_with_default(
+    ctx: &Context,
+    profiles: &[ProfileConfig],
+    binding: Option<&Binding>,
+    default_profile: Option<&str>,
+) -> Selection {
+    let sel = select(ctx, profiles, binding);
+    if !matches!(sel, Selection::None) {
+        return sel;
+    }
+    // Don't override a deliberate opt-out.
+    if matches!(binding, Some(Binding::None)) {
+        return sel;
+    }
+    match default_profile {
+        Some(name) => match profiles.iter().find(|p| p.name == name && !p.disabled) {
+            Some(p) => Selection::Default(p.clone()),
+            None => sel, // configured default missing/disabled → no fallback
+        },
+        None => sel,
+    }
+}
+
+/// Compose the chosen `selection` into a [`Composition`]. A [`Selection::Use`]
+/// or [`Selection::Default`] (the fallback) produces fragments; `None`/`Ambiguous`
+/// yield the empty overlay (the caller resolves an `Ambiguous` to a concrete
+/// profile or `None` before this point).
 pub fn compose_selection(
     ctx: &Context,
     selection: &Selection,
@@ -289,7 +322,9 @@ pub fn compose_selection(
     fragment_params: &BTreeMap<String, toml::Value>,
 ) -> Composition {
     match selection {
-        Selection::Use(p) => compose_profile(ctx, p, fragments, fragment_params),
+        Selection::Use(p) | Selection::Default(p) => {
+            compose_profile(ctx, p, fragments, fragment_params)
+        }
         Selection::None | Selection::Ambiguous(_) => Composition::default(),
     }
 }
@@ -581,6 +616,44 @@ mod tests {
             Selection::Ambiguous(cands) => assert_eq!(cands.len(), 2),
             other => panic!("expected Ambiguous, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn select_with_default_falls_back_only_when_unmatched() {
+        let mut ctx = sample_context();
+        ctx.stacks = vec!["rust".into()];
+        let profs = [prof("rust", &["rust"], &["x"]), prof("base", &[], &["y"])];
+
+        // A real match wins — the default is ignored.
+        match select_with_default(&ctx, &profs, None, Some("base")) {
+            Selection::Use(p) => assert_eq!(p.name, "rust"),
+            other => panic!("expected Use(rust), got {other:?}"),
+        }
+
+        // Nothing matches (go repo) → fall back to the default profile.
+        ctx.stacks = vec!["go".into()];
+        match select_with_default(&ctx, &profs, None, Some("base")) {
+            Selection::Default(p) => assert_eq!(p.name, "base"),
+            other => panic!("expected Default(base), got {other:?}"),
+        }
+
+        // No default configured → stays None.
+        assert!(matches!(
+            select_with_default(&ctx, &profs, None, None),
+            Selection::None
+        ));
+
+        // Default names a missing profile → no fallback.
+        assert!(matches!(
+            select_with_default(&ctx, &profs, None, Some("ghost")),
+            Selection::None
+        ));
+
+        // An explicit opt-out is honored — the default never overrides it.
+        assert!(matches!(
+            select_with_default(&ctx, &profs, Some(&Binding::None), Some("base")),
+            Selection::None
+        ));
     }
 
     #[test]

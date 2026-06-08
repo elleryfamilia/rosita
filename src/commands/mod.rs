@@ -155,7 +155,31 @@ pub fn prepare_with_live(
         context::detect_context_with(&rt.cwd, &config, live).context("detecting context")?;
 
     let remembered = binding::read(&context);
-    let selection = profile::select(&context, &config.profiles, remembered.as_ref());
+    let selection = profile::select_with_default(
+        &context,
+        &config.profiles,
+        remembered.as_ref(),
+        config.default_profile.as_deref(),
+    );
+    // On a real render (not a read-only inspection), tell the user when nothing
+    // matched — either falling back to the default profile, or noting the empty
+    // overlay and how to fix it. An explicit opt-out (a `None` binding) stays
+    // silent: that's a deliberate choice, not a gap.
+    if live {
+        match &selection {
+            Selection::Default(p) => crate::warn_user!(
+                "no profile targets this project ({}); using the default profile '{}'.",
+                detected_summary(&context),
+                p.name
+            ),
+            Selection::None if !matches!(remembered, Some(Binding::None)) => crate::warn_user!(
+                "no profile targets this project ({}) — overlay is empty. Create a profile \
+                 or set a fallback (`[defaults] profile = \"…\"`, or in `rosita studio`).",
+                detected_summary(&context)
+            ),
+            _ => {}
+        }
+    }
     let resolved = resolve_selection(rt, &context, selection, chooser)?;
 
     let composition = profile::compose_selection(
@@ -211,6 +235,29 @@ fn resolve_selection(
             Ok(Selection::None)
         }
         Choice::Skip => Ok(Selection::None),
+    }
+}
+
+/// A short human summary of what detection found, for the no-profile notice
+/// (e.g. `stack java, language Java` or `off-repo`).
+fn detected_summary(ctx: &Context) -> String {
+    let mut parts = Vec::new();
+    if !ctx.stacks.is_empty() {
+        parts.push(format!("stack {}", ctx.stacks.join("/")));
+    }
+    if !ctx.custom_targets.is_empty() {
+        parts.push(format!("target {}", ctx.custom_targets.join("/")));
+    }
+    if !ctx.languages.is_empty() {
+        parts.push(format!("language {}", ctx.languages.join("/")));
+    }
+    if ctx.scope() == crate::context::Scope::Machine {
+        parts.push("off-repo".to_string());
+    }
+    if parts.is_empty() {
+        "nothing detected".to_string()
+    } else {
+        parts.join(", ")
     }
 }
 

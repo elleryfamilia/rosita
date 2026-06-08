@@ -31,6 +31,10 @@ use crate::target::TargetDef;
 pub struct Config {
     /// Agent rendered when `--agent` is omitted.
     pub default_agent: String,
+    /// Fallback profile applied when a project matches no profile and hasn't
+    /// been explicitly opted out (`[defaults] profile`). `None` = no fallback
+    /// (the historical behavior: an unmatched project gets an empty overlay).
+    pub default_profile: Option<String>,
     /// Environment-variable exposure policy.
     pub env: EnvConfig,
     /// Codex-adapter knobs.
@@ -263,6 +267,7 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct RawDefaults {
     agent: Option<String>,
+    profile: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -306,6 +311,9 @@ impl RawConfig {
             let slot = self.defaults.get_or_insert_with(Default::default);
             if d.agent.is_some() {
                 slot.agent = d.agent;
+            }
+            if d.profile.is_some() {
+                slot.profile = d.profile;
             }
         }
         if let Some(e) = other.env {
@@ -412,6 +420,7 @@ impl RawConfig {
 
         Config {
             default_agent: defaults.agent.unwrap_or_else(|| "claude".to_string()),
+            default_profile: defaults.profile,
             env: EnvConfig {
                 allowlist: dedup(env.allowlist.unwrap_or_else(default_env_allowlist)),
                 deny_name_patterns: dedup(
@@ -858,6 +867,20 @@ mod tests {
         assert!(c.profiles.iter().any(|p| p.name == "p"));
         assert!(!c.fragments.iter().any(|x| x.id == "repo-cap"));
         assert!(!c.profiles.iter().any(|p| p.name == "repo-prof"));
+    }
+
+    #[test]
+    fn default_profile_parses_from_defaults_table() {
+        use crate::fragment::Layer;
+        let c = Config::from_layer_strs(vec![(
+            Layer::Global,
+            PathBuf::from("/g/config.toml"),
+            "[defaults]\nprofile = \"everyday\"\n".to_string(),
+        )])
+        .unwrap();
+        assert_eq!(c.default_profile.as_deref(), Some("everyday"));
+        // Absent → None (the historical no-fallback behavior).
+        assert_eq!(Config::defaults().default_profile, None);
     }
 
     #[test]

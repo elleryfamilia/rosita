@@ -247,10 +247,17 @@ pub fn simulated_context(base: &Context, sim: &Simulated) -> Context {
     ctx
 }
 
-/// Select the profile for `(cfg, ctx)` honoring the on-disk binding.
+/// Select the profile for `(cfg, ctx)` honoring the on-disk binding, then the
+/// configured default/fallback profile (so the preview reflects what a real
+/// render would apply).
 pub fn select_for(cfg: &Config, ctx: &Context) -> Selection {
     let binding = crate::binding::read(ctx);
-    profile::select(ctx, &cfg.profiles, binding.as_ref())
+    profile::select_with_default(
+        ctx,
+        &cfg.profiles,
+        binding.as_ref(),
+        cfg.default_profile.as_deref(),
+    )
 }
 
 /// Render a specific profile (by name) composed for `agent`. `mode` is
@@ -469,11 +476,11 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
     let selection = select_for(&cfg, &ctx);
 
     let selected_name = match &selection {
-        Selection::Use(p) => Some(p.name.clone()),
+        Selection::Use(p) | Selection::Default(p) => Some(p.name.clone()),
         _ => None,
     };
     let active_ids: Vec<String> = match &selection {
-        Selection::Use(p) => {
+        Selection::Use(p) | Selection::Default(p) => {
             profile::compose_profile(&ctx, p, &cfg.fragments, &cfg.fragment_params)
                 .fragments
                 .iter()
