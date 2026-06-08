@@ -9,9 +9,8 @@
 //! - **Machine** (no repo) → a global, path-keyed store `bindings.toml`, keyed
 //!   by the project path.
 //!
-//! `None` is an explicit, remembered choice — opting a project out of rosita
-//! entirely. The store is rosita-owned, so the global file is written with the
-//! plain `toml` serializer; only the hand-editable `local.toml` needs `toml_edit`.
+//! The store is rosita-owned, so the global file is written with the plain
+//! `toml` serializer; only the hand-editable `local.toml` needs `toml_edit`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -23,7 +22,9 @@ use crate::config;
 use crate::context::{Context, Scope};
 use crate::writer::atomic_write;
 
-/// A remembered profile choice for a project.
+/// A remembered profile choice for a project. There is no "opt out" binding:
+/// invoking rosita means you want a profile, so the only remembered choice is
+/// *which* one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     /// Use this profile by name. `targets_hash` fingerprints the profile's
@@ -36,8 +37,6 @@ pub enum Binding {
         name: String,
         targets_hash: Option<String>,
     },
-    /// Explicitly apply no profile here (a remembered opt-out).
-    None,
 }
 
 impl Binding {
@@ -51,9 +50,9 @@ impl Binding {
 }
 
 /// The on-disk shape of a binding: the `[binding]` table in repo `local.toml`,
-/// and each per-path entry in the global store. `none = true` is an explicit
-/// opt-out; otherwise `profile` names the chosen profile. Neither set ⇒ no
-/// binding.
+/// and each per-path entry in the global store. `profile` names the chosen
+/// profile; unset ⇒ no binding. A legacy `none = true` opt-out is still parsed
+/// (so old files don't hard-error) but no longer honored — see [`RawBinding::none`].
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawBinding {
@@ -65,7 +64,9 @@ pub struct RawBinding {
     /// profile and re-run selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets_hash: Option<String>,
-    /// Explicit opt-out ("no profile here").
+    /// Legacy opt-out flag ("no profile here"). No longer honored — invoking
+    /// rosita means you want a profile — but still accepted on read so old
+    /// `none = true` files parse, and never re-emitted on write.
     #[serde(default, skip_serializing_if = "is_false")]
     pub none: bool,
 }
@@ -75,30 +76,22 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl RawBinding {
-    /// Interpret the raw fields as a [`Binding`] (opt-out wins over a profile).
+    /// Interpret the raw fields as a [`Binding`]. A legacy `none = true` opt-out
+    /// is ignored (treated as no binding): invoking rosita means you want a
+    /// profile, so selection re-runs and the chooser fires when 2+ match.
     pub fn to_binding(&self) -> Option<Binding> {
-        if self.none {
-            Some(Binding::None)
-        } else {
-            self.profile.clone().map(|name| Binding::Profile {
-                name,
-                targets_hash: self.targets_hash.clone(),
-            })
-        }
+        self.profile.clone().map(|name| Binding::Profile {
+            name,
+            targets_hash: self.targets_hash.clone(),
+        })
     }
 
     fn from_binding(b: &Binding) -> Self {
-        match b {
-            Binding::Profile { name, targets_hash } => RawBinding {
-                profile: Some(name.clone()),
-                targets_hash: targets_hash.clone(),
-                none: false,
-            },
-            Binding::None => RawBinding {
-                profile: None,
-                targets_hash: None,
-                none: true,
-            },
+        let Binding::Profile { name, targets_hash } = b;
+        RawBinding {
+            profile: Some(name.clone()),
+            targets_hash: targets_hash.clone(),
+            none: false,
         }
     }
 }
@@ -148,17 +141,13 @@ pub fn write_repo(repo_base: &Path, b: &Binding) -> Result<()> {
         .parse()
         .with_context(|| format!("parsing {} before writing binding", path.display()))?;
 
-    // Replace the whole `[binding]` table so switching profile↔none never leaves
-    // a stale key behind.
+    // Replace the whole `[binding]` table so rebinding to a different profile
+    // (or clearing a legacy `none`) never leaves a stale key behind.
     let mut table = toml_edit::Table::new();
-    match b {
-        Binding::Profile { name, targets_hash } => {
-            table["profile"] = toml_edit::value(name.as_str());
-            if let Some(h) = targets_hash {
-                table["targets_hash"] = toml_edit::value(h.as_str());
-            }
-        }
-        Binding::None => table["none"] = toml_edit::value(true),
+    let Binding::Profile { name, targets_hash } = b;
+    table["profile"] = toml_edit::value(name.as_str());
+    if let Some(h) = targets_hash {
+        table["targets_hash"] = toml_edit::value(h.as_str());
     }
     doc["binding"] = toml_edit::Item::Table(table);
 
@@ -249,11 +238,32 @@ mod tests {
         assert!(text.contains("# private notes"));
         assert!(text.contains("user = \"deploy\""));
 
-        // Switching to an explicit opt-out replaces the table (no stale profile).
-        write_repo(repo.path(), &Binding::None).unwrap();
-        assert_eq!(read_repo(repo.path()), Some(Binding::None));
+        // Rebinding to another profile replaces the table (no stale name left).
+        write_repo(repo.path(), &Binding::profile("go")).unwrap();
+        assert_eq!(read_repo(repo.path()), Some(Binding::profile("go")));
         let text = std::fs::read_to_string(config::repo_local_path(repo.path())).unwrap();
         assert!(!text.contains("rust — browser"));
+    }
+
+    #[test]
+    fn legacy_none_opt_out_is_ignored() {
+        // Files written by old rosita versions may carry `none = true`. It is no
+        // longer honored: read back as "no binding" so selection runs normally
+        // (the chooser fires when 2+ profiles match).
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(config::repo_dir(repo.path())).unwrap();
+        std::fs::write(
+            config::repo_local_path(repo.path()),
+            "[binding]\nnone = true\n",
+        )
+        .unwrap();
+        assert_eq!(read_repo(repo.path()), None);
+
+        // Same for the global path-keyed store.
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("bindings.toml");
+        std::fs::write(&store, "[bound.\"/work/p\"]\nnone = true\n").unwrap();
+        assert_eq!(read_global_at(&store, Path::new("/work/p")), None);
     }
 
     #[test]
@@ -265,10 +275,10 @@ mod tests {
 
         assert_eq!(read_global_at(&store, a), None);
         write_global_at(&store, a, &Binding::profile("machine")).unwrap();
-        write_global_at(&store, b, &Binding::None).unwrap();
+        write_global_at(&store, b, &Binding::profile("kernel")).unwrap();
 
         assert_eq!(read_global_at(&store, a), Some(Binding::profile("machine")));
-        assert_eq!(read_global_at(&store, b), Some(Binding::None));
+        assert_eq!(read_global_at(&store, b), Some(Binding::profile("kernel")));
         // Independent paths don't bleed into each other.
         assert_eq!(read_global_at(&store, Path::new("/elsewhere")), None);
     }

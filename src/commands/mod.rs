@@ -173,8 +173,7 @@ pub fn prepare_with_live(
     let selection = profile::select(&context, &config.profiles, remembered.as_ref());
     // On a real render (not a read-only inspection), tell the user when nothing
     // matched — either falling back to a no-targets default profile, or noting
-    // the empty overlay and how to fix it. An explicit opt-out (a `None` binding)
-    // stays silent: that's a deliberate choice, not a gap.
+    // the empty overlay and how to fix it.
     if live {
         match &selection {
             Selection::Default(p) => crate::warn_user!(
@@ -183,7 +182,7 @@ pub fn prepare_with_live(
                 detected_summary(&context),
                 p.name
             ),
-            Selection::None if !matches!(remembered, Some(Binding::None)) => crate::warn_user!(
+            Selection::None => crate::warn_user!(
                 "no profile targets this project ({}) — overlay is empty. Create a profile \
                  (one with no targets becomes the default).",
                 detected_summary(&context)

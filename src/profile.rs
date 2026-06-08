@@ -240,33 +240,28 @@ pub fn profile_matches_targets(profile: &ProfileConfig, tags: &[String]) -> bool
 
 /// Select the profile for `ctx`, honoring a remembered [`Binding`] first.
 ///
-/// 1. A binding wins: `None` ⇒ no profile (remembered opt-out); a named profile
-///    that still exists ⇒ use it (a deleted/renamed binding falls through).
+/// 1. A binding wins: a named profile that still exists ⇒ use it (a deleted,
+///    renamed, or retargeted binding falls through to fresh detection).
 /// 2. Otherwise match `ctx`'s coarse targets: 0 ⇒ [`Selection::None`], exactly 1
 ///    ⇒ [`Selection::Use`] (no prompt), 2+ ⇒ [`Selection::Ambiguous`].
 pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Binding>) -> Selection {
-    if let Some(b) = binding {
-        match b {
-            Binding::None => return Selection::None,
-            Binding::Profile { name, targets_hash } => {
-                // Honor the bound profile only while it still exists, is enabled,
-                // and hasn't been retargeted since it was bound. A stale
-                // `targets_hash` (the profile's targets changed) ⇒ fall through
-                // and re-detect; a `None` fingerprint is trusted by name (a
-                // hand-written or pre-hash binding, incl. deliberate manual binds
-                // and empty-targets profiles). A disabled bound profile is inert.
-                if let Some(p) = profiles.iter().find(|p| &p.name == name && !p.disabled) {
-                    let fresh = match targets_hash {
-                        Some(h) => h == &crate::hash::context_hash(&p.targets),
-                        None => true,
-                    };
-                    if fresh {
-                        return Selection::Use(p.clone());
-                    }
-                }
-                // Missing, disabled, or stale → fall through to fresh detection.
+    if let Some(Binding::Profile { name, targets_hash }) = binding {
+        // Honor the bound profile only while it still exists, is enabled, and
+        // hasn't been retargeted since it was bound. A stale `targets_hash` (the
+        // profile's targets changed) ⇒ fall through and re-detect; a `None`
+        // fingerprint is trusted by name (a hand-written or pre-hash binding,
+        // incl. deliberate manual binds and empty-targets profiles). A disabled
+        // bound profile is inert.
+        if let Some(p) = profiles.iter().find(|p| &p.name == name && !p.disabled) {
+            let fresh = match targets_hash {
+                Some(h) => h == &crate::hash::context_hash(&p.targets),
+                None => true,
+            };
+            if fresh {
+                return Selection::Use(p.clone());
             }
         }
+        // Missing, disabled, or stale → fall through to fresh detection.
     }
 
     let tags = ctx.selection_targets();
@@ -624,12 +619,6 @@ mod tests {
             other => panic!("expected Default(base), got {other:?}"),
         }
 
-        // An explicit opt-out is honored — the default never overrides it.
-        assert!(matches!(
-            select(&ctx, &profs, Some(&Binding::None)),
-            Selection::None
-        ));
-
         // Two no-targets profiles → ambiguous, so the user picks one.
         let two = [prof("a", &[], &["x"]), prof("b", &[], &["y"])];
         match select(&ctx, &two, None) {
@@ -654,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn select_honors_binding_profile_and_none() {
+    fn select_honors_binding_profile() {
         let mut ctx = sample_context();
         ctx.stacks = vec!["rust".into()];
         let profs = [
@@ -667,11 +656,6 @@ mod tests {
             Selection::Use(p) => assert_eq!(p.name, "rust-browser"),
             other => panic!("expected Use, got {other:?}"),
         }
-        // An explicit `None` binding means "no profile here", even with matches.
-        assert!(matches!(
-            select(&ctx, &profs, Some(&Binding::None)),
-            Selection::None
-        ));
     }
 
     #[test]
