@@ -8,7 +8,7 @@ All notable changes to rosita are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
-## Unreleased
+## 0.2.1 — 2026-06-08
 
 ### Added
 
@@ -19,6 +19,13 @@ version and date (see [RELEASING.md](RELEASING.md)).
 - `rosita run` now prints a quiet, once-a-day "a newer rosita is available" hint
   when an update exists. It's best-effort and never slows a launch — gated to an
   interactive terminal, time-bounded, and silenced by `ROSITA_NO_UPDATE_CHECK`.
+
+### Fixed
+
+- `rosita studio`'s profile editor now offers the correct target checkboxes: the
+  phantom `android` target is gone, and the `ruby`/`php`/`swift`/`dotnet` stacks
+  added in 0.2.0 are now selectable. A starter-pack card also labels its atom
+  count "fragments" rather than the old "caps".
 
 ## 0.2.0 — 2026-06-08
 
