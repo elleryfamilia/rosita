@@ -47,6 +47,10 @@ libc = "0.2"
 # ANSI styling for the stepped `rosita run` / `sync` output (TTY/NO_COLOR-aware).
 # Already in the tree via clap, so no extra build cost.
 anstyle = "1"
+# Self-update (`rosita update`) + the throttled "update available" nudge on
+# `rosita run`, via cargo-dist's own updater. `blocking` adds the sync wrappers
+# (pulls in tokio); `github_releases` (default) targets our GitHub Releases.
+axoupdater = { version = "0.10", features = ["blocking"] }
 
 [dev-dependencies]
 assert_cmd = "2"

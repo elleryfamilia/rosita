@@ -13,6 +13,7 @@ pub mod refresh;
 pub mod render;
 pub mod run;
 pub mod sync;
+pub mod update;
 
 use std::path::PathBuf;
 

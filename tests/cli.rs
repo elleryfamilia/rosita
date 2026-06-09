@@ -1328,3 +1328,18 @@ fn run_with_ambiguous_profiles_non_tty_falls_back_without_blocking() {
         .stderr(predicate::str::contains("isn't an interactive terminal"))
         .stdout(predicate::str::contains("would exec: claude"));
 }
+
+#[test]
+fn update_check_without_a_receipt_reports_unmanaged() {
+    // A binary not installed via the cargo-dist installer has no install receipt,
+    // so `update --check` degrades gracefully (exit 0, a hint about the installer)
+    // instead of erroring or hitting the network. $HOME is isolated by the
+    // fixture; clear XDG_CONFIG_HOME so axoupdater can't find a real receipt.
+    let fx = Fixture::new();
+    fx.cmd()
+        .args(["update", "--check"])
+        .env_remove("XDG_CONFIG_HOME")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installer"));
+}

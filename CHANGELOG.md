@@ -8,6 +8,18 @@ All notable changes to rosita are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
+## Unreleased
+
+### Added
+
+- `rosita update` — self-update to the latest release in place, for installs done
+  with the rosita installer (it uses cargo-dist's updater). Installs from
+  `cargo install` report how to switch instead of failing. `rosita update --check`
+  reports whether a newer release exists without installing it.
+- `rosita run` now prints a quiet, once-a-day "a newer rosita is available" hint
+  when an update exists. It's best-effort and never slows a launch — gated to an
+  interactive terminal, time-bounded, and silenced by `ROSITA_NO_UPDATE_CHECK`.
+
 ## 0.2.0 — 2026-06-08
 
 ### Added

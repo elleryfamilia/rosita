@@ -28,6 +28,10 @@ curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosi
 
 Or from source: `cargo install --git https://github.com/elleryfamilia/rosita`.
 
+Installed this way, `rosita update` self-updates to the latest release (and
+`rosita run` quietly notes when one is available). Source installs update with
+`cargo install --git … --force` instead.
+
 **2. Author your context** — reusable fragments and profiles, in a local web UI:
 
 ```bash

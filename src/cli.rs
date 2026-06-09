@@ -68,6 +68,16 @@ pub enum Command {
     Studio(StudioArgs),
     /// Sync your global config (fragments & profiles) across machines via git.
     Sync(SyncArgs),
+    /// Update rosita to the latest release (installer-based installs only).
+    Update(UpdateArgs),
+}
+
+/// `update` options.
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    /// Only report whether a newer release exists; don't install it.
+    #[arg(long)]
+    pub check: bool,
 }
 
 /// `sync` options. Bare `rosita sync` pulls the latest and pushes local edits.

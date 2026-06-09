@@ -251,6 +251,13 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
         );
         return Ok(());
     }
+
+    // Best-effort, throttled (once/day), time-bounded "update available" hint —
+    // skipped on dry-run, non-TTY, and via `ROSITA_NO_UPDATE_CHECK`. Printed
+    // before the launch line since the launch `exec`s away on Unix.
+    if let Some(detail) = crate::update::nudge_detail() {
+        println!("{}", step(&p, p.cyan("↑"), "update", detail));
+    }
     print_launch_step(&p, &program, &args.args);
 
     launch(&program, &launch_args, &rendered_at, &rt.cwd, &extra_env)
