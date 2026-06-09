@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context as _};
 
@@ -1270,19 +1271,75 @@ pub fn serve(rt: &Runtime, args: &StudioArgs) -> crate::Result<()> {
         onboarding_active: false,
     }));
 
+    // `0`/`0s` disables the idle shutdown; anything else is the inactivity window.
+    let idle = crate::providers::parse_duration(&args.idle_timeout).ok_or_else(|| {
+        anyhow!(
+            "invalid --idle-timeout '{}': use e.g. 30m, 90s, 2h, or 0 to disable",
+            args.idle_timeout
+        )
+    })?;
+
     let url = format!("http://127.0.0.1:{port}{BOOTSTRAP_PATH}?token={token}");
     println!("rosita studio → open  {url}");
-    println!("(serving on 127.0.0.1:{port}; Ctrl-C to stop)");
+    if idle.is_zero() {
+        println!("(serving on 127.0.0.1:{port}; Ctrl-C to stop)");
+    } else {
+        println!(
+            "(serving on 127.0.0.1:{port}; Ctrl-C to stop, or auto-exit after {} idle)",
+            args.idle_timeout
+        );
+    }
     if !args.no_open {
         open_browser(&url);
     }
 
-    for mut request in server.incoming_requests() {
-        let req = read_request(&mut request);
-        let resp = route(&state, &req);
-        let _ = respond(request, resp);
-    }
+    serve_loop(&server, &state, idle);
     Ok(())
+}
+
+/// The request loop. With a zero `idle` window it blocks until Ctrl-C; otherwise
+/// it polls so it can notice inactivity and shut the server down on its own. Any
+/// handled request resets the clock — there's no background browser polling, so
+/// "no requests" genuinely means the user has stepped away.
+fn serve_loop(server: &tiny_http::Server, state: &Arc<Mutex<StudioState>>, idle: Duration) {
+    use std::time::Instant;
+    let handle = |request: &mut tiny_http::Request| {
+        let req = read_request(request);
+        route(state, &req)
+    };
+
+    if idle.is_zero() {
+        for mut request in server.incoming_requests() {
+            let resp = handle(&mut request);
+            let _ = respond(request, resp);
+        }
+        return;
+    }
+
+    // Wake at least once a minute (and never coarser than the window itself) so a
+    // 30-minute timeout fires within ~a minute of the deadline.
+    let poll = idle.min(Duration::from_secs(60));
+    let mut last = Instant::now();
+    loop {
+        match server.recv_timeout(poll) {
+            Ok(Some(mut request)) => {
+                last = Instant::now();
+                let resp = handle(&mut request);
+                let _ = respond(request, resp);
+            }
+            Ok(None) => {
+                if last.elapsed() >= idle {
+                    println!("rosita studio: idle — shutting down.");
+                    return;
+                }
+            }
+            // A receive error means the listener is unusable; stop rather than spin.
+            Err(e) => {
+                eprintln!("rosita studio: server error ({e}); shutting down.");
+                return;
+            }
+        }
+    }
 }
 
 fn read_request(request: &mut tiny_http::Request) -> Req {

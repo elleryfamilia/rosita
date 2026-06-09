@@ -122,6 +122,10 @@ pub struct StudioArgs {
     /// Don't open a browser window automatically.
     #[arg(long)]
     pub no_open: bool,
+    /// Shut down after this much inactivity (e.g. `30m`, `90s`, `2h`).
+    /// `0` disables the timeout (serve until Ctrl-C).
+    #[arg(long, default_value = "30m")]
+    pub idle_timeout: String,
 }
 
 /// `fragments` options.

@@ -13,12 +13,19 @@ use std::time::{Duration, Instant};
 /// Spawn `rosita studio --no-open --port 0` in an isolated tempdir and parse the
 /// bound port + session token from its startup output.
 fn spawn_studio() -> (Child, tempfile::TempDir, u16, String) {
+    spawn_studio_args(&[])
+}
+
+/// Like [`spawn_studio`] but with extra `rosita studio` flags appended (e.g.
+/// `--idle-timeout`).
+fn spawn_studio_args(extra: &[&str]) -> (Child, tempfile::TempDir, u16, String) {
     let dir = tempfile::tempdir().unwrap();
     let bin = assert_cmd::cargo::cargo_bin("rosita");
     let mut child = Command::new(bin)
         .args(["--cwd"])
         .arg(dir.path())
         .args(["studio", "--no-open", "--port", "0"])
+        .args(extra)
         // Isolate the global config dir so the test never touches ~/.config.
         .env("ROSITA_CONFIG_DIR", dir.path().join("empty-global"))
         .stdout(Stdio::piped())
@@ -399,6 +406,30 @@ fn studio_first_run_lands_on_profiles_and_guides_through_pack() {
         reopened.contains("Welcome to Rosita studio"),
         "the ? button re-opens the welcome; got head:\n{}",
         head(&reopened)
+    );
+}
+
+#[test]
+fn studio_auto_exits_after_idle_timeout() {
+    // A 1-second idle window with no requests → the server shuts itself down.
+    // We never kill the child; it must exit on its own, cleanly.
+    let (mut child, _dir, _port, _token) = spawn_studio_args(&["--idle-timeout", "1s"]);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let status = loop {
+        if let Some(s) = child.try_wait().expect("try_wait studio") {
+            break s;
+        }
+        if Instant::now() >= deadline {
+            child.kill().ok();
+            child.wait().ok();
+            panic!("studio did not auto-exit within 15s of a 1s idle timeout");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(
+        status.success(),
+        "studio should exit cleanly on idle; got {status:?}"
     );
 }
 

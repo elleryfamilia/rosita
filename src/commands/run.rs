@@ -145,6 +145,7 @@ fn open_studio_handoff(rt: &Runtime, agent: &str) -> crate::Result<()> {
     let args = StudioArgs {
         port: 7777,
         no_open: false,
+        idle_timeout: "30m".to_string(),
     };
     crate::studio::serve(rt, &args)
 }
