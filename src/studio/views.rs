@@ -24,9 +24,11 @@ use crate::studio::state::{
 };
 use crate::target::{TargetDef, TargetRule};
 
-/// Language/platform targets a profile can declare.
+/// Language/platform targets a profile can declare. Mirrors the built-in stacks
+/// detected in [`crate::context::languages`] (plus `machine` for the no-repo
+/// context); keep in sync with [`crate::target::builtin_targets`].
 const TARGETS: &[&str] = &[
-    "rust", "node", "nextjs", "go", "python", "android", "java", "machine",
+    "rust", "node", "nextjs", "go", "python", "java", "ruby", "php", "swift", "dotnet", "machine",
 ];
 
 /// Script interpreters offered in the fragment dialog.
@@ -1065,7 +1067,7 @@ fn pack_card(p: &PackView) -> Markup {
             p class="pack-desc" { (p.description) }
             div class="pack-foot" {
                 span class="atoms" { @for a in &p.atoms { (atom_dot(a)) } }
-                span class="muted small" { (p.atoms.len()) " caps" }
+                span class="muted small" { (p.atoms.len()) " fragments" }
                 span class="pack-spacer" {}
                 button class="btn btn-ghost btn-sm" hx-get=(format!("/packs/{e}/preview")) hx-target="#modal" { (icon("eye")) "Preview" }
                 @if p.applied {
