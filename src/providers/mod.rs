@@ -596,7 +596,15 @@ mod tests {
         // Non-zero exit → Failed with the stderr message, and nothing cached.
         let dir3 = tempfile::tempdir().unwrap();
         let base3 = dir3.path();
-        match run_command("echo boom >&2; exit 3", Some("sh"), base3, "cmd-k", ttl, now, true) {
+        match run_command(
+            "echo boom >&2; exit 3",
+            Some("sh"),
+            base3,
+            "cmd-k",
+            ttl,
+            now,
+            true,
+        ) {
             CommandOutcome::Failed(msg) => {
                 assert!(msg.contains("exited 3"), "message: {msg}");
                 assert!(msg.contains("boom"), "message: {msg}");
@@ -626,7 +634,15 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert!(matches!(
-            run_command("true", Some("sh"), base, "cmd-k", Duration::from_secs(300), now, false),
+            run_command(
+                "true",
+                Some("sh"),
+                base,
+                "cmd-k",
+                Duration::from_secs(300),
+                now,
+                false
+            ),
             CommandOutcome::NotCached
         ));
     }

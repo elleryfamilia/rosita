@@ -2018,7 +2018,10 @@ mod tests {
             ),
         ));
         assert!(ran.contains("Script failed:"), "shows the failure");
-        assert!(ran.contains("exited 7") && ran.contains("boom"), "with the message");
+        assert!(
+            ran.contains("exited 7") && ran.contains("boom"),
+            "with the message"
+        );
         assert!(ran.contains("Retry"), "and a retry button");
         assert!(!ran.contains("fragment-output"), "no (blank) output panel");
     }
