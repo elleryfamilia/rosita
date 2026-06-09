@@ -8,6 +8,24 @@ All notable changes to rosita are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
+## 0.3.0 — 2026-06-09
+
+### Added
+
+- `rosita studio` now shuts itself down after a period of inactivity, so a
+  forgotten browser tab no longer leaves a localhost server bound indefinitely.
+  The window is configurable with `--idle-timeout` (default `30m`; `0` disables
+  it and serves until Ctrl-C). Any request resets the clock.
+
+### Fixed
+
+- Dynamic `command` fragments (e.g. the `tailnet` peer dump) no longer go blank
+  after a transient hiccup: a script that briefly produced no output — say, while
+  its tool's daemon was restarting — was cached as an empty result for the whole
+  cache window, hiding the fragment even once the tool recovered. Empty and
+  failed runs are no longer cached, and in `rosita studio` a failed script now
+  shows its error with a **Retry** button instead of a blank panel.
+
 ## 0.2.1 — 2026-06-08
 
 ### Added
