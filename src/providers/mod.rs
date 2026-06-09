@@ -111,6 +111,26 @@ pub fn probe_one(
 /// stdout. `lang` picks the interpreter (`bash`/`sh`/`python`); `None` runs the
 /// command as a plain `sh -c` line. `live = false` serves only an existing cache
 /// entry and never executes.
+/// The outcome of resolving a `command` fragment — distinguishes "ran and
+/// produced output" from "ran clean but said nothing" and "failed to run", so
+/// the studio can show an honest error (with a retry) instead of a blank body.
+pub enum CommandOutcome {
+    /// Usable (non-empty) output — a fresh run or a fresh cache hit. Cached.
+    Output(ProviderOutput),
+    /// Ran successfully but produced no output. **Not cached** — a transient
+    /// empty (e.g. a daemon mid-restart) must not pin "nothing" for the TTL.
+    Empty,
+    /// Failed to run: a non-zero exit, a signal kill, or a spawn failure. The
+    /// string is a short redacted message. **Not cached** (fail-open to retry).
+    Failed(String),
+    /// Read-only mode with no usable cache — nothing to show yet.
+    NotCached,
+}
+
+/// Run a `command` fragment, honoring the cache. Only non-empty successful
+/// output is cached; empty-success and failures are surfaced but never cached,
+/// so a transient hiccup can't pin a blank result for the whole TTL. A cached
+/// entry with empty text (a legacy pre-fix cache) is treated as a miss.
 pub fn run_command(
     command: &str,
     lang: Option<&str>,
@@ -119,11 +139,82 @@ pub fn run_command(
     ttl: Duration,
     now: DateTime<Utc>,
     live: bool,
-) -> Option<ProviderOutput> {
-    cached(repo_base, key, ttl, now, live, || {
-        Ok(Some(exec_command(command, lang, None)))
-    })
-    .unwrap_or(None)
+) -> CommandOutcome {
+    let path = config::cache_dir(repo_base).join(format!("{}.json", sanitize_key(key)));
+    let cached = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<CacheEntry>(&t).ok())
+        // Empty cached text is not usable output — ignore it so the card shows a
+        // run prompt rather than a misleading blank body.
+        .filter(|e| !e.text.trim().is_empty());
+
+    if !live {
+        // Read-only: surface any cached value (even stale), never execute.
+        return match cached {
+            Some(e) => CommandOutcome::Output(ProviderOutput {
+                text: e.text,
+                data: e.data,
+            }),
+            None => CommandOutcome::NotCached,
+        };
+    }
+    if let Some(e) = &cached {
+        if is_fresh(&e.generated_at, ttl, now) {
+            return CommandOutcome::Output(ProviderOutput {
+                text: e.text.clone(),
+                data: e.data.clone(),
+            });
+        }
+    }
+
+    let mut out = exec_command(command, lang, None);
+    // Spawn failure: `exec_command` returns a Null `data` (the program couldn't
+    // run at all).
+    if out.data.is_null() {
+        return CommandOutcome::Failed(redact::redact_secrets(&out.text));
+    }
+    // Non-zero exit (or a signal kill → `status` is null) is a failure: surface
+    // it, don't cache it.
+    let status = out.data.get("status").and_then(serde_json::Value::as_i64);
+    if status != Some(0) {
+        return CommandOutcome::Failed(command_error_message(&out.data));
+    }
+    if out.text.trim().is_empty() {
+        return CommandOutcome::Empty; // ran clean, nothing to add — don't cache
+    }
+    out.text = redact::redact_secrets(&out.text);
+
+    let entry = CacheEntry {
+        generated_at: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        text: out.text.clone(),
+        data: out.data.clone(),
+    };
+    if let Ok(serialized) = serde_json::to_string(&entry) {
+        if std::fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).is_ok() {
+            let _ = std::fs::write(&path, serialized); // best-effort
+        }
+    }
+    CommandOutcome::Output(out)
+}
+
+/// Build a short, redacted failure message from a command's captured `data`
+/// (`status`/`stdout`/`stderr`). Prefers stderr, falls back to stdout.
+fn command_error_message(data: &serde_json::Value) -> String {
+    let pick = |k: &str| data.get(k).and_then(|v| v.as_str()).unwrap_or("").trim();
+    let detail = match (pick("stderr"), pick("stdout")) {
+        ("", out) => out,
+        (err, _) => err,
+    };
+    let prefix = match data.get("status").and_then(serde_json::Value::as_i64) {
+        Some(c) => format!("command exited {c}"),
+        None => "command was killed by a signal".to_string(),
+    };
+    let msg = if detail.is_empty() {
+        prefix
+    } else {
+        format!("{prefix}: {detail}")
+    };
+    redact::redact_secrets(&msg)
 }
 
 /// Run a command once, bypassing the cache — for studio's "test run" of a draft
@@ -471,6 +562,73 @@ mod tests {
         assert_eq!(parse_version("v22.1.0"), "22.1.0");
         // No version token → trimmed first line.
         assert_eq!(parse_version("weird tool\nsecond line"), "weird tool");
+    }
+
+    #[test]
+    fn run_command_caches_only_nonempty_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let now = DateTime::parse_from_rfc3339("2026-06-09T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let ttl = Duration::from_secs(300);
+        let cache = config::cache_dir(base).join("cmd-k.json");
+
+        // Success with output → returned and cached.
+        match run_command("printf hello", Some("sh"), base, "cmd-k", ttl, now, true) {
+            CommandOutcome::Output(o) => assert_eq!(o.text, "hello"),
+            _ => panic!("expected Output"),
+        }
+        assert!(cache.exists(), "non-empty success should cache");
+
+        // Empty-but-clean run → Empty, and nothing cached.
+        let dir2 = tempfile::tempdir().unwrap();
+        let base2 = dir2.path();
+        assert!(matches!(
+            run_command("true", Some("sh"), base2, "cmd-k", ttl, now, true),
+            CommandOutcome::Empty
+        ));
+        assert!(
+            !config::cache_dir(base2).join("cmd-k.json").exists(),
+            "empty output must not be cached"
+        );
+
+        // Non-zero exit → Failed with the stderr message, and nothing cached.
+        let dir3 = tempfile::tempdir().unwrap();
+        let base3 = dir3.path();
+        match run_command("echo boom >&2; exit 3", Some("sh"), base3, "cmd-k", ttl, now, true) {
+            CommandOutcome::Failed(msg) => {
+                assert!(msg.contains("exited 3"), "message: {msg}");
+                assert!(msg.contains("boom"), "message: {msg}");
+            }
+            _ => panic!("expected Failed"),
+        }
+        assert!(
+            !config::cache_dir(base3).join("cmd-k.json").exists(),
+            "failure must not be cached"
+        );
+    }
+
+    #[test]
+    fn run_command_ignores_empty_cache_entry() {
+        // A legacy/pre-fix cache with empty text is treated as a miss in
+        // read-only mode (so the card shows a run prompt, not a blank body).
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let path = config::cache_dir(base).join("cmd-k.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"generated_at":"2026-06-09T12:00:00Z","text":"","data":{"status":0}}"#,
+        )
+        .unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-06-09T12:00:30Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(matches!(
+            run_command("true", Some("sh"), base, "cmd-k", Duration::from_secs(300), now, false),
+            CommandOutcome::NotCached
+        ));
     }
 
     #[test]

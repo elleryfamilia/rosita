@@ -503,6 +503,12 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .fragment-detail-head .fragment-run { color: var(--muted); opacity: .85; }
 .fragment-detail-head:hover .fragment-run { opacity: 1; }
 
+/* Failed-run body: the error banner with a retry button beneath it (replaces
+   the output/run-prompt for a card whose script just failed). */
+.fragment-run-error { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 16px; }
+.fragment-run-error .banner { width: 100%; }
+.fragment-run-error .banner-body { word-break: break-word; }
+
 /* Centered "Run" prompt shown in a not-yet-run dynamic card (replaced by the
    script's output once run). */
 .fragment-run-prompt { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 16px; text-align: center; }

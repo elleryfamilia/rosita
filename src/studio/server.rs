@@ -299,6 +299,7 @@ fn profiles_tab_main(
                 outcome,
                 disabled: *disabled,
                 expand: views::Expand::None,
+                failed: None,
             }),
             flash,
             None,
@@ -339,6 +340,7 @@ fn handle_profile_detail(
     agent: &str,
     mode: DynamicMode,
     expand: views::Expand,
+    failed: Option<(String, String)>,
 ) -> Resp {
     let snap = state.lock().unwrap().snapshot();
     let disabled = state::staged_config(&snap)
@@ -356,6 +358,7 @@ fn handle_profile_detail(
             outcome: &outcome,
             disabled,
             expand,
+            failed,
         })),
         Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
@@ -371,6 +374,7 @@ fn handle_profile_run(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
         "",
         DynamicMode::Live,
         views::Expand::AllDynamic,
+        None,
     )
 }
 
@@ -379,18 +383,20 @@ fn handle_profile_run(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 /// their placeholder until they're run too. `profile` scopes the render context.
 /// The run fragment re-renders expanded so its output stays visible.
 fn handle_fragment_run(state: &Arc<Mutex<StudioState>>, id: &str, profile: &str) -> Resp {
-    {
+    let failed = {
         let snap = state.lock().unwrap().snapshot();
-        if let Err(e) = state::run_fragment(&snap, profile, id) {
-            return Resp::html(views::error_fragment(&e.to_string()));
+        match state::run_fragment(&snap, profile, id) {
+            Ok(err) => err.map(|msg| (id.to_string(), msg)),
+            Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
         }
-    }
+    };
     handle_profile_detail(
         state,
         profile,
         "",
         DynamicMode::ReadOnly,
         views::Expand::One(id),
+        failed,
     )
 }
 
@@ -875,7 +881,14 @@ fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 }
 
 fn handle_profile_select(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
-    handle_profile_detail(state, name, "", DynamicMode::ReadOnly, views::Expand::None)
+    handle_profile_detail(
+        state,
+        name,
+        "",
+        DynamicMode::ReadOnly,
+        views::Expand::None,
+        None,
+    )
 }
 
 fn handle_profile_preview(state: &Arc<Mutex<StudioState>>, name: &str, agent: &str) -> Resp {
@@ -885,6 +898,7 @@ fn handle_profile_preview(state: &Arc<Mutex<StudioState>>, name: &str, agent: &s
         agent,
         DynamicMode::ReadOnly,
         views::Expand::None,
+        None,
     )
 }
 
@@ -1977,6 +1991,36 @@ mod tests {
         ));
         assert!(ran.contains(" open>"), "the run fragment stays open");
         assert!(ran.contains("fragment-output"), "and shows its output");
+    }
+
+    #[test]
+    fn a_failing_dynamic_fragment_shows_error_and_retry() {
+        let cfg = "[[fragments]]\n\
+             id = \"deploy\"\n\
+             description = \"Deploy status\"\n\
+             command = \"echo boom >&2; exit 7\"\n\
+             \n\
+             [[profiles]]\n\
+             name = \"rust\"\n\
+             targets = [\"rust\"]\n\
+             fragments = [\"deploy\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+
+        let ran = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/fragments/deploy/run",
+                "profile=rust",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(ran.contains("Script failed:"), "shows the failure");
+        assert!(ran.contains("exited 7") && ran.contains("boom"), "with the message");
+        assert!(ran.contains("Retry"), "and a retry button");
+        assert!(!ran.contains("fragment-output"), "no (blank) output panel");
     }
 
     #[test]

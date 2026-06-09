@@ -439,7 +439,10 @@ else
   done
 fi
 [ -n "$ts" ] || exit 0
-"$ts" status 2>/dev/null || true
+# No `2>/dev/null || true`: a stopped/logged-out daemon must surface as a
+# non-zero exit + stderr so the run is reported as failed (and retryable),
+# not silently cached as "no peers".
+"$ts" status
 "#,
         ),
         script_frag(

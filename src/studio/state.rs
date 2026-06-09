@@ -411,7 +411,15 @@ fn render_profile_in_config(
 /// execution is gated by `allow_exec` (a disabled command leaves the cache empty
 /// and the re-render shows the skip note). Resolving a non-dynamic id is a
 /// harmless no-op.
-pub fn run_fragment(snap: &Snapshot, profile_name: &str, fragment_id: &str) -> crate::Result<()> {
+///
+/// Returns `Ok(Some(msg))` when a command **failed** to run (non-zero exit,
+/// signal, or spawn failure) so the caller can surface it with a retry; `Ok(None)`
+/// on success, an empty-but-clean run, or a non-dynamic id.
+pub fn run_fragment(
+    snap: &Snapshot,
+    profile_name: &str,
+    fragment_id: &str,
+) -> crate::Result<Option<String>> {
     let cfg = staged_config(snap)?;
     let cap = cfg
         .fragments
@@ -423,15 +431,16 @@ pub fn run_fragment(snap: &Snapshot, profile_name: &str, fragment_id: &str) -> c
         None => snap.base_context.clone(),
     };
     // Live resolve runs the provider/command and writes the cache as a side
-    // effect; the returned value (or skip note) is surfaced by the re-render.
-    let _ = crate::dynamic::resolve(
+    // effect; output (or the skip note) is surfaced by the re-render via the
+    // cache, while a failure is returned here so the card can show it + a retry.
+    let res = crate::dynamic::resolve(
         cap,
         &ctx,
         &ctx.repo_base,
         DynamicMode::Live,
         chrono::Utc::now(),
     );
-    Ok(())
+    Ok(res.and_then(|r| r.error))
 }
 
 /// Synthesize a context from a profile's targets so its fragments gate as

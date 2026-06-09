@@ -313,6 +313,9 @@ pub struct ProfileDetail<'a> {
     /// Which fragment card(s) to render expanded. Cards collapse by default; a
     /// fragment that was just run opens so its fresh output is visible.
     pub expand: Expand<'a>,
+    /// `(fragment_id, message)` when a just-run command **failed** — that card's
+    /// body shows the error and a retry button instead of (blank) output.
+    pub failed: Option<(String, String)>,
 }
 
 /// Which fragment cards open after an action. Passive views ([`Expand::None`])
@@ -499,7 +502,9 @@ pub fn profile_detail(d: &ProfileDetail) -> Markup {
                     p class="muted" { "This profile composes no guidance for " (p.agent.as_str()) " in this context." }
                 }
             } @else {
-                div class="detail-doc" { @for c in &p.caps { (preview_fragment_card(c, name, d.expand)) } }
+                div class="detail-doc" { @for c in &p.caps {
+                    (preview_fragment_card(c, name, d.expand, failed_msg(&d.failed, &c.id)))
+                } }
             }
         }
     }
@@ -512,20 +517,37 @@ pub fn profile_detail_fragment(d: &ProfileDetail) -> String {
 /// One collapsible fragment section inside the profile "document": a compact
 /// summary row that, when opened, reveals the fragment's rendered-markdown
 /// guidance (the prominent content) plus an "Edit fragment" action.
-fn preview_fragment_card(c: &PreviewCap, profile: &str, expand: Expand) -> Markup {
+/// The failure message for fragment `id`, if this render carries one — matched
+/// by id so only the card that actually failed shows the error + retry.
+fn failed_msg<'a>(failed: &'a Option<(String, String)>, id: &str) -> Option<&'a str> {
+    failed
+        .as_ref()
+        .filter(|(fid, _)| fid == id)
+        .map(|(_, msg)| msg.as_str())
+}
+
+fn preview_fragment_card(
+    c: &PreviewCap,
+    profile: &str,
+    expand: Expand,
+    failed: Option<&str>,
+) -> Markup {
     let glyph = c.glyph;
     // Cards start collapsed on a passive view (the user opens what they care
     // about), but a just-run fragment stays open so its fresh output is visible.
     // `has_output`/`prompt` pick what the body shows once expanded: live output
     // for a dynamic cap that ran, or a centered "Run" prompt for one that hasn't.
-    // A dynamic cap can also be run from the summary's corner button.
-    let has_output = c.dynamic && !c.pending && !c.skipped;
-    let prompt = c.dynamic && c.pending;
-    let open = match expand {
-        Expand::None => false,
-        Expand::One(id) => c.id == id,
-        Expand::AllDynamic => c.dynamic,
-    };
+    // A dynamic cap can also be run from the summary's corner button. A failed
+    // run takes over the body with an error + retry, regardless of the above.
+    let has_output = c.dynamic && !c.pending && !c.skipped && failed.is_none();
+    let prompt = c.dynamic && c.pending && failed.is_none();
+    // A failed card opens so its error is visible even on a passive re-render.
+    let open = failed.is_some()
+        || match expand {
+            Expand::None => false,
+            Expand::One(id) => c.id == id,
+            Expand::AllDynamic => c.dynamic,
+        };
     let run_url = format!("/fragments/{}/run?profile={}", enc(&c.id), enc(profile));
     html! {
         details class="fragment-detail" open[open] {
@@ -546,7 +568,20 @@ fn preview_fragment_card(c: &PreviewCap, profile: &str, expand: Expand) -> Marku
                 span class="fragment-chev" { (icon("chevron-down")) }
             }
             div class="fragment-detail-body" {
-                @if has_output {
+                @if let Some(msg) = failed {
+                    // The script ran but failed — show the error and a retry
+                    // button right beneath it, in place of any output.
+                    div class="fragment-run-error" {
+                        div class="banner error" {
+                            span class="banner-icon" { (icon("alert")) }
+                            div class="banner-body" { "Script failed: " (msg) }
+                        }
+                        button type="button" class="btn btn-primary fragment-run-center"
+                            hx-post=(run_url.clone()) hx-target="#profile-main" {
+                            (icon("refresh")) "Retry"
+                        }
+                    }
+                } @else if has_output {
                     pre class="fragment-output" { (c.markdown) }
                 } @else if prompt {
                     // Centered run prompt — clicking it (or the corner button)

@@ -40,6 +40,10 @@ pub struct Resolution {
     /// Set when a command was skipped (e.g. `allow_exec = false`); the value is
     /// the human note, rendered in place of output.
     pub skipped: Option<String>,
+    /// Set when a command **failed** to run (non-zero exit, signal, or spawn
+    /// failure) during a live resolve; the value is a short redacted message.
+    /// The render omits the fragment, but the studio surfaces it with a retry.
+    pub error: Option<String>,
 }
 
 /// Resolve a fragment's dynamic output, or `None` if it isn't dynamic.
@@ -69,20 +73,29 @@ pub fn resolve(
                 skipped: Some(
                     "execution disabled for this fragment (allow_exec = false)".to_string(),
                 ),
+                error: None,
             });
         }
         let key = format!("cmd-{}", cap.id);
+        let (output, error) = match providers::run_command(
+            command,
+            cap.script_lang.as_deref(),
+            repo_base,
+            &key,
+            ttl,
+            now,
+            live,
+        ) {
+            providers::CommandOutcome::Output(o) => (Some(o), None),
+            providers::CommandOutcome::Failed(msg) => (None, Some(msg)),
+            // Empty-but-clean and a cold read-only cache both contribute nothing
+            // and aren't errors.
+            providers::CommandOutcome::Empty | providers::CommandOutcome::NotCached => (None, None),
+        };
         return Some(Resolution {
-            output: providers::run_command(
-                command,
-                cap.script_lang.as_deref(),
-                repo_base,
-                &key,
-                ttl,
-                now,
-                live,
-            ),
+            output,
             skipped: None,
+            error,
         });
     }
 
@@ -90,5 +103,6 @@ pub fn resolve(
     Some(Resolution {
         output: providers::probe_one(pid, ctx, repo_base, ttl, now, live),
         skipped: None,
+        error: None,
     })
 }
