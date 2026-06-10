@@ -276,19 +276,38 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
 // --- embedded-skill preflight --------------------------------------------------
 
 /// Maintain or offer rosita's embedded skills before launch. All branches are
-/// best-effort: errors are logged verbosely and never abort the run.
+/// best-effort: errors are logged verbosely and never abort the run. Undecided,
+/// not-yet-installed skills are collected into ONE bundled offer — a fresh user
+/// gets a single question no matter how many skills rosita ships.
 fn skill_preflight(prep: &super::Prepared, p: &Painter) {
     let Some(home) = crate::config::home_dir() else {
         return;
     };
+    let mut offerable: Vec<&skills::Skill> = Vec::new();
     for skill in skills::all() {
         let outcome = match crate::binding::read_skill_decision(skill.id) {
             Some(SkillDecision::Declined) => Ok(()),
             Some(SkillDecision::Accepted) => maintain_skill(&home, skill, p),
-            None => offer_skill(&home, skill, prep, p),
+            None => match skills::status(&home, skill).state {
+                // Already present with our marker (installed elsewhere or on
+                // another rosita version): adopt silently instead of asking.
+                SkillState::Managed { .. } => {
+                    crate::binding::write_skill_decision(skill.id, SkillDecision::Accepted)
+                }
+                SkillState::Unmanaged => Ok(()), // the user's own copy; never ours
+                SkillState::NotInstalled => {
+                    offerable.push(skill);
+                    Ok(())
+                }
+            },
         };
         if let Err(e) = outcome {
             vlog!("skill preflight for '{}' failed: {e:#}", skill.id);
+        }
+    }
+    if !offerable.is_empty() {
+        if let Err(e) = offer_skills(&home, &offerable, prep, p) {
+            vlog!("skill offer failed: {e:#}");
         }
     }
 }
@@ -344,13 +363,14 @@ fn maintain_skill(home: &std::path::Path, skill: &skills::Skill, p: &Painter) ->
     Ok(())
 }
 
-/// No decision recorded: offer the skill once — only on a real terminal, and
-/// only while the user looks pre-migration (no profiles configured yet), which
-/// is exactly when `rosita-migrate` is useful. Configured users are never
-/// interrupted; they get the skill via `rosita skill install` or studio.
-fn offer_skill(
+/// No decision recorded yet: offer the not-yet-installed skills once, as one
+/// bundle — only on a real terminal, and only while the user looks
+/// pre-migration (no profiles configured yet), which is exactly when the
+/// migrate skill is useful. Configured users are never interrupted; they get
+/// the skills via `rosita skill install` or studio.
+fn offer_skills(
     home: &std::path::Path,
-    skill: &skills::Skill,
+    offerable: &[&skills::Skill],
     prep: &super::Prepared,
     p: &Painter,
 ) -> crate::Result<()> {
@@ -360,32 +380,34 @@ fn offer_skill(
     if !prep.config.profiles.is_empty() {
         return Ok(());
     }
-    match skills::status(home, skill).state {
-        // Already present (e.g. installed on another rosita version or by hand
-        // with our marker): adopt it silently instead of asking.
-        SkillState::Managed { .. } => {
-            return crate::binding::write_skill_decision(skill.id, SkillDecision::Accepted);
-        }
-        SkillState::Unmanaged => return Ok(()), // the user's own copy; never ours to manage
-        SkillState::NotInstalled => {}
-    }
 
+    let ids = offerable
+        .iter()
+        .map(|s| format!("'{}'", s.id))
+        .collect::<Vec<_>>()
+        .join(", ");
     println!();
     println!(
-        "  {} rosita ships {} — an agent skill that imports an existing CLAUDE.md/AGENTS.md",
+        "  {} rosita ships agent skills {}",
         p.cyan("✦"),
-        p.bold(&format!("'{}'", skill.id))
+        p.dim("(work in Claude Code, Codex, Gemini CLI, opencode)")
+    );
+    for skill in offerable {
+        println!(
+            "    {} — {}",
+            p.bold(skill.id),
+            skill_blurb(skill.id)
+        );
+    }
+    println!("  install to {}?", p.bold("~/.agents/skills"));
+    println!(
+        "    1) yes — install {}",
+        p.dim("(`rosita skill remove` undoes this)")
     );
     println!(
-        "    into rosita fragments & profiles {}",
-        p.dim("(works in Claude Code, Codex, Gemini CLI, opencode)")
+        "    2) no — don't ask again {}",
+        p.dim("(`rosita skill install` re-enables)")
     );
-    println!(
-        "  install it to {}?",
-        p.bold("~/.agents/skills")
-    );
-    println!("    1) yes — install {}", p.dim("(`rosita skill remove` undoes this)"));
-    println!("    2) no — don't ask again {}", p.dim("(`rosita skill install` re-enables)"));
 
     loop {
         print!("  ❯ ");
@@ -396,8 +418,10 @@ fn offer_skill(
         }
         match line.trim() {
             "1" => {
-                skills::install(home, skill)?;
-                crate::binding::write_skill_decision(skill.id, SkillDecision::Accepted)?;
+                for skill in offerable {
+                    skills::install(home, skill)?;
+                    crate::binding::write_skill_decision(skill.id, SkillDecision::Accepted)?;
+                }
                 println!(
                     "{}",
                     step(
@@ -405,20 +429,30 @@ fn offer_skill(
                         p.green("✓"),
                         "skill",
                         format!(
-                            "'{}' installed → {}",
-                            skill.id,
-                            skills::canonical_dir(home, skill.id).display()
+                            "{ids} installed → {}",
+                            home.join(".agents").join("skills").display()
                         ),
                     )
                 );
                 return Ok(());
             }
             "2" => {
-                crate::binding::write_skill_decision(skill.id, SkillDecision::Declined)?;
+                for skill in offerable {
+                    crate::binding::write_skill_decision(skill.id, SkillDecision::Declined)?;
+                }
                 return Ok(());
             }
             _ => println!("  please enter 1 or 2."),
         }
+    }
+}
+
+/// One-line pitch per shipped skill for the bundled offer.
+fn skill_blurb(id: &str) -> &'static str {
+    match id {
+        "rosita-migrate" => "imports an existing CLAUDE.md/AGENTS.md into rosita",
+        "rosita-remember" => "saves durable preferences you state mid-session as rosita guidance",
+        _ => "an agent skill shipped with rosita",
     }
 }
 

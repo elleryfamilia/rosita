@@ -19,6 +19,11 @@ version and date (see [RELEASING.md](RELEASING.md)).
   `~/.claude/skills/` and `~/.codex/skills/` when those agents are present, and
   the skill itself was rewritten to the portable Agent Skills format so it works
   beyond Claude Code.
+- A second embedded skill, `rosita-remember`: when you state a durable,
+  cross-project preference mid-session, your agent saves it as a rosita
+  fragment (or updates the fragment it contradicts) instead of leaving it in
+  one agent's local memory. Deliberately scoped: project- and session-specific
+  notes stay in the agent's own memory.
 - `rosita run` offers the skill once (interactive terminals only, and only while
   your config has no profiles yet — i.e. before you've migrated); the answer is
   remembered per machine. Accepted installs are kept healthy on later runs:

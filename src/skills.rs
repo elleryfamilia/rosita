@@ -64,9 +64,26 @@ pub const MIGRATE: Skill = Skill {
     ],
 };
 
+/// The `rosita-remember` skill: saves durable, cross-project user guidance
+/// into rosita fragments — the ongoing-maintenance complement to migrate's
+/// one-time import.
+pub const REMEMBER: Skill = Skill {
+    id: "rosita-remember",
+    files: &[
+        SkillFile {
+            relpath: "SKILL.md",
+            content: include_str!("../skills/rosita-remember/SKILL.md"),
+        },
+        SkillFile {
+            relpath: "reference.md",
+            content: include_str!("../skills/rosita-remember/reference.md"),
+        },
+    ],
+};
+
 /// Every skill shipped in this binary.
 pub fn all() -> &'static [Skill] {
-    &[MIGRATE]
+    &[MIGRATE, REMEMBER]
 }
 
 /// Look up an embedded skill by id.
@@ -441,15 +458,23 @@ mod tests {
     }
 
     #[test]
-    fn embedded_skill_md_has_frontmatter_and_no_marker() {
-        let md = MIGRATE.files[0].content;
-        assert!(md.starts_with("---\n"), "SKILL.md must open with frontmatter");
-        assert!(!md.contains(SKILL_MARKER));
-        // The skill must be portable: no Claude-only dynamic preamble.
-        assert!(
-            !md.contains("!`"),
-            "SKILL.md must not use Claude-only dynamic preamble commands"
-        );
+    fn embedded_skill_mds_have_frontmatter_and_no_marker() {
+        for skill in all() {
+            assert_eq!(skill.files[0].relpath, "SKILL.md");
+            let md = skill.files[0].content;
+            assert!(
+                md.starts_with("---\n"),
+                "{}: SKILL.md must open with frontmatter",
+                skill.id
+            );
+            assert!(!md.contains(SKILL_MARKER), "{}: embedded marker", skill.id);
+            // The skills must be portable: no Claude-only dynamic preamble.
+            assert!(
+                !md.contains("!`"),
+                "{}: SKILL.md must not use Claude-only dynamic preamble commands",
+                skill.id
+            );
+        }
     }
 
     #[test]

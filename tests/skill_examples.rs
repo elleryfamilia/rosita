@@ -1,6 +1,6 @@
-//! The TOML examples shipped in the `rosita-migrate` skill must stay valid
-//! rosita config — otherwise the skill would teach people a schema that no
-//! longer parses. This guards every ```toml block in the skill's reference.
+//! The TOML examples shipped in the embedded skills must stay valid rosita
+//! config — otherwise a skill would teach people a schema that no longer
+//! parses. This guards every ```toml block in each skill's reference.
 
 use std::path::PathBuf;
 
@@ -28,24 +28,26 @@ fn parse_global(toml: &str) -> rosita::Result<Config> {
     )])
 }
 
-#[test]
-fn skill_reference_toml_examples_are_valid_config() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/skills/rosita-migrate/reference.md"
-    );
-    let md = std::fs::read_to_string(path).expect("read skill reference.md");
+/// Parse-check every ```toml block in a skill's reference.md, returning them.
+fn check_skill_reference(skill: &str) -> Vec<String> {
+    let path = format!("{}/skills/{skill}/reference.md", env!("CARGO_MANIFEST_DIR"));
+    let md = std::fs::read_to_string(&path).expect("read skill reference.md");
     let blocks = toml_blocks(&md);
     assert!(
         !blocks.is_empty(),
-        "expected ```toml examples in the skill reference"
+        "{skill}: expected ```toml examples in the skill reference"
     );
-
     for block in &blocks {
         parse_global(block).unwrap_or_else(|e| {
-            panic!("skill example must parse as config:\n{block}\n\nerror: {e}")
+            panic!("{skill}: example must parse as config:\n{block}\n\nerror: {e}")
         });
     }
+    blocks
+}
+
+#[test]
+fn skill_reference_toml_examples_are_valid_config() {
+    let blocks = check_skill_reference("rosita-migrate");
 
     // The first (complete) example defines the documented profiles + a dynamic
     // fragment — assert the schema the skill teaches still resolves.
@@ -53,6 +55,16 @@ fn skill_reference_toml_examples_are_valid_config() {
     assert!(cfg.profiles.iter().any(|p| p.name == "machine"));
     assert!(cfg.profiles.iter().any(|p| p.name == "rust"));
     assert!(cfg.fragments.iter().any(|c| c.id == "host"));
+}
+
+#[test]
+fn remember_skill_reference_toml_examples_are_valid_config() {
+    let blocks = check_skill_reference("rosita-remember");
+
+    // The editing example teaches a minimal fragment edit — it must keep
+    // resolving as a fragment with guidance.
+    let cfg = parse_global(&blocks[0]).unwrap();
+    assert!(cfg.fragments.iter().any(|c| c.id == "conventional-commits"));
 }
 
 #[test]

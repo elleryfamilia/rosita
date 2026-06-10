@@ -271,11 +271,17 @@ rosita skill install
 # then, in any agent session:  /rosita-migrate   (or "import my CLAUDE.md into rosita")
 ```
 
-The skill is embedded in the binary — no repo checkout needed. It installs to
-`~/.agents/skills/` (read natively by Gemini CLI and opencode) with symlinks
+rosita also ships [`rosita-remember`](skills/rosita-remember/SKILL.md): when
+you tell your agent a durable, cross-project preference mid-session ("always
+X", "stop doing Y"), the skill saves it as a rosita fragment — or updates the
+fragment it contradicts — instead of leaving it stranded in one agent's local
+memory. Project- and session-specific notes stay in the agent's own memory.
+
+The skills are embedded in the binary — no repo checkout needed. They install
+to `~/.agents/skills/` (read natively by Gemini CLI and opencode) with symlinks
 into `~/.claude/skills/` and `~/.codex/skills/` for agents that scan their own
 dotdir — created only when that agent's directory already exists. The first
-interactive `rosita run` also offers it (once) while your config has no
+interactive `rosita run` also offers them (once) while your config has no
 profiles yet; `rosita skill remove` uninstalls and stops the offer, and
 `rosita doctor` reports the install's health. If you edit the installed files,
 rosita stops touching them.

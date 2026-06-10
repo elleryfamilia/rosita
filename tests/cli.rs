@@ -1368,12 +1368,18 @@ fn skill_install_writes_canonical_links_existing_agents_and_records_accepted() {
         .args(["skill", "install"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("installed rosita-migrate"));
+        .stdout(
+            predicate::str::contains("installed rosita-migrate")
+                .and(predicate::str::contains("installed rosita-remember")),
+        );
 
-    // Canonical files under the cross-agent dir, marker in place.
+    // Canonical files under the cross-agent dir, marker in place — for every
+    // shipped skill.
     let skill_md = fx.read_home(".agents/skills/rosita-migrate/SKILL.md");
     assert!(skill_md.contains("<!-- rosita:skill content=sha256:"));
     assert!(fx.home_exists(".agents/skills/rosita-migrate/reference.md"));
+    assert!(fx.home_exists(".agents/skills/rosita-remember/SKILL.md"));
+    assert!(fx.home_exists(".claude/skills/rosita-remember"));
 
     // A symlink only for the agent dir that exists.
     let link = fx.home().join(".claude/skills/rosita-migrate");
@@ -1405,10 +1411,11 @@ fn skill_remove_deletes_everything_and_records_declined() {
         .stdout(predicate::str::contains("removed"));
 
     assert!(!fx.home_exists(".agents/skills/rosita-migrate"));
+    assert!(!fx.home_exists(".agents/skills/rosita-remember"));
     assert!(!fx.home_exists(".claude/skills/rosita-migrate"));
-    assert!(fx
-        .read_global("bindings.toml")
-        .contains("rosita-migrate = \"declined\""));
+    let store = fx.read_global("bindings.toml");
+    assert!(store.contains("rosita-migrate = \"declined\""));
+    assert!(store.contains("rosita-remember = \"declined\""));
 }
 
 #[test]

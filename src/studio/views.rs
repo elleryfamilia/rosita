@@ -430,45 +430,46 @@ pub enum SkillCardState {
     HandsOff,
 }
 
-/// The agent-skill card (fills `#skill-card`). Unlike packs, the Install button
-/// writes `~/.agents/skills` immediately on confirm — there is nothing staged
-/// to review or discard, so it must not imply staged semantics.
-pub fn skill_card(skill_id: &str, state: &SkillCardState) -> String {
+/// The agent-skill card (fills `#skill-card`). `ids` lists the shipped skills
+/// (display only). Unlike packs, the Install button writes `~/.agents/skills`
+/// immediately on confirm — there is nothing staged to review or discard, so
+/// it must not imply staged semantics.
+pub fn skill_card(ids: &[&str], state: &SkillCardState) -> String {
+    let id_list = ids.join(", ");
     html! {
         div class="cmd-block" {
             @match state {
                 SkillCardState::Offer => {
                     span class="muted small" {
-                        "Already have a CLAUDE.md or AGENTS.md? rosita ships the "
-                        strong { (skill_id) }
-                        " agent skill — it imports your existing instructions into fragments & profiles "
-                        "(works in Claude Code, Codex, Gemini CLI, opencode)."
+                        "rosita ships agent skills (" strong { (id_list) } "): import an existing "
+                        "CLAUDE.md/AGENTS.md, and save preferences you state mid-session as global guidance "
+                        "(work in Claude Code, Codex, Gemini CLI, opencode)."
                     }
                     button class="btn btn-ghost"
                         hx-post="/skills/install" hx-target="#skill-card"
                         hx-confirm=(format!(
-                            "Install the {skill_id} skill into ~/.agents/skills now? \
+                            "Install the rosita skills ({id_list}) into ~/.agents/skills now? \
                              This writes files immediately (not staged); `rosita skill remove` undoes it."
                         )) {
-                        (icon("bolt")) "Install the skill"
+                        (icon("bolt")) "Install the skills"
                     }
                 }
                 SkillCardState::Installed => {
-                    span class="muted small" { "The " strong { (skill_id) } " skill is installed. Import your existing instructions from any agent session:" }
-                    code { "rosita run claude -- \"/" (skill_id) "\"" }
+                    span class="muted small" { "The rosita skills (" strong { (id_list) } ") are installed. Import your existing instructions from any agent session:" }
+                    code { "rosita run claude -- \"/rosita-migrate\"" }
                     span class="muted small" { "remove with " code { "rosita skill remove" } }
                 }
                 SkillCardState::UpgradeAvailable => {
-                    span class="muted small" { "The " strong { (skill_id) } " skill is installed but a newer version ships with this rosita." }
+                    span class="muted small" { "The rosita skills are installed but a newer version ships with this rosita." }
                     button class="btn btn-ghost"
                         hx-post="/skills/install" hx-target="#skill-card"
-                        hx-confirm=(format!("Upgrade the {skill_id} skill in ~/.agents/skills? This rewrites the skill files immediately.")) {
-                        (icon("refresh")) "Upgrade the skill"
+                        hx-confirm="Upgrade the rosita skills in ~/.agents/skills? This rewrites the skill files immediately." {
+                        (icon("refresh")) "Upgrade the skills"
                     }
                 }
                 SkillCardState::HandsOff => {
                     span class="muted small" {
-                        "A " strong { (skill_id) } " skill exists in ~/.agents/skills with local edits — rosita leaves it alone."
+                        "Skills exist in ~/.agents/skills with local edits — rosita leaves them alone."
                     }
                 }
             }
