@@ -171,6 +171,14 @@ fn report_actions(p: &Painter, skill: &Skill, actions: &[InstallAction]) {
             InstallAction::WroteCanonical(path) => {
                 println!("  {} installed {} → {}", p.green("✓"), p.bold(skill.id), path.display());
             }
+            InstallAction::UpgradedCanonical(path) => {
+                println!(
+                    "  {} upgraded {} to this rosita's version → {}",
+                    p.green("⟳"),
+                    p.bold(skill.id),
+                    path.display()
+                );
+            }
             InstallAction::CanonicalCurrent(path) => {
                 println!(
                     "  {} {} already current at {}",
