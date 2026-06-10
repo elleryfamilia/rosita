@@ -309,8 +309,10 @@ fn resolves_to(link: &Path, target: &Path, canonical: &Path) -> bool {
 /// One line of an install/repair report, for the CLI to print.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallAction {
-    /// Wrote the canonical files (fresh install or upgrade).
+    /// Wrote the canonical files (fresh install).
     WroteCanonical(PathBuf),
+    /// Rewrote a pristine managed install with this binary's newer version.
+    UpgradedCanonical(PathBuf),
     /// Canonical files already current; nothing written.
     CanonicalCurrent(PathBuf),
     /// Canonical files left alone: user-modified (or unmanaged).
@@ -343,7 +345,7 @@ pub fn install(home: &Path, skill: &Skill) -> Result<Vec<InstallAction>> {
             ..
         } => {
             write_skill_files(&dir, skill)?;
-            actions.push(InstallAction::WroteCanonical(dir.clone()));
+            actions.push(InstallAction::UpgradedCanonical(dir.clone()));
         }
         SkillState::Managed {
             user_modified: true, ..
@@ -612,7 +614,8 @@ mod tests {
             SkillState::Managed { user_modified: false, upgrade_available: true, .. }
         ));
 
-        install(h.path(), &MIGRATE).unwrap();
+        let actions = install(h.path(), &MIGRATE).unwrap();
+        assert!(actions.contains(&InstallAction::UpgradedCanonical(dir)));
         let st = status(h.path(), &MIGRATE);
         assert!(matches!(
             st.state,
