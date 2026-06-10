@@ -819,55 +819,81 @@ fn handle_quickstart(state: &Arc<Mutex<StudioState>>) -> Resp {
 
 // --- agent skill card ----------------------------------------------------------
 
-/// Derive the skill card's state from the real filesystem + decision store.
+/// Derive the skill card's state from the real filesystem + decision store,
+/// aggregated over every shipped skill (the card offers them as one bundle).
 /// Deliberately not part of the studio snapshot: skill install is a direct,
 /// immediate action on `~/.agents/skills`, not a staged config edit.
-fn skill_card_state(skill: &crate::skills::Skill) -> views::SkillCardState {
+fn skill_card_state() -> views::SkillCardState {
     use crate::skills::SkillState;
     let Some(home) = crate::config::home_dir() else {
         return views::SkillCardState::HandsOff;
     };
-    match crate::skills::status(&home, skill).state {
-        SkillState::NotInstalled => views::SkillCardState::Offer,
-        SkillState::Unmanaged
-        | SkillState::Managed {
-            user_modified: true,
-            ..
-        } => views::SkillCardState::HandsOff,
-        SkillState::Managed {
-            upgrade_available: true,
-            ..
-        } => views::SkillCardState::UpgradeAvailable,
-        SkillState::Managed { .. } => views::SkillCardState::Installed,
+    let states: Vec<SkillState> = crate::skills::all()
+        .iter()
+        .map(|s| crate::skills::status(&home, s).state)
+        .collect();
+    if states.contains(&SkillState::NotInstalled) {
+        return views::SkillCardState::Offer;
     }
+    if states.iter().any(|s| {
+        matches!(
+            s,
+            SkillState::Managed {
+                user_modified: false,
+                upgrade_available: true,
+                ..
+            }
+        )
+    }) {
+        return views::SkillCardState::UpgradeAvailable;
+    }
+    if states.iter().all(|s| {
+        matches!(
+            s,
+            SkillState::Managed {
+                user_modified: false,
+                ..
+            }
+        )
+    }) {
+        return views::SkillCardState::Installed;
+    }
+    views::SkillCardState::HandsOff
+}
+
+fn skill_ids() -> Vec<&'static str> {
+    crate::skills::all().iter().map(|s| s.id).collect()
 }
 
 /// `GET /skills/card` — the lazily-loaded agent-skill card on the welcome screen.
 fn handle_skill_card() -> Resp {
-    let skill = &crate::skills::MIGRATE;
-    Resp::html(views::skill_card(skill.id, &skill_card_state(skill)))
+    Resp::html(views::skill_card(&skill_ids(), &skill_card_state()))
 }
 
-/// `POST /skills/install` — install (or upgrade) the embedded skill NOW and
-/// record the accepted decision, then re-render the card. Gated client-side by
+/// `POST /skills/install` — install (or upgrade) every embedded skill NOW and
+/// record the accepted decisions, then re-render the card. Gated client-side by
 /// `hx-confirm`; this is studio's one immediate-side-effect action (everything
 /// config-shaped stays in the staged session).
 fn handle_skill_install() -> Resp {
-    let skill = &crate::skills::MIGRATE;
     let Some(home) = crate::config::home_dir() else {
         return Resp::html(views::error_fragment("cannot resolve $HOME"));
     };
-    if let Err(e) = crate::skills::install(&home, skill) {
-        return Resp::html(views::error_fragment(&format!("skill install failed: {e:#}")));
+    for skill in crate::skills::all() {
+        if let Err(e) = crate::skills::install(&home, skill) {
+            return Resp::html(views::error_fragment(&format!(
+                "skill install failed for '{}': {e:#}",
+                skill.id
+            )));
+        }
+        if let Err(e) =
+            crate::binding::write_skill_decision(skill.id, crate::binding::SkillDecision::Accepted)
+        {
+            return Resp::html(views::error_fragment(&format!(
+                "skills installed, but recording the decision failed: {e:#}"
+            )));
+        }
     }
-    if let Err(e) =
-        crate::binding::write_skill_decision(skill.id, crate::binding::SkillDecision::Accepted)
-    {
-        return Resp::html(views::error_fragment(&format!(
-            "skill installed, but recording the decision failed: {e:#}"
-        )));
-    }
-    Resp::html(views::skill_card(skill.id, &skill_card_state(skill)))
+    Resp::html(views::skill_card(&skill_ids(), &skill_card_state()))
 }
 
 /// `GET /onboarding/welcome` — (re)show the first-launch welcome on demand (the
