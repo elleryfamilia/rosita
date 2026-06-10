@@ -212,13 +212,12 @@ impl Config {
     }
 }
 
-/// Enforce the global-only model: fragments, targets, agents, and profiles are
-/// honored only from the layers allowed to contribute them (caps/targets/agents:
-/// built-in/global/global-local; profiles: built-in/global). A repo layer that
-/// declares any of them is silently dropped here so it can never select, render,
-/// or execute — `rosita doctor` flags the raw file so the mistake is visible.
-/// Other repo-layer content (`fragment_params`, `host_classes`, `[binding]`,
-/// `env`) is untouched.
+/// Enforce the global-only model. A repo (`.rosita/config.toml` / `local.toml`)
+/// is an untrusted, committed/shareable layer: it may contribute only a private
+/// `[binding]`, `fragment_params`, and `host_classes`. Everything else is owned
+/// by your global config and is stripped from repo layers here so a cloned repo
+/// can never select, render, execute, sync, or widen exposure — `rosita doctor`
+/// flags the raw file so the mistake is visible.
 fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
     if !layer.contributes_fragments() {
         parsed.fragments.clear();
@@ -232,11 +231,17 @@ fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
         // `rosita run` into executing attacker code, or write/delete files outside
         // the project. Agents are global-only, exactly like fragments and targets.
         parsed.agents.clear();
-        // `defaults.agent` picks which agent `run`/`render` uses; keep that choice
-        // global so a repo can't silently redirect it to another agent.
-        if let Some(defaults) = parsed.defaults.as_mut() {
-            defaults.agent = None;
-        }
+        // The remaining global-only operational tables:
+        //   - `[defaults]` (`agent`) selects which agent `run`/`render` uses.
+        //   - `[sync]` drives git pull/push against your GLOBAL config dir.
+        //   - `[codex]` toggles writing an override file and output limits.
+        //   - `[env]` widens which environment variables are surfaced into the
+        //     overlay; since the loader *appends* allowlists, a repo could
+        //     otherwise add names (e.g. `DATABASE_URL`) to leak their values.
+        parsed.defaults = None;
+        parsed.sync = None;
+        parsed.codex = None;
+        parsed.env = None;
     }
     if !layer.contributes_profiles() {
         parsed.profiles.clear();
@@ -887,6 +892,78 @@ mod tests {
             "studio path must not honor a repo-layer agent override"
         );
         assert_eq!(c.default_agent, "claude");
+    }
+
+    // Global-only operational tables a repo `config.toml` must not influence.
+    // `[defaults]`/`[sync]`/`[codex]` flip values away from their defaults; `[env]`
+    // tries to widen the allowlist so an extra var's value would leak into the
+    // overlay.
+    const OPERATIONAL_TABLES: &str = r#"
+        [defaults]
+        agent = "codex"
+
+        [sync]
+        auto_pull = false
+        auto_push = false
+
+        [codex]
+        write_override = false
+
+        [env]
+        allowlist = ["DATABASE_URL"]
+    "#;
+
+    fn assert_operational_tables_stripped(c: &Config) {
+        assert_eq!(c.default_agent, "claude", "repo must not change [defaults].agent");
+        assert!(c.sync.auto_pull, "repo must not change [sync].auto_pull");
+        assert!(c.sync.auto_push, "repo must not change [sync].auto_push");
+        assert!(
+            c.codex.write_override,
+            "repo must not change [codex].write_override"
+        );
+        assert!(
+            !c.env.allowlist.iter().any(|n| n == "DATABASE_URL"),
+            "repo must not widen the env allowlist"
+        );
+    }
+
+    #[test]
+    fn repo_layer_operational_tables_are_dropped_by_loader() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
+        std::fs::write(repo_config_path(repo.path()), OPERATIONAL_TABLES).unwrap();
+
+        let c = Config::load_from(None, repo.path()).unwrap();
+        assert_operational_tables_stripped(&c);
+    }
+
+    #[test]
+    fn from_layer_strs_drops_repo_operational_tables() {
+        // The studio (in-memory) load path must enforce the same global-only rule.
+        use crate::fragment::Layer;
+        let c = Config::from_layer_strs(vec![(
+            Layer::Repo,
+            PathBuf::from("/r/.rosita/config.toml"),
+            OPERATIONAL_TABLES.to_string(),
+        )])
+        .unwrap();
+        assert_operational_tables_stripped(&c);
+    }
+
+    #[test]
+    fn global_config_can_set_operational_tables() {
+        // The legitimate feature: your own global config owns these settings.
+        let global = tempfile::tempdir().unwrap();
+        let gcfg = global.path().join("config.toml");
+        std::fs::write(&gcfg, OPERATIONAL_TABLES).unwrap();
+        let repo = tempfile::tempdir().unwrap();
+
+        let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
+        assert_eq!(c.default_agent, "codex");
+        assert!(!c.sync.auto_pull);
+        assert!(!c.sync.auto_push);
+        assert!(!c.codex.write_override);
+        assert!(c.env.allowlist.iter().any(|n| n == "DATABASE_URL"));
     }
 
     #[test]
