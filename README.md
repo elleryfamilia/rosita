@@ -10,7 +10,7 @@
 
 **Stop using the same global `AGENTS.md` for every task.**
 
-Rosita is an **adaptive context layer** for AI coding agents. Define reusable context once, then apply the right profile based on the stack, language, task, or environment you're working in.
+Rosita is an **adaptive context layer** for AI coding agents. Define reusable context fragments once, then compose them into profiles that apply based on stack, language, task, or environment. Think *"use this global `AGENTS.md` any time I'm working in Rust, but use this other one when I'm not in a repo at all."*
 
 - Your project's `AGENTS.md` describes **the repo**.
 - Rosita describes **the context you bring with you** — across projects, machines, and agent tools.
