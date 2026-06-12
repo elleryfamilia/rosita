@@ -15,7 +15,7 @@ Rosita is an **adaptive context layer** for AI coding agents. Define reusable co
 - Your project's `AGENTS.md` describes **the repo**.
 - Rosita describes **the context you bring with you** — across projects, machines, and agent tools.
 
-Works with **Claude, Codex, Gemini, opencode, and Copilot**. Rosita renders gitignored overlays and wires them into each agent — without touching committed project instruction files.
+Works with **Claude, Codex, Gemini, opencode, and Copilot**. Rosita delivers your context as a local, gitignored file each agent reads — without touching committed project instruction files.
 
 <p align="center">
   <img src="docs/screenshots/profiles.png" alt="rosita studio — the Profiles tab: composing a machine profile from fragments, with live script re-runs" width="900">
@@ -65,7 +65,7 @@ More options — source builds, self-updating — in [Install](#install).
 
 ## What happens?
 
-Rosita detects the current context, selects the matching profile, renders the selected fragments, and wires the result into your agent through a local, gitignored overlay.
+Rosita detects the current context, selects the matching profile, and renders the selected fragments into a local, gitignored file — the **overlay** — which it wires into your agent.
 
 ```bash
 $ rosita explain
