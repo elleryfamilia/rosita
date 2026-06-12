@@ -1,116 +1,89 @@
-## <img src="docs/rosita-mark.svg" alt="" height="32" align="top"> Rosita — Composable context for AI coding agents
+<p align="left">
+  <img src="docs/rosita-mark.svg" alt="Rosita" width="64">
+</p>
 
-Author reusable guidance once, globally — conventions, preferences, safety rules —
-and `rosita` delivers it into whichever agent you use (Claude, Codex, Gemini,
-opencode, Copilot) without touching your committed files. It picks the guidance
-that fits each project, so you're not pasting the same `CLAUDE.md` into every repo
-and every tool.
+# Rosita
+
+Stop using the same global `AGENTS.md` for every task.
+
+Rosita is an adaptive context layer for AI coding agents. Define reusable context once, then apply the right profile based on the stack, language, task, or environment you're working in.
+
+Your project's `AGENTS.md` describes the repo. Rosita describes the context you want to bring with you across projects, machines, and agent tools.
+
+Rosita works with Claude, Codex, Gemini, opencode, Copilot, and generic Markdown-based agent flows. It renders gitignored overlays and wires them into each agent without touching committed project instruction files.
 
 <p align="center">
   <img src="docs/screenshots/profiles.png" alt="rosita studio — the Profiles tab: composing a machine profile from fragments, with live script re-runs" width="900">
 </p>
-<p align="center"><sub><i><code>rosita studio</code> — composing a profile from your fragment library.</i></sub></p>
+<p align="center"><sub><i><code>rosita studio</code> — compose reusable context profiles from your fragment library.</i></sub></p>
+
+---
+
+## Why Rosita?
+
+Most AI tools give you either one global context file or repo-specific instruction files.
+
+Rosita adds the missing layer in between: reusable context that adapts to the stack, language, task, or environment you're working in.
 
 <p align="center">
-  <img src="docs/diagrams/journey.svg" alt="How you use rosita: run rosita studio to author fragments and reusable profiles; run rosita run to detect your stack, select the right profile, and inject the global context into the agent — wired per agent through each one's native gitignored hook." width="900">
+  <img src="docs/diagrams/slots-in.svg" alt="Where rosita fits: instead of one global CLAUDE.md or AGENTS.md carrying the same content into every project, rosita holds your reusable context once and gives each repo the right slice through a gitignored overlay, alongside the team's committed instruction file." width="900">
 </p>
 
-<p align="center"><sub><i>* how the overlay reaches each agent is detailed in <a href="#agents--one-overlay-n-deliveries">Agents — one overlay, N deliveries</a>.</i></sub></p>
+Use it when you want to:
 
-> ⚠️ Generated overlays are **agent guidance, not enforced policy.** They are
-> regular files an agent reads; nothing here is a security control. The only real
-> safety boundary is the environment-variable allowlist (see [Safety](#safety)).
+* stop maintaining one giant global instruction file
+* reuse guidance across Claude, Codex, Gemini, opencode, and Copilot
+* apply different context for coding, debugging, DevOps, or sysadmin work
+* keep personal/global context outside committed project files
+* sync agent context across laptops, servers, VMs, and containers
+* inspect exactly what context an agent will receive before launching it
 
 ---
 
 ## Quick start
 
-**1. Install** — prebuilt binary, no Rust toolchain needed (macOS + Linux):
+Install the prebuilt binary — no Rust toolchain needed:
 
 ```bash
 curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.sh | sh
 ```
 
-Or from source: `cargo install --git https://github.com/elleryfamilia/rosita`.
-
-Installed this way, `rosita update` self-updates to the latest release (and
-`rosita run` quietly notes when one is available). Source installs update with
-`cargo install --git … --force` instead.
-
-**2. Author your context** — reusable fragments and profiles, in a local web UI:
+Open the local UI and create your first fragments and profiles:
 
 ```bash
 rosita studio
 ```
 
-**3. Run your agent** in any project, with the matching context injected:
+See what Rosita detects in the current project:
+
+```bash
+rosita explain
+```
+
+Run your agent with the matching context injected:
 
 ```bash
 rosita run claude
 ```
 
-**4. Use it everywhere** — publish your config once, pull it on any other machine:
+More options — source builds, self-updating — in [Install](#install).
+
+---
+
+## What happens?
+
+Rosita detects the current context, selects the matching profile, renders the selected fragments, and wires the result into your agent through a local, gitignored overlay.
 
 ```bash
-rosita sync init                 # on this machine: git-back your config + push
-```
-```bash
-rosita sync clone https://github.com/you/rosita-config.git   # on a headless box
-```
-
-After that it's automatic — `rosita run` pulls the latest first. See
-[Sync across machines](#sync-across-machines) for details.
-
-## The model in 60 seconds
-
-rosita has **three** things you author, and one rule for putting them together.
-
-- **Fragments** — reusable atoms of guidance: *"Rust conventions"*,
-  *"be terse"*, *"be careful with infrastructure"*, or a live script like
-  *"here are my running containers"*. You keep a **library** of your own, and
-  there's a shipped read-only **palette** to duplicate starters from.
-- **Profiles** — a named bundle of fragments, tied to one or more **targets**
-  (the coarse thing rosita detects: `rust`, `node`, `nextjs`, `go`, `python`,
-  `java`, `ruby`, `php`, `swift`, `dotnet`, or `machine` when you're not in a
-  repo).
-- **The binding** — when more than one profile could apply, rosita asks **once**
-  which to use and remembers your answer for that project.
-
-**The rule — one profile per context.** rosita detects the context, finds the
-profiles whose `targets` match, and selects **exactly one** (or none). Profiles
-do **not** merge or stack; composition happens *inside* the chosen profile, over
-its fragment list. That's the whole trick: no priority math, no union of
-half-a-dozen matching rules — just *this repo looks like rust → use the rust
-profile → render its fragments.*
-
-```
-no profile's targets match  →  a no-targets "default" profile applies, else empty
-exactly one matches          →  use it, no prompt
-two or more match            →  you pick once; the choice is remembered (the binding)
-```
-
-A profile that declares **no `targets`** is the catch-all **default** — it
-applies wherever nothing more specific matches (keep two and you pick between
-them, like any other tie).
-
-Selection is fully deterministic and inspectable (`rosita explain` shows what was
-detected, which profiles matched, and which one is bound). **No LLM is involved
-in selection** — the agent only ever consumes the finished overlay.
-
-## A worked example
-
-```bash
-# 1. Author a profile once, globally (here via the visual editor; see `rosita studio`).
-#    Say: a "rust" profile, targets = [rust], composing rust-conventions + terse-comms.
-
-# 2. cd into any Rust repo and ask what rosita sees:
 $ rosita explain
+
 Project
   base   : ~/code/my-rust-app
   branch : main
 
 Detected targets: [rust]
-Profile selection → rust          # 1 match → auto-selected, no prompt
+
+Profile selection → rust
 
 Active fragments
   • rust-conventions
@@ -119,235 +92,95 @@ Active fragments
 Write plan
   claude:
     created  .rosita/generated/claude.md
-    updated  CLAUDE.local.md       # managed @import block → the overlay
-
-# 3. Render the overlay and wire it into the agent's file:
-$ rosita refresh --agent claude
-claude  ·  profile rust  ·  sha256:a1fb087e1a81…
-  created       .rosita/generated/claude.md
-  created       CLAUDE.local.md        (@import block → the overlay)
-  created       .gitignore             (ignores the generated/ overlay)
-
-# 4. Or do both and launch the agent in one step:
-$ rosita run claude            # render, then exec `claude` (args passed through)
+    updated  CLAUDE.local.md
 ```
 
-The repo itself gains no committed rosita content — only a gitignored overlay and
-(if you had to pick between profiles) a gitignored note of which one you chose.
+Then launch the agent:
 
-## Where everything lives
+```bash
+$ rosita run claude
+```
 
-You author fragments and profiles **once, globally**. A repo never stores them
-— it only remembers *which profile to use here*.
+Rosita renders the overlay, wires it into Claude, and starts `claude`.
+
+The repo itself gains no committed Rosita content. Generated overlays, local bindings, logs, and managed local files stay gitignored.
 
 <p align="center">
-  <img src="docs/diagrams/layout.svg" alt="Where rosita stores things: a read-only palette you duplicate from, your global library of fragments and profiles split into shared config.toml and private local.toml, and a repo that only remembers which profile to use." width="900">
+  <img src="docs/diagrams/journey.svg" alt="How you use rosita: run rosita studio to author fragments and reusable profiles; run rosita run to detect your stack, select the right profile, and inject the global context into the agent — wired per agent through each one's native gitignored hook." width="900">
 </p>
 
-- **Global** (`~/.config/rosita/`) holds your whole library — fragments *and*
-  profiles. It splits into a **public** `config.toml` (shareable, commit it to a
-  dotfiles repo to sync across machines) and a **private** `local.toml`
-  (gitignored — real hostnames, `[host_classes]`, secret-adjacent params).
-- **The palette** is shipped inside the binary, read-only. You *duplicate* a
-  starter from it into your library to own and edit it; it is never auto-composed.
-- **A repo** (`.rosita/`) carries only the **binding** (`local.toml`,
-  gitignored) and the generated overlay (gitignored). Fragments and profiles
-  declared in a repo are ignored — `rosita doctor` flags them and points you at
-  the global config.
+---
 
-## `rosita studio` — the visual way
+## The model in 60 seconds
 
-```bash
-rosita studio            # opens a local web UI at 127.0.0.1:7777; Ctrl-C to quit
-```
+Rosita has three things you author and one rule for putting them together.
 
-Studio is an **ephemeral, localhost-only** web UI for managing your library —
-run the command, it starts a server and opens your browser; close it and it's
-gone. It's a **lens over your TOML**, never a hidden store: every edit is shown
-as the exact file diff before you **Apply**, and it writes clean,
-comment-preserving TOML you could have hand-written.
+### Fragments
 
-- **Fragments** — a content-first editor for static guidance or scripts (with
-  syntax highlighting and on-demand "run this script" preview).
-- **Profiles** — a composer: name, targets, and a fragment picker, with a
-  **live overlay preview** that updates as you edit.
-- **Stage → diff → apply** — nothing touches disk until you review the per-file
-  diff (against the raw bytes on disk) and apply.
-- **First launch** — on a fresh config, studio greets you, shows what it
-  detected, and offers a **quick start**: a starter profile pre-filled from the
-  detected target plus a few palette fragments, all staged for you to tweak.
+Reusable units of guidance or context.
 
-Hand-edit a config file and studio reflects it; everything stays git-diffable and
-yours. Studio never executes a fragment during preview — editing is
-side-effect-free until you Apply.
+Examples:
 
-## Install
+* `rust-conventions`
+* `nextjs-preferences`
+* `terse-comms`
+* `infrastructure-safety`
+* `workspace-status`
+* `running-containers`
 
-**Prebuilt binary** (no Rust toolchain needed) — fetches the latest
-[GitHub Release](https://github.com/elleryfamilia/rosita/releases):
+Fragments can be static guidance or dynamic context from providers and shell commands.
 
-```bash
-curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.sh | sh
-```
+### Profiles
 
-Builds are published for macOS (Apple Silicon + Intel) and Linux (x86_64 +
-ARM64). The installer drops `rosita` on your `PATH`; from then on `rosita update`
-self-updates in place. Windows isn't built yet (rosita is unix-only today); use
-WSL there.
+Named bundles of fragments, tied to one or more targets. A profile is the unit of selection: when its targets match, its fragment list is what gets rendered. See the [worked example](#a-worked-example) below.
 
-**From source** — requires a stable Rust toolchain (1.85+) and the `git` CLI
-(used for repo detection; no libgit2 build dependency):
+### Targets
 
-```bash
-cargo install --git https://github.com/elleryfamilia/rosita
-```
+Targets are the coarse project or environment types Rosita detects.
 
-That builds and installs the `rosita` binary straight from the repo — no clone
-needed. For local development instead:
-
-```bash
-git clone https://github.com/elleryfamilia/rosita && cd rosita
-cargo install --path .       # or: cargo build --release  → ./target/release/rosita
-```
-
-## Sync across machines
-
-Because fragments and profiles are **global-only**, sharing them across
-machines is just syncing one file — `config.toml`. rosita git-backs your config
-dir and keeps it current automatically, so your laptop's library is there on every
-headless box (a VPS, Proxmox, a container).
-
-**Set it up once**, on the machine you author from:
-
-```bash
-rosita sync init        # or: rosita sync init git@github.com:you/rosita-config.git
-```
-
-This makes your config dir a git repo and scaffolds a `.gitignore` so `local.toml`
-(your per-machine hostnames / secret-adjacent params) **never syncs**. If you pass
-a URL it wires it as the remote and pushes; if you don't and `gh` is installed, it
-**offers to create the GitHub repo for you** — you pick the name (default
-`rosita-config`) and public vs. private — then pushes.
-
-**Onboard a headless box** — install, then pull your config:
-
-```bash
-rosita sync clone https://github.com/you/rosita-config.git
-```
-
-That's the whole setup: `rosita run claude` there now composes your laptop-authored
-profiles. A fresh per-machine `local.toml` is created for the box's own specifics.
-
-**Then it's automatic.** Editing in studio commits + pushes on Apply; `rosita run`
-pulls the latest first — throttled, timeout-bounded, and **never blocking** (offline
-just uses the last-synced config):
+Built-in targets include:
 
 ```text
-  ⟳ sync    pulled 2 changes · rosita-config  1.3s
-  ✓ render  rust → claude · sha256:a1fb087…
-  ▸ launch  claude
+rust
+node
+nextjs
+go
+python
+java
+ruby
+php
+swift
+dotnet
+machine
 ```
 
-`rosita sync` forces a pull + push by hand. Auto-pull/push default on but stay
-inert until you `sync init`; tune them under `[sync]` (see
-[configuration](docs/configuration.md#sync-implemented)).
+`machine` applies when you are not inside a repo, which is useful for sysadmin, DevOps, and machine-level work.
 
-> **Public or private repo?** `config.toml` is secret-free by design (the leak-lint
-> guarantees it), so the config repo can be **public** — then onboarding a box
-> needs no git auth at all. Keep it private if you prefer; either way your secrets
-> live only in the per-machine `local.toml`, which never syncs.
+### The rule
 
-## Already have a `CLAUDE.md` / `AGENTS.md`?
+Rosita selects one profile per context.
 
-Don't hand-translate it. rosita ships an **agent skill**,
-[`rosita-migrate`](skills/rosita-migrate/SKILL.md), that reads your existing
-global agent instructions and turns them into rosita fragments plus the few
-profiles you actually need — additively (your originals are left untouched).
-It follows the cross-agent Agent Skills format (`SKILL.md`), so the same
-install works in Claude Code, Codex CLI, Gemini CLI, and opencode.
+Profiles do not merge or stack. Composition happens inside the chosen profile, through its fragment list.
+
+```text
+no profile's targets match  →  a no-targets default profile applies, else empty
+exactly one profile matches →  use it automatically
+multiple profiles match     →  ask once, then remember the binding for this project
+```
+
+Selection is deterministic and inspectable:
 
 ```bash
-rosita skill install
-# then, in any agent session:  /rosita-migrate   (or "import my CLAUDE.md into rosita")
+rosita explain
 ```
 
-rosita also ships [`rosita-remember`](skills/rosita-remember/SKILL.md): when
-you tell your agent a durable, cross-project preference mid-session ("always
-X", "stop doing Y"), the skill saves it as a rosita fragment — or updates the
-fragment it contradicts — instead of leaving it stranded in one agent's local
-memory. Project- and session-specific notes stay in the agent's own memory.
+No LLM is involved in profile selection. The agent only receives the finished overlay.
 
-The skills are embedded in the binary — no repo checkout needed. They install
-to `~/.agents/skills/` (read natively by Gemini CLI and opencode) with symlinks
-into `~/.claude/skills/` and `~/.codex/skills/` for agents that scan their own
-dotdir — created only when that agent's directory already exists. The first
-interactive `rosita run` also offers them (once) while your config has no
-profiles yet; `rosita skill remove` uninstalls and stops the offer, and
-`rosita doctor` reports the install's health. If you edit the installed files,
-rosita stops touching them.
+---
 
-## Commands
+## A worked example
 
-| Command | What it does |
-| --- | --- |
-| `rosita studio [--port N] [--no-open]` | Launch the local web UI to view/edit fragments & profiles. |
-| `rosita sync [init [url] \| clone <url>]` | Sync your global config across machines (git-backed); bare `sync` pulls + pushes. See [Sync across machines](#sync-across-machines). |
-| `rosita detect [--json] [--probes]` | Detect and print the current context; `--probes` also runs environment providers (host/toolchain/ai-tools/tailnet/docker). |
-| `rosita explain [--agent <id>\|all] [--json]` | Show what was detected, which profiles matched their `targets`, the selected one, and the write plan. |
-| `rosita run <id> [args…] [--skip-render] [--override\|--no-override]` | Pull latest config, render for a launchable agent, then exec it (args passed through). |
-| `rosita refresh [--agent <id>\|all] [--override\|--no-override] [--force]` | Pull latest config, then (re-)render overlays — already-initialized ones by default, or the named agent (which also first-adopts it). No-op if context unchanged. |
-| `rosita clean [--agent <id>\|all]` | Remove rosita-generated overlays + managed blocks (never touches committed files). |
-| `rosita doctor` | Diagnose environment, config, agents, templates, overlay freshness, public-config leaks, and repo-declared fragments/profiles. |
-| `rosita fragments [list\|show <id>] [--json]` | List your fragment library (active ones marked), or show one in detail. |
-| `rosita profiles [--json]` | List your profiles with their `targets`, marking which match and which is selected. |
-| `rosita agents [--json]` | List configured agents and how each delivers the overlay. |
-| `rosita skill [install\|remove\|status] [id]` | Manage the embedded agent skills under `~/.agents/skills` (bare `skill` shows status). |
-| `rosita update [--check]` | Self-update to the latest release (installer-based installs); `--check` only reports availability. |
-
-`<id>` is an agent id — built-ins are `claude`, `codex`, `gemini`, `opencode`,
-`copilot`, `generic` (plus any you add via `[[agents]]`). `--agent` defaults to
-the configured default agent.
-
-**Global flags:** `--cwd <DIR>` (operate as if run from there), `--verbose`,
-`--dry-run` (write nothing; show what would change).
-
-## What gets detected
-
-`rosita detect` exposes: cwd, git root/branch/remotes (credential-sanitized)/
-worktree flag, repo name, languages (by extension), stack (Rust, Next.js, Node,
-Go, Python…), package manager (cargo, pnpm, yarn, npm, bun, uv, poetry, pip…),
-discovered build/test/lint/run commands, OS/arch/hostname/user, the parent
-process (caller), and an **allowlisted, redacted** subset of environment
-variables. The coarse **stack** is what profile `targets` match against.
-
-## Configuration
-
-Fragments and profiles are **global-only**. They live in:
-
-- `~/.config/rosita/config.toml` — **public / shareable** (honors
-  `$XDG_CONFIG_HOME`, and `$ROSITA_CONFIG_DIR` for tests/isolation).
-- `~/.config/rosita/local.toml` — **private / gitignored**: real hostnames,
-  `[host_classes]` globs, and `[fragment_params.<id>]` values. Layered *after*
-  `config.toml`, so it wins. `rosita doctor` flags machine-specific literals that
-  belong here.
-
-A repo's `.rosita/` directory holds only the per-project **binding**
-(`local.toml`, gitignored), the generated overlays (`generated/`, gitignored),
-the audit log (`logs/events.jsonl`), the probe cache (`cache/`), and any template
-overrides (`templates/`). Sharing your library across machines is just committing
-`config.toml` to a synced repo — the public/private split *is* the sync boundary.
-
-See [`examples/config.toml`](examples/config.toml) and
-[`examples/local.toml`](examples/local.toml) for annotated configs.
-
-### Fragments & profiles
-
-A **fragment** is a reusable unit of guidance. A **profile** ties a set of
-fragments to one or more detected **targets** and is the unit of selection.
-Within the selected profile, its fragments are composed: deduped by id,
-`requires`-resolved (dependencies first), each fragment's own `when` self-gate
-applied, and `params` merged (fragment default ← profile-supplied ← private
-`[fragment_params]`).
+Create a `rust` profile once, globally:
 
 ```toml
 [[fragments]]
@@ -360,142 +193,504 @@ guidance = "Be terse: lead with the result and what changed; skip preamble."
 
 [[profiles]]
 name = "rust"
-targets = ["rust"]                       # matches when the repo detects as rust
+targets = ["rust"]
 fragments = ["rust-conventions", "terse-comms"]
 ```
 
-- **Targets:** the coarse detected tags — `rust`, `node`, `nextjs`, `go`,
-  `python`, `java`, `ruby`, `php`, `swift`, `dotnet`, and `machine` (the no-repo
-  context). A profile is a candidate when **any** of its targets matches; rosita
-  then picks one (see [the model](#the-model-in-60-seconds)).
-- **Fragment `when` self-gate:** a fragment may carry `when` rules (fields
-  `stack`, `language`, `package_manager`, `path`, `branch`, `repo`, `host_class`,
-  `os`, `arch`; ops `equals`, `starts_with`, `contains`, `matches`) so it only
-  contributes in part of a profile's reach. Profiles themselves select on
-  `targets`, not `when`.
-- **`host_class`** is derived from `[host_classes]` hostname globs (define them
-  in `local.toml`), then referenced via `host_class equals "work"`.
+Move into any Rust repo:
 
-Inline `guidance = "…"` on a profile still works (back-compat) — it becomes a
-`<profile>:inline` fragment rendered after the explicit ones. Inspect with
-`rosita fragments` / `rosita profiles`.
+```bash
+cd ~/code/my-rust-app
+rosita explain
+```
 
-### Dynamic fragments & providers
+Rosita detects the target and selects the matching profile:
 
-A fragment may embed **live** environment output via a built-in `provider`
-(`host` / `toolchain` / `ai-tools` / `tailnet` / `docker`) or a shell `command`
-(`{{ provider.output }}` / `{{ provider.data }}` in scope, cache-backed). Output
-is redacted, kept out of the context hash, and lands only in the gitignored
-overlay. A `command`-backed fragment runs at render unless you set
-`allow_exec = false` (the per-fragment off-switch); built-in providers are
-always safe. Because fragments are global-only, a cloned repo can't introduce
-one — there's nothing untrusted to gate.
+```text
+Detected targets: [rust]
+Profile selection → rust
+
+Active fragments
+  • rust-conventions
+  • terse-comms
+```
+
+Render the overlay for Claude:
+
+```bash
+rosita refresh --agent claude
+```
+
+Output:
+
+```text
+claude  ·  profile rust  ·  sha256:a1fb087e1a81…
+  created  .rosita/generated/claude.md
+  created  CLAUDE.local.md
+  created  .gitignore
+```
+
+Or render and launch in one step:
+
+```bash
+rosita run claude
+```
+
+The repo itself gains no committed Rosita content — only a gitignored overlay and, if needed, a gitignored binding that remembers which profile to use here.
+
+---
+
+## Where everything lives
+
+You author fragments and profiles once, globally. A repo never stores them — it only remembers which profile to use.
+
+<p align="center">
+  <img src="docs/diagrams/layout.svg" alt="Where rosita stores things: a read-only palette you duplicate from, your global library of fragments and profiles split into shared config.toml and private local.toml, and a repo that only remembers which profile to use." width="900">
+</p>
+
+A read-only **palette** of starter fragments also ships inside the binary. You duplicate a starter into your library to own and edit it; palette entries are never auto-composed.
+
+### Global config
+
+Your reusable library lives in:
+
+```text
+~/.config/rosita/config.toml
+~/.config/rosita/local.toml
+```
+
+`config.toml` is public/shareable.
+
+`local.toml` is private and gitignored. Use it for hostnames, host classes, and machine-specific values.
+
+### Repo-local state
+
+A repo may contain:
+
+```text
+.rosita/generated/
+.rosita/local.toml
+.rosita/logs/
+.rosita/cache/
+```
+
+These are gitignored. They hold generated overlays, local profile bindings, logs, and caches.
+
+Repos do not store global fragments or profiles. If a repo declares them, `rosita doctor` flags it.
+
+---
+
+## `rosita studio`
+
+`rosita studio` opens a localhost-only web UI for managing your fragment and profile library.
+
+```bash
+rosita studio
+```
+
+Studio is a visual editor over your TOML config files. It is not a hidden database.
+
+Use it to:
+
+* create and edit fragments
+* compose profiles
+* assign profiles to targets
+* preview generated overlays
+* run dynamic fragment previews
+* review diffs before applying changes
+
+Nothing touches disk until you review and apply the staged diff.
+
+On first launch, Studio detects your current context and can scaffold a starter profile from the detected target.
+
+---
+
+## Sync across machines
+
+Because fragments and profiles are global-only, sharing them across machines is just syncing your global config.
+
+On your main machine:
+
+```bash
+rosita sync init
+```
+
+Or wire it to an existing repo:
+
+```bash
+rosita sync init git@github.com:you/rosita-config.git
+```
+
+On another machine:
+
+```bash
+rosita sync clone https://github.com/you/rosita-config.git
+```
+
+After that, `rosita run` pulls the latest config before rendering.
+
+```text
+⟳ sync    pulled 2 changes · rosita-config  1.3s
+✓ render  rust → claude · sha256:a1fb087…
+▸ launch  claude
+```
+
+`local.toml` stays private and does not sync.
+
+---
+
+## Already have a `CLAUDE.md` or `AGENTS.md`?
+
+Do not hand-translate it.
+
+Rosita ships an agent skill called [`rosita-migrate`](skills/rosita-migrate/SKILL.md). It reads your existing global agent instructions and turns them into Rosita fragments plus the profiles you need. Your originals are left untouched.
+
+The skills follow the cross-agent Agent Skills format (`SKILL.md`), so the same install works in Claude Code, Codex CLI, Gemini CLI, and opencode.
+
+Install the skills:
+
+```bash
+rosita skill install
+```
+
+Then in an agent session:
+
+```text
+/rosita-migrate
+```
+
+Or ask:
+
+```text
+Import my CLAUDE.md into Rosita.
+```
+
+Rosita also ships [`rosita-remember`](skills/rosita-remember/SKILL.md). When you tell your agent a durable, cross-project preference mid-session, the skill can save it as a Rosita fragment instead of leaving it stranded in one agent's local memory.
+
+Example:
+
+```text
+Always lead with the answer before explaining.
+```
+
+That kind of durable preference can become reusable Rosita context.
+
+Project-specific or session-specific notes should stay in the agent's own memory.
+
+---
+
+## Supported agents
+
+Rosita produces one overlay and delivers it differently depending on the agent.
+
+| Agent      | Rosita writes                                                            | Default wiring                                                 |
+| ---------- | ------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `claude`   | `.rosita/generated/claude.md`                                            | Adds a managed import block to `CLAUDE.local.md`               |
+| `codex`    | `.rosita/generated/agents.md`                                            | Merges into gitignored `AGENTS.override.md`                    |
+| `gemini`   | `.rosita/generated/gemini.md`                                            | Wires through gitignored `GEMINI.local.md` and Gemini settings |
+| `opencode` | `.rosita/generated/opencode.md`                                          | Registers the overlay in global opencode instructions          |
+| `copilot`  | `.rosita/generated/copilot/.github/instructions/rosita.instructions.md`  | Launches Copilot CLI with the custom instructions directory    |
+| `generic`  | `.rosita/generated/generic.md`                                           | Emit-only; you wire it yourself                                 |
+
+Rosita never edits committed shared instruction files like:
+
+```text
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
+```
+
+It uses local and gitignored paths instead.
+
+---
+
+## What gets detected?
+
+`rosita detect` exposes:
+
+* current working directory
+* git root, branch, remotes, and worktree state
+* repo name
+* languages by extension
+* stack, such as Rust, Next.js, Node, Go, Python
+* package manager, such as cargo, pnpm, yarn, npm, bun, uv, poetry, pip
+* discovered build, test, lint, and run commands
+* OS, architecture, hostname, and user
+* parent process
+* allowlisted and redacted environment variables
+
+Use:
+
+```bash
+rosita detect
+```
+
+For provider details:
+
+```bash
+rosita detect --probes
+```
+
+The coarse detected stack is what profile `targets` match against.
+
+---
+
+## Dynamic fragments
+
+Fragments can include live environment context through built-in providers or shell commands.
+
+Example:
 
 ```toml
 [[fragments]]
 id = "containers"
-provider = "docker"          # or: command = "docker ps --format '{{.Names}}'"
+provider = "docker"
 cache = "30s"
-guidance = "Running containers (as of {{ generated_at }}):\n{{ provider.output }}"
+guidance = "Running containers as of {{ generated_at }}:\n{{ provider.output }}"
 ```
 
-### Templates
-
-Markdown templates rendered with [minijinja](https://github.com/mitsuhiko/minijinja).
-The model exposes `context`, `profile`, `profile_guidance` (the composed
-fragments, joined into the overlay body), and `agent`. Every generated file
-starts with a header carrying the generation timestamp, selected profile,
-**context hash**, source config files, and a "do not edit" warning.
-
-## Agents — one overlay, N deliveries
-
-rosita produces **one** overlay (the rendered context for the selected profile).
-Everything agent-specific is *delivery*, described declaratively — not coded.
-Each agent is a descriptor along four axes: **where** it reads, **how** content
-gets there (reference vs embed), **whose** file it is (rosita-owned vs a managed
-block in a user file), and **freshness**. Built-ins:
-
-| Agent | rosita writes | Default wiring |
-| --- | --- | --- |
-| `claude` | `.rosita/generated/claude.md` | **auto-wires** a managed `@import` block into `CLAUDE.local.md` (a *local* file) |
-| `codex` | `.rosita/generated/agents.md` | **auto-wires** by merging into a gitignored `AGENTS.override.md` (which Codex reads *before* `AGENTS.md`); never touches `AGENTS.md`. `--no-override` for emit-only |
-| `gemini` | `.rosita/generated/gemini.md` | **auto-wires** a gitignored `GEMINI.local.md` (`@import`) and registers it in `~/.gemini/settings.json` `context.fileName`; never touches `GEMINI.md` |
-| `opencode` | `.rosita/generated/opencode.md` | **auto-wires**: registers the overlay path in the global `~/.config/opencode/opencode.json` `instructions`; never touches a committed `opencode.json` |
-| `copilot` | `.rosita/generated/copilot/.github/instructions/rosita.instructions.md` | **auto-wires** at launch: `rosita run copilot` points the Copilot CLI at the gitignored overlay via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`; never touches `.github/copilot-instructions.md` |
-| `generic` | `.rosita/generated/generic.md` | emit-only; you wire it in |
-
-**The key rule:** rosita auto-wires only through *local/gitignored* paths and
-**never edits a committed, shared instruction file** (`AGENTS.md`, `GEMINI.md`,
-`copilot-instructions.md`). Each launchable agent gets the cleanest hook it
-supports; only `generic` stays **emit-only** (rosita writes a gitignored overlay
-and prints how to wire it). Add or override agents in config without code changes:
+A command-backed fragment can also run at render time:
 
 ```toml
-[[agents]]
-id = "gemini"
-generated_filename = "gemini.md"
-launch = "gemini"
-template = "overlay"                      # body template (repo/global override → embedded)
-# importer = "GEMINI.local.md"            # auto-wire via @import (LOCAL files only)
-# override_target = "AGENTS.override.md"  # auto-merge target (default-on; --no-override to skip)
-wire_hint = "…how to include it…"
+[[fragments]]
+id = "workspace-status"
+command = "git status --short"
+cache = "10s"
+guidance = "Current git status:\n{{ provider.output }}"
 ```
 
-## Staleness & freshness
+Dynamic output is redacted, cached, and written only to the gitignored overlay.
 
-Overlays are point-in-time snapshots, so every one carries a **self-healing
-banner**: host, timestamp, profile, context hash, and the exact commands to
-verify/regenerate/remove it (`rosita doctor` / `refresh` / `clean`). `rosita run`
-re-renders first **and** launches the agent with `ROSITA_RUN=1` +
-`ROSITA_RENDERED_AT` in the environment (and, for Claude, an
-`--append-system-prompt` note), so an agent launched via rosita knows the context
-is current — and one launched directly knows to check. `doctor` flags drift by
-comparing hashes.
+Because fragments are global-only, a cloned repo cannot introduce one.
 
-## Safety
+---
 
-- **Env vars are allowlist-only.** Only names you list are surfaced; names
-  matching the denylist (`secret|token|key|password|…`) are dropped even if
-  allowlisted; values are run through redaction as a backstop.
-- **Redaction** strips embedded URL credentials and common token formats
-  (GitHub/AWS/Slack/Google/OpenAI/JWT/PEM keys).
-- **Atomic writes** — temp file in the same dir → `fsync` → rename.
-- **Marker blocks** are surgically updated; surrounding content is preserved.
-- **Derived artifacts are gitignored, never committed** — `.rosita/generated/`,
-  `.rosita/logs/`, repo `.rosita/local.toml` (the binding), `AGENTS.override.md`,
-  and (when rosita creates it) `CLAUDE.local.md`. Hand-authored
-  `AGENTS.md`/`GEMINI.md`/`copilot-instructions.md` stay committed and untouched.
-- **Idempotent** — overlays embed a context hash; re-rendering an unchanged
-  context is a no-op (`--force` overrides).
-- **`--dry-run`** previews every change without touching disk (not even the log).
+## Safety model
 
-This is hygiene, not a security boundary. Treat generated files as guidance.
+Generated overlays are agent guidance, not enforced policy.
+
+Rosita helps keep generated context clean and local, but the files are still regular files an agent reads.
+
+Safety and hygiene features include:
+
+* allowlisted environment variables only
+* denylist filtering for secret-like names
+* redaction for common token formats and embedded credentials
+* atomic writes
+* gitignored generated artifacts
+* managed marker blocks
+* context hashes for idempotent rendering
+* `--dry-run` previews
+* `rosita doctor` diagnostics
+
+Treat generated files as guidance, not a security boundary.
+
+---
+
+## Commands
+
+| Command                                                                     | What it does                                                                |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `rosita studio [--port N] [--no-open]`                                      | Launch the local web UI for fragments and profiles                          |
+| `rosita sync [init [url] \| clone <url>]`                                   | Sync global config across machines                                          |
+| `rosita detect [--json] [--probes]`                                         | Print detected context and optional provider data                           |
+| `rosita explain [--agent <id>\|all] [--json]`                               | Show detected context, matching profiles, selected profile, and write plan  |
+| `rosita run <id> [args…] [--skip-render] [--override\|--no-override]`       | Pull latest config, render context, then launch the agent                   |
+| `rosita refresh [--agent <id>\|all] [--override\|--no-override] [--force]`  | Pull latest config, then render or re-render overlays without launching     |
+| `rosita clean [--agent <id>\|all]`                                          | Remove generated overlays and managed blocks                                |
+| `rosita doctor`                                                             | Diagnose config, agents, templates, overlays, and safety issues             |
+| `rosita fragments [list\|show <id>] [--json]`                               | Inspect your fragment library                                               |
+| `rosita profiles [--json]`                                                  | List profiles, targets, matches, and selected profile                       |
+| `rosita agents [--json]`                                                    | List configured agents and delivery behavior                                |
+| `rosita skill [install\|remove\|status] [id]`                               | Manage embedded agent skills (installed under `~/.agents/skills`)           |
+| `rosita update [--check]`                                                   | Self-update installer-based installs                                        |
+
+Built-in agent IDs:
+
+```text
+claude
+codex
+gemini
+opencode
+copilot
+generic
+```
+
+Global flags:
+
+```text
+--cwd <path>
+--verbose
+--dry-run
+```
+
+---
+
+## Configuration
+
+Fragments and profiles are global-only.
+
+They live in:
+
+```text
+~/.config/rosita/config.toml
+~/.config/rosita/local.toml
+```
+
+Basic example:
+
+```toml
+[[fragments]]
+id = "nextjs-preferences"
+guidance = """
+Prefer server components by default.
+Use TypeScript.
+Avoid unnecessary client state.
+Run the existing lint/test commands before claiming completion.
+"""
+
+[[fragments]]
+id = "review-style"
+guidance = """
+Be concise.
+Lead with the result.
+Call out risky assumptions.
+Prefer diffs over full-file rewrites.
+"""
+
+[[profiles]]
+name = "nextjs"
+targets = ["nextjs"]
+fragments = ["nextjs-preferences", "review-style"]
+```
+
+Within the selected profile, fragments are composed, deduped by ID, dependency-resolved, self-gated with `when` rules, and rendered into the agent overlay.
+
+Profiles select on `targets`.
+
+Fragments can self-gate with `when` rules for narrower conditions, such as stack, language, package manager, path, branch, repo, host class, OS, or architecture.
+
+---
+
+## Templates
+
+Rosita renders Markdown overlays using templates.
+
+The template model includes:
+
+* `context`
+* `profile`
+* `profile_guidance`
+* `agent`
+
+Generated files include a header with:
+
+* generation timestamp
+* selected profile
+* context hash
+* source config files
+* "do not edit" warning
+
+You can use the defaults or override templates when needed.
+
+---
+
+## Staleness and freshness
+
+Overlays are point-in-time snapshots.
+
+Each overlay includes a self-healing banner with the host, timestamp, selected profile, context hash, and commands to verify, regenerate, or remove it.
+
+```bash
+rosita doctor
+rosita refresh
+rosita clean
+```
+
+`rosita run` re-renders before launching the agent.
+
+---
 
 ## Audit
 
-Every render appends a JSON line to `.rosita/logs/events.jsonl`: selected agent &
-profile, detected stacks, files written, the rule-match reasons, the context
-hash, and whether it was a dry-run.
+Every render appends a JSON line to:
+
+```text
+.rosita/logs/events.jsonl
+```
+
+The audit log records:
+
+* selected agent
+* selected profile
+* detected stacks
+* files written
+* match reasons
+* context hash
+* dry-run status
+
+---
+
+## Install
+
+Prebuilt binary — no Rust toolchain needed:
+
+```bash
+curl -LsSf https://github.com/elleryfamilia/rosita/releases/latest/download/rosita-installer.sh | sh
+```
+
+Builds are published for macOS and Linux.
+
+Windows is not built yet. Use WSL.
+
+Installer-based installs can update in place:
+
+```bash
+rosita update
+```
+
+From source:
+
+```bash
+cargo install --git https://github.com/elleryfamilia/rosita
+```
+
+For local development:
+
+```bash
+git clone https://github.com/elleryfamilia/rosita
+cd rosita
+cargo install --path .
+```
+
+---
 
 ## Testing
 
 ```bash
-cargo test       # 263 unit + end-to-end + studio tests
+cargo test
 cargo clippy --all-targets
 cargo fmt --check
 ```
+
+---
 
 ## Documentation
 
 Full docs live in [`docs/`](docs/):
 
-- [Concepts](docs/concepts.md) · [Configuration](docs/configuration.md) ·
-  [Security & trust](docs/security.md) — for consumers.
-- [Architecture](docs/architecture.md) · [Extending](docs/extending.md) ·
-  [Testing](docs/testing.md) — for devs.
+* [Concepts](docs/concepts.md)
+* [Configuration](docs/configuration.md)
+* [Security & trust](docs/security.md)
+* [Architecture](docs/architecture.md)
+* [Extending](docs/extending.md)
+* [Testing](docs/testing.md)
+
+---
 
 ## License
 
-Licensed under the [MIT License](LICENSE). Unless you explicitly state otherwise,
-any contribution you submit for inclusion shall be licensed as above, without
-additional terms.
+Licensed under the [MIT License](LICENSE).
+
+Unless you explicitly state otherwise, any contribution you submit for inclusion shall be licensed as above, without additional terms.
