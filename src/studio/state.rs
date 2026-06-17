@@ -80,6 +80,9 @@ pub struct PreviewCap {
     pub title: String,
     /// Glyph derived from the fragment's content type (markdown/script/provider).
     pub glyph: &'static str,
+    /// Content type (`static`/`command`/`provider`) — drives the glyph's `k-*`
+    /// color class so scripts/providers read distinctly, as in the Fragments tab.
+    pub kind: &'static str,
     /// Rendered guidance markdown (or the skip note).
     pub markdown: String,
     /// Resolved a dynamic provider/command.
@@ -306,13 +309,12 @@ fn render_profile_in_config(
             let cap = &rc.fragment;
             let owned = cfg.fragments.iter().find(|x| x.id == cap.id);
             let editable = owned.is_some();
-            let glyph = type_glyph(
-                kind_of(cap.command.is_some(), cap.provider.is_some()),
-                cap.script_lang.as_deref(),
-            );
+            let kind = kind_of(cap.command.is_some(), cap.provider.is_some());
+            let glyph = type_glyph(kind, cap.script_lang.as_deref());
             if let Some(c) = rendered.get(cap.id.as_str()) {
                 Some(PreviewCap {
                     glyph,
+                    kind,
                     editable,
                     id: c.id.clone(),
                     title: c.title.clone(),
@@ -324,6 +326,7 @@ fn render_profile_in_config(
             } else if cap.is_dynamic() {
                 Some(PreviewCap {
                     glyph,
+                    kind,
                     editable,
                     id: cap.id.clone(),
                     title: cap.title().to_string(),
@@ -502,7 +505,7 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             icon: target_icons.get(id).cloned().flatten(),
         }
     };
-    let profiles = cfg
+    let mut profiles: Vec<ProfileView> = cfg
         .profiles
         .iter()
         .map(|p| ProfileView {
@@ -517,6 +520,10 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
                 .collect(),
         })
         .collect();
+    // Pin the machine-scope profile(s) to the top of the rail; everything else
+    // keeps config order (stable sort). The bare-machine profile is the one users
+    // reach for off-repo, so it's handy to have it first.
+    profiles.sort_by_key(|p| !p.targets.iter().any(|t| t.id == "machine"));
 
     Ok(LibraryView {
         yours,

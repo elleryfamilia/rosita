@@ -8,6 +8,21 @@ All notable changes to rosita are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
+## Unreleased
+
+### Changed
+
+- **The machine-scope profile is pinned to the top of the Studio profile list**,
+  so the off-repo profile is always first regardless of config order.
+- **Scripts read consistently in the profile view.** A profile's fragment list
+  now tints script and live-provider fragments with the same amber tile — and
+  amber run buttons — as the Fragments tab, so executable fragments stand out.
+
+### Fixed
+
+- **Documented the `bun` built-in target**, which was detected and selectable but
+  missing from the README's target list.
+
 ## 0.7.0 — 2026-06-16
 
 ### Added

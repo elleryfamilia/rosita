@@ -2439,6 +2439,23 @@ mod tests {
     }
 
     #[test]
+    fn machine_profile_is_pinned_to_top_of_rail() {
+        // `machine` is declared *second*, but the rail pins the machine-scope
+        // profile to the top regardless of config order.
+        let cfg = "[[fragments]]\nid = \"rc\"\nguidance = \"x\"\n\n\
+                   [[profiles]]\nname = \"web\"\ntargets = [\"nextjs\"]\nfragments = [\"rc\"]\n\n\
+                   [[profiles]]\nname = \"machine\"\ntargets = [\"machine\"]\nfragments = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let r = route(&st, &req("GET", "/tab/profiles", "", &[HOST, COOKIE], ""));
+        let body = body_of(r);
+        let machine_at = body.find(r#"data-profile="machine""#);
+        let web_at = body.find(r#"data-profile="web""#);
+        assert!(machine_at.is_some(), "machine profile in rail");
+        assert!(machine_at < web_at, "machine renders before web");
+    }
+
+    #[test]
     fn profiles_tab_does_not_auto_select() {
         // A rust profile that *would* be the bound candidate in this repo.
         let cfg = "[[fragments]]\nid = \"rc\"\nguidance = \"x\"\n\

@@ -136,6 +136,7 @@ Built-in targets include:
 ```text
 rust
 node
+bun
 nextjs
 go
 python
