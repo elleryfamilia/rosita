@@ -2447,13 +2447,12 @@ mod tests {
                    [[profiles]]\nname = \"machine\"\ntargets = [\"machine\"]\nfragments = [\"rc\"]\n";
         let d = rust_repo();
         let st = state_for(d.path(), Some(cfg));
-        let body = body_of(route(&st, &req("GET", "/tab/profiles", "", &[HOST, COOKIE], "")));
-        let machine_at = body.find(r#"data-profile="machine""#).expect("machine in rail");
-        let web_at = body.find(r#"data-profile="web""#).expect("web in rail");
-        assert!(
-            machine_at < web_at,
-            "machine profile must render before web in the rail"
-        );
+        let r = route(&st, &req("GET", "/tab/profiles", "", &[HOST, COOKIE], ""));
+        let body = body_of(r);
+        let machine_at = body.find(r#"data-profile="machine""#);
+        let web_at = body.find(r#"data-profile="web""#);
+        assert!(machine_at.is_some(), "machine profile in rail");
+        assert!(machine_at < web_at, "machine renders before web");
     }
 
     #[test]
