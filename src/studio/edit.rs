@@ -545,6 +545,9 @@ fn target_table(t: &TargetDef) -> Result<Table> {
     if let Some(d) = &t.description {
         tbl["description"] = value(d.as_str());
     }
+    if let Some(ic) = &t.icon {
+        tbl["icon"] = value(ic.as_str());
+    }
     let rule = toml::Value::try_from(&t.rule).context("serializing target rule")?;
     tbl["rule"] = Item::Value(to_edit_value(&rule));
     if t.disabled {

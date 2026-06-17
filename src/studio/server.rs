@@ -750,7 +750,9 @@ fn handle_profile_new(state: &Arc<Mutex<StudioState>>) -> Resp {
     };
     let draft = state::draft_profile_from_form(&[]);
     let preview = profile_preview_or_empty(&snap, &draft, "");
-    Resp::html(views::profile_editor(&draft, true, &lib, &preview, None))
+    Resp::html(views::profile_editor(
+        &draft, true, None, &lib, &preview, None,
+    ))
 }
 
 // --- starter packs -----------------------------------------------------------
@@ -949,7 +951,14 @@ fn handle_profile_edit(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
     match cfg.profiles.iter().find(|p| p.name == name) {
         Some(p) => {
             let preview = profile_preview_or_empty(&snap, p, "");
-            Resp::html(views::profile_editor(p, false, &lib, &preview, None))
+            Resp::html(views::profile_editor(
+                p,
+                false,
+                Some(p.name.as_str()),
+                &lib,
+                &preview,
+                None,
+            ))
         }
         None => Resp::html(views::error_fragment(&format!("unknown profile '{name}'"))),
     }
@@ -994,6 +1003,16 @@ fn handle_profile_disable(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
     }
 }
 
+/// The original profile name carried by the editor form (the upsert key for a
+/// rename); `None` for a new profile or an empty/whitespace field.
+fn original_profile_name(pairs: &[(String, String)]) -> Option<&str> {
+    pairs
+        .iter()
+        .find(|(k, _)| k == "original_name")
+        .map(|(_, v)| v.trim())
+        .filter(|s| !s.is_empty())
+}
+
 fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let pairs = state::parse_pairs(&req.body);
     let profile = match state::profile_from_form(&pairs) {
@@ -1004,10 +1023,33 @@ fn handle_profile_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         Err(e) => return profile_editor_with_error(state, &pairs, &e.to_string()),
     };
     let name = profile.name.clone();
+    // The upsert key: the original name when editing (so a rename finds and
+    // replaces the right profile in place), else the new name (a fresh create).
+    let original = original_profile_name(&pairs);
+    // Renaming onto a *different* existing profile would silently clobber it —
+    // refuse, keeping the user in the editor with their draft intact.
+    if let Some(orig) = original {
+        if orig != name {
+            let taken = {
+                let snap = state.lock().unwrap().snapshot();
+                state::staged_config(&snap)
+                    .map(|cfg| cfg.profiles.iter().any(|p| p.name == name))
+                    .unwrap_or(false)
+            };
+            if taken {
+                return profile_editor_with_error(
+                    state,
+                    &pairs,
+                    &format!("a profile named “{name}” already exists — choose another name"),
+                );
+            }
+        }
+    }
+    let key = original.unwrap_or(name.as_str()).to_string();
     // Profiles are global-only — always authored into the global config.
     let res = state.lock().unwrap().session.stage(StagedOp::EditProfile {
         layer: Layer::Global,
-        name: name.clone(),
+        name: key,
         profile: Box::new(profile),
     });
     match res {
@@ -1040,6 +1082,7 @@ fn profile_editor_with_error(
     Resp::html(views::profile_editor(
         &draft,
         is_new,
+        original_profile_name(pairs),
         &lib,
         &preview,
         Some(error),
@@ -1094,7 +1137,14 @@ fn handle_profile_draft(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
     let preview = profile_preview_or_empty(&snap, &draft, "");
     Resp::html(format!(
         "{}{}",
-        views::profile_editor(&draft, is_new, &lib, &preview, None),
+        views::profile_editor(
+            &draft,
+            is_new,
+            original_profile_name(&pairs),
+            &lib,
+            &preview,
+            None
+        ),
         views::staged_indicator_loader(),
     ))
 }
@@ -1722,7 +1772,7 @@ mod tests {
     fn create_custom_target_stages_and_applies() {
         let d = rust_repo();
         let st = state_for(d.path(), None);
-        // Author a "deno" target via the editor form.
+        // Author a "deno" target via the editor form, with a chosen glyph icon.
         let r = body_of(route(
             &st,
             &req(
@@ -1730,12 +1780,12 @@ mod tests {
                 "/targets",
                 "",
                 &[HOST, COOKIE, ORIGIN],
-                "name=Deno&kind=file_exists&paths=deno.json&visibility=public",
+                "name=Deno&kind=file_exists&paths=deno.json&icon=database&visibility=public",
             ),
         ));
         assert!(r.contains("staged target"), "save flash: got {r}");
         assert!(r.contains("deno"), "the new target shows in the tab");
-        // Apply it; the [[targets]] entry lands in the global config.
+        // Apply it; the [[targets]] entry (incl. the icon) lands in the config.
         body_of(route(
             &st,
             &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
@@ -1746,6 +1796,10 @@ mod tests {
             "target written: {on_disk}"
         );
         assert!(on_disk.contains("deno.json"), "rule written");
+        assert!(
+            on_disk.contains("icon = \"database\""),
+            "icon round-trips: {on_disk}"
+        );
     }
 
     #[test]
@@ -1794,6 +1848,31 @@ mod tests {
             r.contains("built-in target"),
             "must refuse a built-in id: {r}"
         );
+    }
+
+    #[test]
+    fn profile_editor_lists_all_builtin_and_custom_targets() {
+        // A config with a custom `deno` target. The profile editor's target
+        // checklist is derived from the catalog, so it must offer every built-in
+        // (regression: `bun` was missing from a hardcoded list) plus the custom
+        // target plus the `machine` scope.
+        let cfg =
+            "[[targets]]\nid = \"deno\"\nrule = { kind = \"file_exists\", path = \"deno.json\" }\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let body = body_of(route(
+            &st,
+            &req("GET", "/profiles/new", "", &[HOST, COOKIE], ""),
+        ));
+        for id in [
+            "rust", "node", "bun", "nextjs", "go", "python", "java", "ruby", "php", "swift",
+            "dotnet", "machine", "deno",
+        ] {
+            assert!(
+                body.contains(&format!("value=\"{id}\"")),
+                "editor target list must offer `{id}`: {body}"
+            );
+        }
     }
 
     #[test]
@@ -2256,6 +2335,80 @@ mod tests {
         assert!(err.contains("name=\"name\"")); // with the editable name field
 
         // Nothing was staged by the failed save.
+        let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
+        assert!(diff.contains("No staged changes"));
+    }
+
+    #[test]
+    fn profile_edit_form_offers_an_editable_name() {
+        // Opening an existing profile's editor presents the name editable (not
+        // readonly) and carries the original name as the rename key.
+        let cfg = "[[fragments]]\nid = \"rc\"\nguidance = \"x\"\n\n\
+                   [[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let body = body_of(route(
+            &st,
+            &req("GET", "/profiles/rust/edit", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(!body.contains("name=\"name\" value=\"rust\" readonly"));
+        assert!(body.contains(r#"name="original_name" value="rust""#));
+    }
+
+    #[test]
+    fn profile_rename_via_editor_stages_and_applies() {
+        // Editing a profile with a changed name renames it in place: the old
+        // entry is replaced, not duplicated.
+        let cfg = "[[fragments]]\nid = \"rc\"\nguidance = \"x\"\n\n\
+                   [[profiles]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let r = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/profiles",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "original_name=rust&name=rust-web&targets=rust&fragments=rc",
+            ),
+        ));
+        assert!(r.contains("staged profile"));
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(global_config_path(d.path())).unwrap();
+        assert!(
+            on_disk.contains("name = \"rust-web\""),
+            "renamed: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains("name = \"rust\""),
+            "old name gone (no duplicate): {on_disk}"
+        );
+    }
+
+    #[test]
+    fn profile_rename_onto_existing_name_is_rejected() {
+        // Renaming `a` onto the existing `b` would clobber it — refused inline.
+        let cfg = "[[fragments]]\nid = \"rc\"\nguidance = \"x\"\n\n\
+                   [[profiles]]\nname = \"a\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\n\n\
+                   [[profiles]]\nname = \"b\"\ntargets = [\"go\"]\nfragments = [\"rc\"]\n";
+        let d = rust_repo();
+        let st = state_for(d.path(), Some(cfg));
+        let err = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/profiles",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "original_name=a&name=b&targets=rust&fragments=rc",
+            ),
+        ));
+        assert!(err.contains("already exists"), "rename collision: {err}");
+        // Nothing staged.
         let diff = body_of(route(&st, &req("GET", "/diff", "", &[HOST, COOKIE], "")));
         assert!(diff.contains("No staged changes"));
     }

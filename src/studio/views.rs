@@ -24,13 +24,6 @@ use crate::studio::state::{
 };
 use crate::target::{TargetDef, TargetRule};
 
-/// Language/platform targets a profile can declare. Mirrors the built-in stacks
-/// detected in [`crate::context::languages`] (plus `machine` for the no-repo
-/// context); keep in sync with [`crate::target::builtin_targets`].
-const TARGETS: &[&str] = &[
-    "rust", "node", "nextjs", "go", "python", "java", "ruby", "php", "swift", "dotnet", "machine",
-];
-
 /// Script interpreters offered in the fragment dialog.
 const SCRIPT_LANGS: &[(&str, &str)] = &[("bash", "Bash"), ("python", "Python"), ("sh", "POSIX sh")];
 
@@ -133,11 +126,164 @@ fn icon(name: &str) -> Markup {
         "lock" => {
             r#"<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>"#
         }
+        // Built-in target *brand* logos are filled silhouettes, not line art —
+        // see `brand_logo` / `brand_svg`, which use a different SVG treatment.
         _ => "",
     };
     PreEscaped(format!(
         r#"<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>"#
     ))
+}
+
+// --- target icons ------------------------------------------------------------
+
+/// The built-in language/framework brand logos as filled single-path
+/// silhouettes (source: simple-icons, CC0). Java's own mark is Oracle-
+/// trademarked, so Java uses the OpenJDK logo. These render *filled*
+/// (`brand_svg`), unlike the stroked general-purpose `icon()` glyphs, so they
+/// look like the real marks. `name` is a closed-set key and the returned path is
+/// a static literal — never interpolated from user input.
+fn brand_logo(name: &str) -> Option<&'static str> {
+    let d = match name {
+        "rust" => {
+            r#"M23.8346 11.7033l-1.0073-.6236a13.7268 13.7268 0 00-.0283-.2936l.8656-.8069a.3483.3483 0 00-.1154-.578l-1.1066-.414a8.4958 8.4958 0 00-.087-.2856l.6904-.9587a.3462.3462 0 00-.2257-.5446l-1.1663-.1894a9.3574 9.3574 0 00-.1407-.2622l.49-1.0761a.3437.3437 0 00-.0274-.3361.3486.3486 0 00-.3006-.154l-1.1845.0416a6.7444 6.7444 0 00-.1873-.2268l.2723-1.153a.3472.3472 0 00-.417-.4172l-1.1532.2724a14.0183 14.0183 0 00-.2278-.1873l.0415-1.1845a.3442.3442 0 00-.49-.328l-1.076.491c-.0872-.0476-.1742-.0952-.2623-.1407l-.1903-1.1673A.3483.3483 0 0016.256.955l-.9597.6905a8.4867 8.4867 0 00-.2855-.086l-.414-1.1066a.3483.3483 0 00-.5781-.1154l-.8069.8666a9.2936 9.2936 0 00-.2936-.0284L12.2946.1683a.3462.3462 0 00-.5892 0l-.6236 1.0073a13.7383 13.7383 0 00-.2936.0284L9.9803.3374a.3462.3462 0 00-.578.1154l-.4141 1.1065c-.0962.0274-.1903.0567-.2855.086L7.744.955a.3483.3483 0 00-.5447.2258L7.009 2.348a9.3574 9.3574 0 00-.2622.1407l-1.0762-.491a.3462.3462 0 00-.49.328l.0416 1.1845a7.9826 7.9826 0 00-.2278.1873L3.8413 3.425a.3472.3472 0 00-.4171.4171l.2713 1.1531c-.0628.075-.1255.1509-.1863.2268l-1.1845-.0415a.3462.3462 0 00-.328.49l.491 1.0761a9.167 9.167 0 00-.1407.2622l-1.1662.1894a.3483.3483 0 00-.2258.5446l.6904.9587a13.303 13.303 0 00-.087.2855l-1.1065.414a.3483.3483 0 00-.1155.5781l.8656.807a9.2936 9.2936 0 00-.0283.2935l-1.0073.6236a.3442.3442 0 000 .5892l1.0073.6236c.008.0982.0182.1964.0283.2936l-.8656.8079a.3462.3462 0 00.1155.578l1.1065.4141c.0273.0962.0567.1914.087.2855l-.6904.9587a.3452.3452 0 00.2268.5447l1.1662.1893c.0456.088.0922.1751.1408.2622l-.491 1.0762a.3462.3462 0 00.328.49l1.1834-.0415c.0618.0769.1235.1528.1873.2277l-.2713 1.1541a.3462.3462 0 00.4171.4161l1.153-.2713c.075.0638.151.1255.2279.1863l-.0415 1.1845a.3442.3442 0 00.49.327l1.0761-.49c.087.0486.1741.0951.2622.1407l.1903 1.1662a.3483.3483 0 00.5447.2268l.9587-.6904a9.299 9.299 0 00.2855.087l.414 1.1066a.3452.3452 0 00.5781.1154l.8079-.8656c.0972.0111.1954.0203.2936.0294l.6236 1.0073a.3472.3472 0 00.5892 0l.6236-1.0073c.0982-.0091.1964-.0183.2936-.0294l.8069.8656a.3483.3483 0 00.578-.1154l.4141-1.1066a8.4626 8.4626 0 00.2855-.087l.9587.6904a.3452.3452 0 00.5447-.2268l.1903-1.1662c.088-.0456.1751-.0931.2622-.1407l1.0762.49a.3472.3472 0 00.49-.327l-.0415-1.1845a6.7267 6.7267 0 00.2267-.1863l1.1531.2713a.3472.3472 0 00.4171-.416l-.2713-1.1542c.0628-.0749.1255-.1508.1863-.2278l1.1845.0415a.3442.3442 0 00.328-.49l-.49-1.076c.0475-.0872.0951-.1742.1407-.2623l1.1662-.1893a.3483.3483 0 00.2258-.5447l-.6904-.9587.087-.2855 1.1066-.414a.3462.3462 0 00.1154-.5781l-.8656-.8079c.0101-.0972.0202-.1954.0283-.2936l1.0073-.6236a.3442.3442 0 000-.5892zm-6.7413 8.3551a.7138.7138 0 01.2986-1.396.714.714 0 11-.2997 1.396zm-.3422-2.3142a.649.649 0 00-.7715.5l-.3573 1.6685c-1.1035.501-2.3285.7795-3.6193.7795a8.7368 8.7368 0 01-3.6951-.814l-.3574-1.6684a.648.648 0 00-.7714-.499l-1.473.3158a8.7216 8.7216 0 01-.7613-.898h7.1676c.081 0 .1356-.0141.1356-.088v-2.536c0-.074-.0536-.0881-.1356-.0881h-2.0966v-1.6077h2.2677c.2065 0 1.1065.0587 1.394 1.2088.0901.3533.2875 1.5044.4232 1.8729.1346.413.6833 1.2381 1.2685 1.2381h3.5716a.7492.7492 0 00.1296-.0131 8.7874 8.7874 0 01-.8119.9526zM6.8369 20.024a.714.714 0 11-.2997-1.396.714.714 0 01.2997 1.396zM4.1177 8.9972a.7137.7137 0 11-1.304.5791.7137.7137 0 011.304-.579zm-.8352 1.9813l1.5347-.6824a.65.65 0 00.33-.8585l-.3158-.7147h1.2432v5.6025H3.5669a8.7753 8.7753 0 01-.2834-3.348zm6.7343-.5437V8.7836h2.9601c.153 0 1.0792.1772 1.0792.8697 0 .575-.7107.7815-1.2948.7815zm10.7574 1.4862c0 .2187-.008.4363-.0243.651h-.9c-.09 0-.1265.0586-.1265.1477v.413c0 .973-.5487 1.1846-1.0296 1.2382-.4576.0517-.9648-.1913-1.0275-.4717-.2704-1.5186-.7198-1.8436-1.4305-2.4034.8817-.5599 1.799-1.386 1.799-2.4915 0-1.1936-.819-1.9458-1.3769-2.3153-.7825-.5163-1.6491-.6195-1.883-.6195H5.4682a8.7651 8.7651 0 014.907-2.7699l1.0974 1.151a.648.648 0 00.9182.0213l1.227-1.1743a8.7753 8.7753 0 016.0044 4.2762l-.8403 1.8982a.652.652 0 00.33.8585l1.6178.7188c.0283.2875.0425.577.0425.8717zm-9.3006-9.5993a.7128.7128 0 11.984 1.0316.7137.7137 0 01-.984-1.0316zm8.3389 6.71a.7107.7107 0 01.9395-.3625.7137.7137 0 11-.9405.3635z"#
+        }
+        "node" => {
+            r#"M11.998,24c-0.321,0-0.641-0.084-0.922-0.247l-2.936-1.737c-0.438-0.245-0.224-0.332-0.08-0.383 c0.585-0.203,0.703-0.25,1.328-0.604c0.065-0.037,0.151-0.023,0.218,0.017l2.256,1.339c0.082,0.045,0.197,0.045,0.272,0l8.795-5.076 c0.082-0.047,0.134-0.141,0.134-0.238V6.921c0-0.099-0.053-0.192-0.137-0.242l-8.791-5.072c-0.081-0.047-0.189-0.047-0.271,0 L3.075,6.68C2.99,6.729,2.936,6.825,2.936,6.921v10.15c0,0.097,0.054,0.189,0.139,0.235l2.409,1.392 c1.307,0.654,2.108-0.116,2.108-0.89V7.787c0-0.142,0.114-0.253,0.256-0.253h1.115c0.139,0,0.255,0.112,0.255,0.253v10.021 c0,1.745-0.95,2.745-2.604,2.745c-0.508,0-0.909,0-2.026-0.551L2.28,18.675c-0.57-0.329-0.922-0.945-0.922-1.604V6.921 c0-0.659,0.353-1.275,0.922-1.603l8.795-5.082c0.557-0.315,1.296-0.315,1.848,0l8.794,5.082c0.57,0.329,0.924,0.944,0.924,1.603 v10.15c0,0.659-0.354,1.273-0.924,1.604l-8.794,5.078C12.643,23.916,12.324,24,11.998,24z M19.099,13.993 c0-1.9-1.284-2.406-3.987-2.763c-2.731-0.361-3.009-0.548-3.009-1.187c0-0.528,0.235-1.233,2.258-1.233 c1.807,0,2.473,0.389,2.747,1.607c0.024,0.115,0.129,0.199,0.247,0.199h1.141c0.071,0,0.138-0.031,0.186-0.081 c0.048-0.054,0.074-0.123,0.067-0.196c-0.177-2.098-1.571-3.076-4.388-3.076c-2.508,0-4.004,1.058-4.004,2.833 c0,1.925,1.488,2.457,3.895,2.695c2.88,0.282,3.103,0.703,3.103,1.269c0,0.983-0.789,1.402-2.642,1.402 c-2.327,0-2.839-0.584-3.011-1.742c-0.02-0.124-0.126-0.215-0.253-0.215h-1.137c-0.141,0-0.254,0.112-0.254,0.253 c0,1.482,0.806,3.248,4.655,3.248C17.501,17.007,19.099,15.91,19.099,13.993z"#
+        }
+        "nextjs" => {
+            r#"M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z"#
+        }
+        "go" => {
+            r#"M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.059-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.77.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 01.292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 01-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2m3.868 6.461c-1.064-.024-2.034-.328-2.852-1.029a3.665 3.665 0 01-1.262-2.255c-.21-1.32.152-2.489.947-3.529.853-1.122 1.881-1.706 3.272-1.95 1.192-.21 2.314-.095 3.33.595.923.63 1.496 1.484 1.648 2.605.198 1.578-.257 2.863-1.344 3.962-.771.783-1.718 1.273-2.805 1.495-.315.06-.63.07-.934.106zm2.78-4.72c-.011-.153-.011-.27-.034-.387-.21-1.157-1.274-1.81-2.384-1.554-1.087.245-1.788.935-2.045 2.033-.21.912.234 1.835 1.075 2.21.643.28 1.285.244 1.905-.07.923-.48 1.425-1.228 1.484-2.233z"#
+        }
+        "python" => {
+            r#"M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z"#
+        }
+        "ruby" => {
+            r#"M20.156.083c3.033.525 3.893 2.598 3.829 4.77L24 4.822 22.635 22.71 4.89 23.926h.016C3.433 23.864.15 23.729 0 19.139l1.645-3 2.819 6.586.503 1.172 2.805-9.144-.03.007.016-.03 9.255 2.956-1.396-5.431-.99-3.9 8.82-.569-.615-.51L16.5 2.114 20.159.073l-.003.01zM0 19.089zM5.13 5.073c3.561-3.533 8.157-5.621 9.922-3.84 1.762 1.777-.105 6.105-3.673 9.636-3.563 3.532-8.103 5.734-9.864 3.957-1.766-1.777.045-6.217 3.612-9.75l.003-.003z"#
+        }
+        "php" => {
+            r#"M7.01 10.207h-.944l-.515 2.648h.838c.556 0 .97-.105 1.242-.314.272-.21.455-.559.55-1.049.092-.47.05-.802-.124-.995-.175-.193-.523-.29-1.047-.29zM12 5.688C5.373 5.688 0 8.514 0 12s5.373 6.313 12 6.313S24 15.486 24 12c0-3.486-5.373-6.312-12-6.312zm-3.26 7.451c-.261.25-.575.438-.917.551-.336.108-.765.164-1.285.164H5.357l-.327 1.681H3.652l1.23-6.326h2.65c.797 0 1.378.209 1.744.628.366.418.476 1.002.33 1.752a2.836 2.836 0 0 1-.305.847c-.143.255-.33.49-.561.703zm4.024.715l.543-2.799c.063-.318.039-.536-.068-.651-.107-.116-.336-.174-.687-.174H11.46l-.704 3.625H9.388l1.23-6.327h1.367l-.327 1.682h1.218c.767 0 1.295.134 1.586.401s.378.7.263 1.299l-.572 2.944h-1.389zm7.597-2.265a2.782 2.782 0 0 1-.305.847c-.143.255-.33.49-.561.703a2.44 2.44 0 0 1-.917.551c-.336.108-.765.164-1.286.164h-1.18l-.327 1.682h-1.378l1.23-6.326h2.649c.797 0 1.378.209 1.744.628.366.417.477 1.001.331 1.751zM17.766 10.207h-.943l-.516 2.648h.838c.557 0 .971-.105 1.242-.314.272-.21.455-.559.551-1.049.092-.47.049-.802-.125-.995s-.524-.29-1.047-.29z"#
+        }
+        "swift" => {
+            r#"M7.508 0c-.287 0-.573 0-.86.002-.241.002-.483.003-.724.01-.132.003-.263.009-.395.015A9.154 9.154 0 0 0 4.348.15 5.492 5.492 0 0 0 2.85.645 5.04 5.04 0 0 0 .645 2.848c-.245.48-.4.972-.495 1.5-.093.52-.122 1.05-.136 1.576a35.2 35.2 0 0 0-.012.724C0 6.935 0 7.221 0 7.508v8.984c0 .287 0 .575.002.862.002.24.005.481.012.722.014.526.043 1.057.136 1.576.095.528.25 1.02.495 1.5a5.03 5.03 0 0 0 2.205 2.203c.48.244.97.4 1.498.495.52.093 1.05.124 1.576.138.241.007.483.009.724.01.287.002.573.002.86.002h8.984c.287 0 .573 0 .86-.002.241-.001.483-.003.724-.01a10.523 10.523 0 0 0 1.578-.138 5.322 5.322 0 0 0 1.498-.495 5.035 5.035 0 0 0 2.203-2.203c.245-.48.4-.972.495-1.5.093-.52.124-1.05.138-1.576.007-.241.009-.481.01-.722.002-.287.002-.575.002-.862V7.508c0-.287 0-.573-.002-.86a33.662 33.662 0 0 0-.01-.724 10.5 10.5 0 0 0-.138-1.576 5.328 5.328 0 0 0-.495-1.5A5.039 5.039 0 0 0 21.152.645 5.32 5.32 0 0 0 19.654.15a10.493 10.493 0 0 0-1.578-.138 34.98 34.98 0 0 0-.722-.01C17.067 0 16.779 0 16.492 0H7.508zm6.035 3.41c4.114 2.47 6.545 7.162 5.549 11.131-.024.093-.05.181-.076.272l.002.001c2.062 2.538 1.5 5.258 1.236 4.745-1.072-2.086-3.066-1.568-4.088-1.043a6.803 6.803 0 0 1-.281.158l-.02.012-.002.002c-2.115 1.123-4.957 1.205-7.812-.022a12.568 12.568 0 0 1-5.64-4.838c.649.48 1.35.902 2.097 1.252 3.019 1.414 6.051 1.311 8.197-.002C9.651 12.73 7.101 9.67 5.146 7.191a10.628 10.628 0 0 1-1.005-1.384c2.34 2.142 6.038 4.83 7.365 5.576C8.69 8.408 6.208 4.743 6.324 4.86c4.436 4.47 8.528 6.996 8.528 6.996.154.085.27.154.36.213.085-.215.16-.437.224-.668.708-2.588-.09-5.548-1.893-7.992z"#
+        }
+        "dotnet" => {
+            r#"M24 8.77h-2.468v7.565h-1.425V8.77h-2.462V7.53H24zm-6.852 7.565h-4.821V7.53h4.63v1.24h-3.205v2.494h2.953v1.234h-2.953v2.604h3.396zm-6.708 0H8.882L4.78 9.863a2.896 2.896 0 0 1-.258-.51h-.036c.032.189.048.592.048 1.21v5.772H3.157V7.53h1.659l3.965 6.32c.167.261.275.442.323.54h.024c-.04-.233-.06-.629-.06-1.185V7.529h1.372zm-8.703-.693a.868.829 0 0 1-.869.829.868.829 0 0 1-.868-.83.868.829 0 0 1 .868-.828.868.829 0 0 1 .869.829Z"#
+        }
+        "bun" => {
+            r#"M12 22.596c6.628 0 12-4.338 12-9.688 0-3.318-2.057-6.248-5.219-7.986-1.286-.715-2.297-1.357-3.139-1.89C14.058 2.025 13.08 1.404 12 1.404c-1.097 0-2.334.785-3.966 1.821a49.92 49.92 0 0 1-2.816 1.697C2.057 6.66 0 9.59 0 12.908c0 5.35 5.372 9.687 12 9.687v.001ZM10.599 4.715c.334-.759.503-1.58.498-2.409 0-.145.202-.187.23-.029.658 2.783-.902 4.162-2.057 4.624-.124.048-.199-.121-.103-.209a5.763 5.763 0 0 0 1.432-1.977Zm2.058-.102a5.82 5.82 0 0 0-.782-2.306v-.016c-.069-.123.086-.263.185-.172 1.962 2.111 1.307 4.067.556 5.051-.082.103-.23-.003-.189-.126a5.85 5.85 0 0 0 .23-2.431Zm1.776-.561a5.727 5.727 0 0 0-1.612-1.806v-.014c-.112-.085-.024-.274.114-.218 2.595 1.087 2.774 3.18 2.459 4.407a.116.116 0 0 1-.049.071.11.11 0 0 1-.153-.026.122.122 0 0 1-.022-.083 5.891 5.891 0 0 0-.737-2.331Zm-5.087.561c-.617.546-1.282.76-2.063 1-.117 0-.195-.078-.156-.181 1.752-.909 2.376-1.649 2.999-2.778 0 0 .155-.118.188.085 0 .304-.349 1.329-.968 1.874Zm4.945 11.237a2.957 2.957 0 0 1-.937 1.553c-.346.346-.8.565-1.286.62a2.178 2.178 0 0 1-1.327-.62 2.955 2.955 0 0 1-.925-1.553.244.244 0 0 1 .064-.198.234.234 0 0 1 .193-.069h3.965a.226.226 0 0 1 .19.07c.05.053.073.125.063.197Zm-5.458-2.176a1.862 1.862 0 0 1-2.384-.245 1.98 1.98 0 0 1-.233-2.447c.207-.319.503-.566.848-.713a1.84 1.84 0 0 1 1.092-.11c.366.075.703.261.967.531a1.98 1.98 0 0 1 .408 2.114 1.931 1.931 0 0 1-.698.869v.001Zm8.495.005a1.86 1.86 0 0 1-2.381-.253 1.964 1.964 0 0 1-.547-1.366c0-.384.11-.76.32-1.079.207-.319.503-.567.849-.713a1.844 1.844 0 0 1 1.093-.108c.367.076.704.262.968.534a1.98 1.98 0 0 1 .4 2.117 1.932 1.932 0 0 1-.702.868Z"#
+        }
+        "java" => {
+            r#"M11.915 0 11.7.215C9.515 2.4 7.47 6.39 6.046 10.483c-1.064 1.024-3.633 2.81-3.711 3.551-.093.87 1.746 2.611 1.55 3.235-.198.625-1.304 1.408-1.014 1.939.1.188.823.011 1.277-.491a13.389 13.389 0 0 0-.017 2.14c.076.906.27 1.668.643 2.232.372.563.956.911 1.667.911.397 0 .727-.114 1.024-.264.298-.149.571-.33.91-.5.68-.34 1.634-.666 3.53-.604 1.903.062 2.872.39 3.559.704.687.314 1.15.664 1.925.664.767 0 1.395-.336 1.807-.9.412-.563.631-1.33.72-2.24.06-.623.055-1.32 0-2.066.454.45 1.117.604 1.213.424.29-.53-.816-1.314-1.013-1.937-.198-.624 1.642-2.366 1.549-3.236-.08-.748-2.707-2.568-3.748-3.586C16.428 6.374 14.308 2.394 12.13.215zm.175 6.038a2.95 2.95 0 0 1 2.943 2.942 2.95 2.95 0 0 1-2.943 2.943A2.95 2.95 0 0 1 9.148 8.98a2.95 2.95 0 0 1 2.942-2.942zM8.685 7.983a3.515 3.515 0 0 0-.145.997c0 1.951 1.6 3.55 3.55 3.55 1.95 0 3.55-1.598 3.55-3.55 0-.329-.046-.648-.132-.951.334.095.64.208.915.336a42.699 42.699 0 0 1 2.042 5.829c.678 2.545 1.01 4.92.846 6.607-.082.844-.29 1.51-.606 1.94-.315.431-.713.651-1.315.651-.593 0-.932-.27-1.673-.61-.741-.338-1.825-.694-3.792-.758-1.974-.064-3.073.293-3.821.669-.375.188-.659.373-.911.5s-.466.2-.752.2c-.53 0-.876-.209-1.16-.64-.285-.43-.474-1.101-.545-1.948-.141-1.693.176-4.069.823-6.614a43.155 43.155 0 0 1 1.934-5.783c.348-.167.749-.31 1.192-.425zm-3.382 4.362a.216.216 0 0 1 .13.031c-.166.56-.323 1.116-.463 1.665a33.849 33.849 0 0 0-.547 2.555 3.9 3.9 0 0 0-.2-.39c-.58-1.012-.914-1.642-1.16-2.08.315-.24 1.679-1.755 2.24-1.781zm13.394.01c.562.027 1.926 1.543 2.24 1.783-.246.438-.58 1.068-1.16 2.08a4.428 4.428 0 0 0-.163.309 32.354 32.354 0 0 0-.562-2.49 40.579 40.579 0 0 0-.482-1.652.216.216 0 0 1 .127-.03z"#
+        } // OpenJDK (Java's logo is Oracle-trademarked; OpenJDK is the CC0 mark)
+        _ => return None,
+    };
+    Some(d)
+}
+
+/// Brand-logo target icons offered in the picker (and the built-in defaults), in
+/// display order. Keep in sync with `brand_logo` and `target::builtin_icon`.
+const BRAND_ICONS: &[&str] = &[
+    "rust", "node", "bun", "nextjs", "go", "python", "java", "ruby", "php", "swift", "dotnet",
+];
+
+/// General-purpose line glyphs (from `icon()`) a custom target may pick when no
+/// brand logo fits. A name in neither this set nor `brand_logo` renders as a
+/// lettermark badge.
+const GENERIC_GLYPHS: &[&str] = &[
+    "box",
+    "package",
+    "layers",
+    "terminal",
+    "code",
+    "git-branch",
+    "database",
+    "server",
+    "cloud",
+    "globe",
+    "cpu",
+    "gear",
+    "wrench",
+    "flask",
+    "rocket",
+    "book",
+    "file",
+    "folder",
+    "bolt",
+    "monitor",
+    "lock",
+    "target",
+];
+
+/// Whether `name` is a general-purpose line glyph a target chip can render.
+/// Returns the matching `&'static str` so callers get a static name for `icon()`.
+fn target_glyph(name: &str) -> Option<&'static str> {
+    GENERIC_GLYPHS.iter().copied().find(|&g| g == name)
+}
+
+/// A target's resolved chip mark: a filled brand logo, a line glyph, or a short
+/// uppercase lettermark badge (the fallback for a custom target with no fitting
+/// icon).
+enum TargetIcon {
+    Logo(&'static str),
+    Glyph(&'static str),
+    Mark(String),
+}
+
+/// Resolve a target's icon for rendering. `token` is the stored icon name (a
+/// built-in's brand, a custom target's chosen icon, or `None`); `id` is the
+/// target id used to derive the lettermark fallback. A token naming a brand logo
+/// renders the filled logo; one naming a general glyph renders that line glyph; a
+/// non-empty unknown token marks from its own text (so `icon = "k8s"` shows
+/// `K8`); an absent/empty token marks from the id.
+fn resolve_target_icon(token: Option<&str>, id: &str) -> TargetIcon {
+    match token.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(name) => {
+            if let Some(p) = brand_logo(name) {
+                TargetIcon::Logo(p)
+            } else if let Some(g) = target_glyph(name) {
+                TargetIcon::Glyph(g)
+            } else {
+                TargetIcon::Mark(crate::target::lettermark(name))
+            }
+        }
+        None => TargetIcon::Mark(crate::target::lettermark(id)),
+    }
+}
+
+/// Render a filled brand-logo SVG. `path` comes only from `brand_logo` (a closed
+/// set of static literals), never from user input, so PreEscaping it is safe.
+fn brand_svg(path: &str) -> Markup {
+    PreEscaped(format!(
+        r#"<svg class="icon brand" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="{path}"/></svg>"#
+    ))
+}
+
+/// Render a resolved target icon: a filled brand logo, a line glyph, or a
+/// lettermark badge `span`.
+fn target_icon_markup(ti: &TargetIcon) -> Markup {
+    match ti {
+        TargetIcon::Logo(path) => brand_svg(path),
+        TargetIcon::Glyph(name) => icon(name),
+        TargetIcon::Mark(letters) => html! { span class="lettermark" { (letters) } },
+    }
+}
+
+/// A single target chip: the resolved icon + the id label. `token` is the
+/// target's stored icon name (built-in brand or custom pick), or `None` to derive
+/// a lettermark from the id.
+fn target_chip(id: &str, token: Option<&str>) -> Markup {
+    let ti = resolve_target_icon(token, id);
+    html! { span class="target-chip" { (target_icon_markup(&ti)) (id) } }
+}
+
+/// A target's icon with no label — for the profile card's top-right cluster,
+/// where the id is dropped. The id is kept as a `title` for hover/discovery.
+fn target_icon_only(id: &str, token: Option<&str>) -> Markup {
+    let ti = resolve_target_icon(token, id);
+    html! { span class="rail-icon" title=(id) { (target_icon_markup(&ti)) } }
 }
 
 /// The rosita brandmark: a small red rose (multi-color, so it ignores the
@@ -394,7 +540,7 @@ fn studio_welcome(o: &Onboarding, packs: &[PackView]) -> Markup {
                 span class="muted small" { "rosita detected" }
                 span class="welcome-chips" {
                     @match &o.stack {
-                        Some(s) => span class="target-chip" { (s) },
+                        Some(s) => (target_chip(s, crate::target::builtin_icon(s))),
                         None => span class="target-chip muted" { "no specific stack" },
                     }
                     span class="target-chip" { (scope_label) }
@@ -478,10 +624,22 @@ pub fn skill_card(ids: &[&str], state: &SkillCardState) -> String {
     .into_string()
 }
 
-/// The first-launch welcome as a standalone `#main` fragment — used by the "?"
-/// tour button so it's reachable any time, not just on a fresh config.
+/// The welcome as a standalone `#main` fragment — the "?" tour button, reachable
+/// any time. Unlike the first-launch welcome (which lives inside the Profiles
+/// tab), this takes over `#main` while the nav still highlights the prior tab, so
+/// it's wrapped in a dimmed overlay with a "Quick tour" bar + Close to read
+/// clearly as a separate screen rather than that tab's content.
 pub fn welcome_fragment(o: &Onboarding, packs: &[PackView]) -> String {
-    studio_welcome(o, packs).into_string()
+    html! {
+        div class="welcome-overlay" {
+            div class="welcome-tourbar" {
+                span class="welcome-tourtag" { (icon("help")) "Quick tour" }
+                button class="btn btn-ghost btn-sm" hx-get="/tab/profiles" hx-target="#main" { (icon("x")) "Close" }
+            }
+            (studio_welcome(o, packs))
+        }
+    }
+    .into_string()
 }
 
 /// One row in the profile rail: name + status + targets + fragment dots.
@@ -502,11 +660,10 @@ fn profile_rail_item(p: &ProfileView, active: bool) -> Markup {
             span class="rail-top" {
                 span class="rail-name" { (name) }
                 @if p.disabled { span class="tag off-tag" { "off" } }
-            }
-            @if p.targets.is_empty() {
-                span class="rail-targets" { span class="target-chip muted" { "no targets" } }
-            } @else {
-                span class="rail-targets" { @for t in &p.targets { span class="target-chip" { (t) } } }
+                // Target icons (no labels) cluster at the card's top-right.
+                @if !p.targets.is_empty() {
+                    span class="rail-icons" { @for t in &p.targets { (target_icon_only(&t.id, t.icon.as_deref())) } }
+                }
             }
             span class="rail-foot" {
                 @if p.atoms.is_empty() {
@@ -782,9 +939,16 @@ pub fn target_result(view: &TargetsView, flash: &str) -> String {
 /// One row in the Targets list: id, what it is, and the detection rule. Custom
 /// (editable) targets carry an edit affordance; built-ins are read-only.
 fn target_row(t: &TargetView) -> Markup {
+    // The target's own icon (built-in glyph or custom pick), falling back to a
+    // lettermark; a no-icon script target defaults to the terminal glyph so its
+    // executable nature still reads at a glance.
+    let token = t
+        .icon
+        .as_deref()
+        .or_else(|| t.is_script.then_some("terminal"));
     html! {
         div class="target-row" {
-            span class="target-glyph" { (icon(if t.is_script { "terminal" } else { "target" })) }
+            span class="target-glyph" { (target_icon_markup(&resolve_target_icon(token, &t.id))) }
             div class="target-main" {
                 span class="target-top" {
                     span class="target-id" { (t.id) }
@@ -868,6 +1032,37 @@ fn target_form_fields(rule: &TargetRule) -> Option<TargetForm> {
     }
 }
 
+/// The custom-target icon control: a grid of glyph tiles plus a leading
+/// "lettermark" tile (the default) that shows the badge derived from the id. The
+/// selected tile posts `icon=<glyph>` (or empty for the lettermark). `current` is
+/// the target's stored icon; `id` seeds the lettermark preview.
+fn target_icon_picker(current: Option<&str>, id: &str) -> Markup {
+    let cur = current.map(str::trim).filter(|s| !s.is_empty());
+    // The auto tile previews the derived letters when editing a named target; a
+    // brand-new target (no name yet) shows a neutral "Aa" placeholder.
+    let mark = if id.is_empty() {
+        "Aa".to_string()
+    } else {
+        crate::target::lettermark(id)
+    };
+    html! {
+        div class="field icon-pick-field" {
+            span class="field-label" { "icon" span class="field-hint" { "shown on profiles — pick a glyph, or use a lettermark from the name" } }
+            div class="icon-picker" {
+                input type="radio" name="icon" id="ic-auto" value="" checked[cur.is_none()];
+                label class="icon-opt" for="ic-auto" title="Lettermark (from the name)" {
+                    span class="lettermark" { (mark) }
+                }
+                @for &g in BRAND_ICONS.iter().chain(GENERIC_GLYPHS) {
+                    @let gid = format!("ic-{g}");
+                    input type="radio" name="icon" id=(gid) value=(g) checked[cur == Some(g)];
+                    label class="icon-opt" for=(gid) title=(g) { (target_icon_markup(&resolve_target_icon(Some(g), g))) }
+                }
+            }
+        }
+    }
+}
+
 /// The custom-target editor modal (create or edit). Built-in targets are never
 /// passed here (they're read-only). A target whose rule the simple form can't
 /// represent gets a "hand-edit as TOML" notice instead.
@@ -912,6 +1107,7 @@ pub fn target_dialog(target: Option<&TargetDef>, layer: Layer) -> String {
                     label class="field grow" { span class="field-label" { "description" span class="field-hint" { "optional" } }
                         input type="text" name="description" value=(desc) placeholder="a Deno project";
                     }
+                    (target_icon_picker(target.and_then(|t| t.icon.as_deref()), id))
                     div class="seg" {
                         input type="radio" name="kind" id="tkind-fe" value="file_exists" checked[f.kind == "file_exists"];
                         label class="seg-opt" for="tkind-fe" { "File exists" }
@@ -1080,7 +1276,9 @@ fn fragment_card(c: &FragmentView) -> Markup {
     let e = enc(id);
     html! {
         div class="fragment-card" hx-get=(format!("/fragments/{e}/edit")) hx-target="#modal" role="button" tabindex="0" {
-            span class="fragment-glyph" { (icon(fragment_icon_name(c))) }
+            // `k-{kind}` (static/command/provider) colors the glyph tile so
+            // executable fragments (scripts + live providers) read distinctly.
+            span class=(format!("fragment-glyph k-{}", c.kind)) { (icon(fragment_icon_name(c))) }
             div class="fragment-main" {
                 span class="fragment-title" { (c.title) }
                 @if let Some(s) = &c.summary { span class="fragment-summary" { (s) } }
@@ -1108,9 +1306,9 @@ fn legend() -> Markup {
             div class="legend-body" {
                 div class="legend-group" {
                     span class="legend-head" { "Type" }
-                    span class="legend-row" { span class="fragment-glyph" { (icon("file")) } "markdown" }
-                    span class="legend-row" { span class="fragment-glyph" { (icon("terminal")) } "script" }
-                    span class="legend-row" { span class="fragment-glyph" { (icon("bolt")) } "live provider" }
+                    span class="legend-row" { span class="fragment-glyph k-static" { (icon("file")) } "markdown" }
+                    span class="legend-row" { span class="fragment-glyph k-command" { (icon("terminal")) } "script — runs at render" }
+                    span class="legend-row" { span class="fragment-glyph k-provider" { (icon("bolt")) } "live provider" }
                     span class="legend-row" { span class="tag" { (icon("lock")) "private" } "local.toml" }
                 }
                 div class="legend-group" {
@@ -1260,7 +1458,7 @@ pub fn onboarding_review(summary: &crate::studio::state::StagedSummary) -> Strin
                         "profile " strong { (p.name) }
                         @if !p.targets.is_empty() {
                             span class="welcome-chips" {
-                                @for t in &p.targets { span class="target-chip" { (t) } }
+                                @for t in &p.targets { @let id = t.as_str(); (target_chip(id, crate::target::builtin_icon(id))) }
                             }
                         }
                     }
@@ -1300,7 +1498,7 @@ pub fn onboarding_done(summary: &crate::studio::state::StagedSummary, agent: &st
                 div class="welcome-detect" {
                     span class="muted small" { "active for" }
                     span class="welcome-chips" {
-                        @for t in &targets { span class="target-chip" { (t) } }
+                        @for t in &targets { @let id = t.as_str(); (target_chip(id, crate::target::builtin_icon(id))) }
                     }
                 }
             }
@@ -1547,6 +1745,7 @@ fn lives_in(layer: Layer) -> Markup {
 pub fn profile_editor(
     draft: &ProfileConfig,
     is_new: bool,
+    original_name: Option<&str>,
     lib: &LibraryView,
     preview: &PreviewOutcome,
     error: Option<&str>,
@@ -1554,6 +1753,17 @@ pub fn profile_editor(
     let name = draft.name.as_str();
     let selected: Vec<&str> = draft.fragments.iter().map(|r| r.id()).collect();
     let chosen = |id: &str| selected.contains(&id);
+    // Target ids the catalog offers (built-ins + custom + machine); plus any id
+    // the draft already references that the catalog doesn't know (a stale/typo'd
+    // target) so editing never silently drops it.
+    let known: std::collections::HashSet<&str> =
+        lib.targets.iter().map(|t| t.id.as_str()).collect();
+    let extra_targets: Vec<&str> = draft
+        .targets
+        .iter()
+        .map(String::as_str)
+        .filter(|t| !known.contains(t))
+        .collect();
     html! {
         div class="profile-editor" {
             form class="editor-form" hx-post="/profiles/preview" hx-trigger="change delay:200ms" hx-target="#editor-preview" {
@@ -1566,17 +1776,27 @@ pub fn profile_editor(
                     div class="banner error" { span class="banner-icon" { (icon("alert")) } div class="banner-body" { (err) } }
                 }
                 label class="field" { span class="field-label" { "name" span class="field-hint" { "required" } }
-                    @if is_new {
-                        input type="text" name="name" value=(name) placeholder="rust — web" required;
-                    } @else {
-                        input type="text" name="name" value=(name) readonly;
-                    }
+                    input type="text" name="name" value=(name) placeholder="rust — web" required;
+                    // When editing, carry the original name as the rename key so
+                    // the save can find-and-replace the right profile.
+                    @if let Some(orig) = original_name { input type="hidden" name="original_name" value=(orig); }
                 }
                 fieldset class="targets-picker" {
                     legend { "Targets" span class="field-hint" { "applies when the repo looks like one of these" } }
                     div class="checks" {
-                        @for &t in TARGETS {
-                            label class="check" { input type="checkbox" name="targets" value=(t) checked[draft.targets.iter().any(|x| x == t)]; span { (t) } }
+                        @for t in &lib.targets {
+                            label class="check" {
+                                input type="checkbox" name="targets" value=(t.id.as_str()) checked[draft.targets.iter().any(|x| x == &t.id)];
+                                span class="check-glyph" { (target_icon_markup(&resolve_target_icon(t.icon.as_deref(), &t.id))) }
+                                span { (t.id.as_str()) }
+                            }
+                        }
+                        @for &t in &extra_targets {
+                            label class="check" {
+                                input type="checkbox" name="targets" value=(t) checked;
+                                span class="check-glyph" { (target_icon_markup(&resolve_target_icon(None, t))) }
+                                span { (t) }
+                            }
                         }
                     }
                 }
@@ -1894,5 +2114,97 @@ mod tests {
                 "Engineering Standards"
             ]
         );
+    }
+
+    // --- target icons --------------------------------------------------------
+
+    #[test]
+    fn resolve_target_icon_picks_glyph_or_lettermark() {
+        // A token naming a brand renders the filled brand logo.
+        assert!(matches!(
+            resolve_target_icon(Some("rust"), "rust"),
+            TargetIcon::Logo(_)
+        ));
+        // A custom glyph pick (a general-purpose line glyph) renders as a glyph.
+        assert!(matches!(
+            resolve_target_icon(Some("database"), "deno"),
+            TargetIcon::Glyph("database")
+        ));
+        // No token → a lettermark derived from the id.
+        match resolve_target_icon(None, "deno") {
+            TargetIcon::Mark(m) => assert_eq!(m, "DE"),
+            _ => panic!("expected a lettermark"),
+        }
+        // A non-glyph token marks from its own text (the custom-letters escape).
+        match resolve_target_icon(Some("k8s"), "kubernetes") {
+            TargetIcon::Mark(m) => assert_eq!(m, "K8"),
+            _ => panic!("expected a lettermark from the token"),
+        }
+    }
+
+    #[test]
+    fn target_chip_renders_glyph_and_lettermark() {
+        // A built-in glyph target shows its SVG glyph (no lettermark badge).
+        let rust = target_chip("rust", Some("rust")).into_string();
+        assert!(rust.contains("<svg"), "glyph chip has an icon: {rust}");
+        assert!(!rust.contains("lettermark"), "glyph chip has no badge");
+        assert!(rust.contains("rust"));
+        // A custom target with no icon shows a lettermark badge.
+        let deno = target_chip("deno", None).into_string();
+        assert!(deno.contains(r#"class="lettermark""#), "got: {deno}");
+        assert!(deno.contains(">DE<"), "badge derived from id: {deno}");
+    }
+
+    #[test]
+    fn target_dialog_offers_an_icon_picker() {
+        // A new target's modal shows the picker with the lettermark (auto) tile
+        // selected and the glyph tiles available.
+        let html = target_dialog(None, Layer::Global);
+        assert!(html.contains(r#"name="icon""#), "icon field present");
+        assert!(
+            html.contains(r#"id="ic-auto" value="" checked"#),
+            "lettermark tile is the default: {html}"
+        );
+        assert!(html.contains(r#"id="ic-rust""#), "a glyph tile is offered");
+        // Editing a target with a chosen glyph pre-selects that tile.
+        let t = TargetDef {
+            id: "deno".into(),
+            description: None,
+            icon: Some("database".into()),
+            rule: TargetRule::FileExists {
+                path: "deno.json".into(),
+            },
+            disabled: false,
+            origin: Layer::Global,
+        };
+        let edit = target_dialog(Some(&t), Layer::Global);
+        assert!(
+            edit.contains(r#"id="ic-database" value="database" checked"#),
+            "chosen glyph pre-selected: {edit}"
+        );
+        assert!(
+            !edit.contains(r#"id="ic-auto" value="" checked"#),
+            "auto tile not selected when a glyph is chosen"
+        );
+    }
+
+    #[test]
+    fn targets_tab_row_shows_the_target_glyph() {
+        let view = TargetsView {
+            targets: vec![TargetView {
+                id: "rust".into(),
+                description: Some("a Cargo manifest".into()),
+                rule_summary: "Cargo.toml exists".into(),
+                icon: Some("rust".into()),
+                builtin: true,
+                detected: false,
+                is_script: false,
+                editable: false,
+                private: false,
+            }],
+        };
+        let html = targets_tab(&view, None).into_string();
+        assert!(html.contains("<svg"), "the row renders a glyph");
+        assert!(html.contains("rust"));
     }
 }

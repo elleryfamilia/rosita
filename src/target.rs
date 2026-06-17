@@ -42,6 +42,13 @@ pub struct TargetDef {
     /// Human summary; doubles as the studio row title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The studio glyph shown for this target on profiles and the Targets tab.
+    /// A name from the studio's closed icon set (e.g. `rust`, `database`); an
+    /// unrecognized or absent value renders as a lettermark badge derived from
+    /// the id (see [`lettermark`]). Built-ins set a brand glyph; custom targets
+    /// pick one (or fall back to the lettermark).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// How this target is detected.
     pub rule: TargetRule,
     /// Off-switch: kept in config, never evaluated. Only serialized when set.
@@ -205,10 +212,14 @@ fn op_matches(op: Op, haystack: &str, needle: &str) -> bool {
 /// [`crate::context::languages`]); they exist so the studio can render how each
 /// built-in is detected, uniformly with custom targets.
 pub fn builtin_targets() -> Vec<TargetDef> {
+    // Each built-in's `icon` comes from `builtin_icon` (the single source of
+    // truth). Ids without a dedicated glyph there (go/python/php/swift) carry no
+    // icon and render as a lettermark badge — see [`lettermark`].
     fn t(id: &str, description: &str, rule: TargetRule) -> TargetDef {
         TargetDef {
             id: id.to_string(),
             description: Some(description.to_string()),
+            icon: builtin_icon(id).map(str::to_string),
             rule,
             disabled: false,
             origin: Layer::BuiltIn,
@@ -305,6 +316,57 @@ pub fn builtin_targets() -> Vec<TargetDef> {
             },
         ),
     ]
+}
+
+/// The studio icon name for a *built-in* target id (or the synthetic `machine`
+/// scope). Lets view code resolve a built-in's icon without threading the whole
+/// config through. Every language/framework built-in has a real brand logo (the
+/// studio renders it filled); `machine` uses a line glyph. Custom ids return
+/// `None`, so the caller falls back to a [`lettermark`].
+pub fn builtin_icon(id: &str) -> Option<&'static str> {
+    match id {
+        "rust" => Some("rust"),
+        "node" => Some("node"),
+        "bun" => Some("bun"),
+        "nextjs" => Some("nextjs"),
+        "go" => Some("go"),
+        "python" => Some("python"),
+        "java" => Some("java"),
+        "ruby" => Some("ruby"),
+        "php" => Some("php"),
+        "swift" => Some("swift"),
+        "dotnet" => Some("dotnet"),
+        // A CPU chip reads as "the machine/host"; deliberately *not* `monitor`,
+        // which the theme toggle already uses for its auto glyph.
+        "machine" => Some("cpu"),
+        _ => None,
+    }
+}
+
+/// A short uppercase lettermark for a target id, used as the badge when a target
+/// has no glyph icon (the default for custom targets). A hyphen/underscore id
+/// takes the first letter of its first two words (`my-stack` → `MS`); otherwise
+/// the first two alphanumeric characters (`deno` → `DE`). Falls back to `?` for
+/// an id with no alphanumerics.
+pub fn lettermark(id: &str) -> String {
+    let words: Vec<&str> = id
+        .split(['-', '_', ' '])
+        .filter(|w| w.chars().any(|c| c.is_alphanumeric()))
+        .collect();
+    let mark: String = if words.len() >= 2 {
+        words
+            .iter()
+            .take(2)
+            .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
+            .collect()
+    } else {
+        id.chars().filter(|c| c.is_alphanumeric()).take(2).collect()
+    };
+    if mark.is_empty() {
+        "?".to_string()
+    } else {
+        mark.to_uppercase()
+    }
 }
 
 /// Ids a custom target may not claim: the built-in stacks (read-only, detected
@@ -440,10 +502,35 @@ mod tests {
                 "missing built-in {needed}"
             );
         }
-        // Every built-in carries a description (the studio row title).
+        // Every built-in carries a description (the studio row title) and a brand
+        // icon, and each one's `icon` agrees with `builtin_icon` (the single
+        // source of truth).
         for t in builtin_targets() {
             assert!(t.description.is_some(), "{} lacks a description", t.id);
+            assert!(t.icon.is_some(), "{} lacks a brand icon", t.id);
+            assert_eq!(
+                builtin_icon(&t.id),
+                t.icon.as_deref(),
+                "builtin_icon disagrees with the catalog for {}",
+                t.id
+            );
         }
+        // Representative built-ins + the synthetic machine scope; a custom id
+        // has no built-in icon (it falls back to a lettermark).
+        assert_eq!(builtin_icon("rust"), Some("rust"));
+        assert_eq!(builtin_icon("python"), Some("python"));
+        assert_eq!(builtin_icon("machine"), Some("cpu"));
+        assert_eq!(builtin_icon("deno"), None);
+    }
+
+    #[test]
+    fn lettermark_derives_a_short_badge() {
+        assert_eq!(lettermark("deno"), "DE");
+        assert_eq!(lettermark("my-stack"), "MS");
+        assert_eq!(lettermark("infra_tools"), "IT");
+        assert_eq!(lettermark("x"), "X");
+        // Non-alphanumeric ids degrade to a placeholder rather than empty.
+        assert_eq!(lettermark("***"), "?");
     }
 
     #[test]
@@ -582,6 +669,7 @@ mod tests {
         let mk = |id: &str, disabled: bool| TargetDef {
             id: id.to_string(),
             description: None,
+            icon: None,
             rule: TargetRule::FileExists {
                 path: "deno.json".into(),
             },
@@ -609,6 +697,7 @@ mod tests {
         let scripted = |allow_exec: bool| TargetDef {
             id: "scripted".to_string(),
             description: None,
+            icon: None,
             rule: TargetRule::Script {
                 command: "test -f marker".to_string(),
                 script_lang: Some("bash".to_string()),
