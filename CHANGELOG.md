@@ -8,6 +8,35 @@ All notable changes to rosita are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
+## Unreleased
+
+### Added
+
+- **Brand-logo icons for targets.** Every built-in target now shows its real
+  brand logo — Rust, Node, Bun, Next.js, Go, Python, Java (OpenJDK), Ruby, PHP,
+  Swift, .NET — on profile cards, the Targets tab, and the profile editor.
+  Custom targets pick an icon in their editor: a glyph from a curated set, or a
+  short lettermark badge derived from the name.
+- **Editable profile names.** The Studio profile editor now lets you rename a
+  profile; the rename replaces it in place and refuses a name already in use.
+
+### Changed
+
+- **Profile cards show target icons (icon-only) at the top-right**, replacing the
+  labeled chips.
+- **Scripts read distinctly in the Fragments tab**: script and live-provider
+  fragments get a warm-tinted glyph tile, set apart from static markdown.
+- **The "Show me around" tour** now opens as a dimmed full-screen overlay so it
+  reads as its own screen rather than the content of the highlighted tab.
+
+### Fixed
+
+- **The profile editor's target list is now derived from the catalog**, so it
+  includes every built-in (Bun was missing from the old hardcoded list) and your
+  custom targets — and can't drift out of sync again.
+- **The `machine` target icon no longer collides** with the theme toggle's auto
+  glyph (it's now a CPU chip).
+
 ## 0.6.2 — 2026-06-16
 
 ### Internal

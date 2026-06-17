@@ -129,10 +129,18 @@ pub struct AtomDot {
     pub state: AtomState,
 }
 
+/// One target reference shown as a chip on a profile: the id plus its resolved
+/// icon token (a built-in's glyph, a custom target's chosen glyph, or `None` to
+/// fall back to a lettermark derived from the id).
+pub struct TargetChip {
+    pub id: String,
+    pub icon: Option<String>,
+}
+
 /// One profile row for the library view.
 pub struct ProfileView {
     pub name: String,
-    pub targets: Vec<String>,
+    pub targets: Vec<TargetChip>,
     pub selected: bool,
     /// When true the profile is an off-switch off (never selected/composed).
     pub disabled: bool,
@@ -145,6 +153,9 @@ pub struct LibraryView {
     pub yours: Vec<FragmentView>,
     pub palette: Vec<FragmentView>,
     pub profiles: Vec<ProfileView>,
+    /// Selectable target options for the profile editor (built-ins + custom
+    /// targets + the `machine` scope), in catalog order, each with its icon.
+    pub targets: Vec<TargetChip>,
 }
 
 /// One target row for the Targets tab.
@@ -155,6 +166,9 @@ pub struct TargetView {
     pub description: Option<String>,
     /// Plain-language one-liner of the detection rule.
     pub rule_summary: String,
+    /// The stored icon-glyph name (built-in default or custom pick), or `None`
+    /// to render a lettermark badge derived from the id.
+    pub icon: Option<String>,
     /// Built-in (read-only) vs a user-authored custom target.
     pub builtin: bool,
     /// Whether this target matches the *current* (real, un-simulated) context.
@@ -459,12 +473,41 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
             id: c.id.clone(),
         })
         .collect();
+    // Selectable target options for the profile editor: every built-in plus the
+    // user's custom targets (in catalog order), then the synthetic `machine`
+    // scope. Derived from the catalog so the editor can never drift out of sync
+    // with `builtin_targets` (which is how `bun` went missing from a hardcoded
+    // list). Each carries its icon token so the checkbox shows the right mark.
+    let mut target_options: Vec<TargetChip> = cfg
+        .effective_targets()
+        .into_iter()
+        .map(|t| TargetChip {
+            id: t.id,
+            icon: t.icon,
+        })
+        .collect();
+    target_options.push(TargetChip {
+        id: "machine".to_string(),
+        icon: crate::target::builtin_icon("machine").map(str::to_string),
+    });
+    let target_icons: std::collections::HashMap<String, Option<String>> = target_options
+        .iter()
+        .map(|t| (t.id.clone(), t.icon.clone()))
+        .collect();
+    let chip_for = |id: &str| -> TargetChip {
+        TargetChip {
+            id: id.to_string(),
+            // `target_options` (and thus the map) already includes `machine`; an
+            // id not found is an unknown/stale target → no icon (lettermark).
+            icon: target_icons.get(id).cloned().flatten(),
+        }
+    };
     let profiles = cfg
         .profiles
         .iter()
         .map(|p| ProfileView {
             name: p.name.clone(),
-            targets: p.targets.clone(),
+            targets: p.targets.iter().map(|t| chip_for(t)).collect(),
             selected: selected_name.as_deref() == Some(p.name.as_str()),
             disabled: p.disabled,
             atoms: p
@@ -479,6 +522,7 @@ pub fn library_view(snap: &Snapshot) -> crate::Result<LibraryView> {
         yours,
         palette,
         profiles,
+        targets: target_options,
     })
 }
 
@@ -521,6 +565,7 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
                 detected,
                 is_script: t.rule.has_script(),
                 rule_summary: crate::target::rule_summary(&t.rule),
+                icon: t.icon,
                 builtin,
                 editable: !builtin,
                 private: matches!(t.origin, Layer::GlobalLocal),
@@ -534,6 +579,7 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
         id: "machine".to_string(),
         description: Some("not inside a git repository (the bare-machine scope)".to_string()),
         rule_summary: "the working directory is not in a git repository".to_string(),
+        icon: crate::target::builtin_icon("machine").map(str::to_string),
         builtin: true,
         detected: ctx.git.is_none(),
         is_script: false,
@@ -910,6 +956,9 @@ pub fn target_from_form(
         }
     };
     let description = opt(value_of(pairs, "description"));
+    // The chosen icon glyph name; empty (the "lettermark" picker tile) → None, so
+    // the chip falls back to a lettermark derived from the id.
+    let icon = opt(value_of(pairs, "icon"));
     let rule = match value_of(pairs, "kind") {
         Some("script") => {
             let command = opt(value_of(pairs, "command"))
@@ -963,6 +1012,7 @@ pub fn target_from_form(
     Ok(TargetDef {
         id,
         description,
+        icon,
         rule,
         disabled: base.map(|b| b.disabled).unwrap_or(false),
         origin: Layer::default(),
@@ -1296,6 +1346,35 @@ mod tests {
         assert_eq!(edited.guidance, "Updated body");
         assert_eq!(edited.requires, vec!["baseline".to_string()]);
         assert_eq!(edited.agents, vec!["claude".to_string()]);
+    }
+
+    #[test]
+    fn target_from_form_parses_icon() {
+        use crate::target::TargetRule;
+        // A chosen glyph is carried onto the target.
+        let t = target_from_form(
+            None,
+            &parse_pairs("name=Deno&kind=file_exists&paths=deno.json&icon=database"),
+        )
+        .unwrap();
+        assert_eq!(t.id, "deno");
+        assert_eq!(t.icon.as_deref(), Some("database"));
+        assert!(matches!(t.rule, TargetRule::FileExists { .. }));
+        // The empty "lettermark" tile (icon=) leaves no icon, so the chip falls
+        // back to a lettermark derived from the id.
+        let auto = target_from_form(
+            None,
+            &parse_pairs("name=Deno&kind=file_exists&paths=deno.json&icon="),
+        )
+        .unwrap();
+        assert_eq!(auto.icon, None);
+        // Absent entirely → also None.
+        let absent = target_from_form(
+            None,
+            &parse_pairs("name=Deno&kind=file_exists&paths=deno.json"),
+        )
+        .unwrap();
+        assert_eq!(absent.icon, None);
     }
 
     #[test]
