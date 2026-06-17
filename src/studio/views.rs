@@ -775,7 +775,7 @@ fn preview_fragment_card(
     html! {
         details class="fragment-detail" open[open] {
             summary class="fragment-detail-head" {
-                span class="fragment-glyph" { (icon(glyph)) }
+                span class=(format!("fragment-glyph k-{}", c.kind)) { (icon(glyph)) }
                 span class="fragment-detail-title" { (c.title) }
                 span class="fragment-detail-id" { (c.id) }
                 span class="fragment-detail-spacer" {}

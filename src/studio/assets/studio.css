@@ -320,8 +320,12 @@ body {
 .fragment-detail-head::-webkit-details-marker { display: none; }
 .fragment-detail-head:hover { background: var(--panel-2); }
 .fragment-detail[open] > .fragment-detail-head { background: var(--panel-2); border-bottom: 1px solid var(--border); }
-.fragment-detail .fragment-glyph { color: var(--faint); display: inline-flex; }
-.fragment-detail .fragment-glyph .icon { width: 15px; height: 15px; }
+/* Tinted tile keyed to execution type, matching the Fragments tab: markdown gets
+   the calm accent tile, scripts/live-providers the warm caution tile — so the
+   type reads at a glance (the bare amber glyph was too faint to spot). */
+.fragment-detail .fragment-glyph { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent); }
+.fragment-detail .fragment-glyph.k-command, .fragment-detail .fragment-glyph.k-provider { background: var(--caution-soft); color: var(--caution); }
+.fragment-detail .fragment-glyph .icon { width: 16px; height: 16px; }
 .fragment-detail-title { font-weight: 600; font-size: 12px; color: var(--muted); }
 .fragment-detail-id { font-family: var(--mono); font-size: 11px; color: var(--faint); }
 .fragment-detail-spacer { flex: 1; }
@@ -539,9 +543,13 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .btn-xs { padding: 2px 8px; font-size: 11px; gap: 4px; }
 .fragment-run .icon, .run-all .icon { width: 12px; height: 12px; }
 .prov-spacer { flex: 1; }
-.run-all { color: var(--accent); margin: -2px 0; }
-.fragment-detail-head .fragment-run { color: var(--muted); opacity: .85; }
+/* Script-run affordances carry the warm caution hue, tying them to the amber
+   script tiles (the buttons only ever appear on script/provider fragments). */
+.run-all { color: var(--caution); border-color: var(--caution-line); margin: -2px 0; }
+.run-all:hover { color: var(--caution); border-color: var(--caution); background: var(--caution-soft); }
+.fragment-detail-head .fragment-run { color: var(--caution); border-color: var(--caution-line); opacity: .85; }
 .fragment-detail-head:hover .fragment-run { opacity: 1; }
+.fragment-detail-head .fragment-run:hover { border-color: var(--caution); background: var(--caution-soft); }
 
 /* Failed-run body: the error banner with a retry button beneath it (replaces
    the output/run-prompt for a card whose script just failed). */
