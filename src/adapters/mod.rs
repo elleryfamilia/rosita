@@ -30,7 +30,10 @@ use crate::config::{self, Config};
 use crate::context::Context;
 use crate::profile::Composition;
 use crate::render::{self, header, RenderRequest};
+use crate::workflow::Workflow;
 use crate::writer::{self, WriteAction, Writer, WrittenFile};
+
+pub mod commands;
 
 /// A declarative description of how to deliver the overlay to one agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +85,16 @@ pub struct AgentDescriptor {
     /// so copilot uses dir `copilot` + file `copilot/.github/instructions/loadout.instructions.md`.
     #[serde(default)]
     pub launch_context_dir: Option<String>,
+    /// Project-relative directory this agent reads slash commands from (e.g.
+    /// `.claude/commands`). When set **and** a workflow is bound, loadout writes
+    /// one command file per stage under `<commands_dir>/loadout/` (a dir it owns).
+    /// `None` → the agent gets the workflow context section only.
+    #[serde(default)]
+    pub commands_dir: Option<String>,
+    /// On-disk format for this agent's command files (markdown vs Gemini TOML).
+    /// Ignored unless `commands_dir` is set; defaults to markdown.
+    #[serde(default)]
+    pub command_format: Option<commands::CommandFormat>,
 }
 
 fn default_template() -> String {
@@ -137,6 +150,8 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             append_prompt_flag: None,
             launch_context_dir_env: None,
             launch_context_dir: None,
+            commands_dir: None,
+            command_format: None,
         }
     }
     vec![
@@ -145,6 +160,9 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             launch: Some("claude".into()),
             importer: Some("CLAUDE.local.md".into()),
             append_prompt_flag: Some("--append-system-prompt".into()),
+            // Claude reads project commands from `.claude/commands/`; a `loadout/`
+            // subdir namespaces them as `/loadout:<stage>`.
+            commands_dir: Some(".claude/commands".into()),
             ..d("claude", "claude.md")
         },
         AgentDescriptor {
@@ -179,6 +197,10 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
                  manually instead, add `@.loadout/generated/gemini.md` to a GEMINI.md."
                     .into(),
             ),
+            // Gemini reads project commands from `.gemini/commands/` as TOML; a
+            // `loadout/` subdir namespaces them as `/loadout:<stage>`.
+            commands_dir: Some(".gemini/commands".into()),
+            command_format: Some(commands::CommandFormat::Toml),
             ..d("gemini", "gemini.md")
         },
         AgentDescriptor {
@@ -303,7 +325,14 @@ pub fn apply(
     app: &AppContext,
     opts: &ApplyOptions,
 ) -> crate::Result<ApplyResult> {
-    let rendered = render_overlay(d, app)?;
+    // The workflow (if any) bound by the selected profile — resolved against the
+    // config's `[[workflows]]` plus the built-in catalog. A dangling binding
+    // resolves to `None` and simply isn't rendered (doctor/run surface it). Used
+    // by both render channels: the context section and the per-stage commands.
+    let workflow = app
+        .config
+        .workflow_for_profile(app.composition.primary_profile());
+    let rendered = render_overlay(d, app, workflow.as_ref())?;
     let mut files = Vec::new();
     let mut warnings = Vec::new();
     let mut notes = Vec::new();
@@ -445,6 +474,17 @@ pub fn apply(
         notes.push(hint.clone());
     }
 
+    // 2b. Per-stage slash commands (the command channel), for agents that read
+    // project commands. Only inside a repo and never at $HOME — a global command
+    // dir (`~/.claude/commands/`) would bleed into every repo, exactly like an
+    // importer. One file per stage under `<commands_dir>/loadout/`, a dir we own.
+    if let (Some(commands_dir), Some(wf)) = (&d.commands_dir, workflow.as_ref()) {
+        if app.in_repo() && !bleeds && is_repo_relative(commands_dir) {
+            write_stage_commands(app, d, commands_dir, wf, &mut files)?;
+            gitignore_extra.push(format!("{commands_dir}/{}/", commands::COMMAND_NAMESPACE));
+        }
+    }
+
     // 3. gitignore (only inside a repo): the loadout-managed dirs + the private
     // local.toml (binding + param overrides) + any root files we created. This
     // keeps a repo clean automatically on every render — there is no `init`.
@@ -505,6 +545,13 @@ pub fn artifacts(d: &AgentDescriptor, repo_base: &Path) -> Vec<PathBuf> {
             out.push(p);
         }
     }
+    // Generated slash-command dir (loadout-owned).
+    if let Some(commands_dir) = &d.commands_dir {
+        let ns = command_namespace_dir(repo_base, commands_dir);
+        if ns.exists() {
+            out.push(ns);
+        }
+    }
     out
 }
 
@@ -547,6 +594,18 @@ pub fn clean(d: &AgentDescriptor, app: &AppContext) -> crate::Result<CleanResult
         }
     }
 
+    // Generated slash-command dir (loadout-owned entirely) → remove it whole.
+    // The agent's own `<commands_dir>` (e.g. `.claude/commands/`) is left alone.
+    if let Some(commands_dir) = &d.commands_dir {
+        let ns = command_namespace_dir(app.repo_base(), commands_dir);
+        if ns.exists() {
+            if !dry {
+                std::fs::remove_dir_all(&ns).ok();
+            }
+            removed.push(ns);
+        }
+    }
+
     // Importer: strip our managed block; delete the file if nothing else is left.
     if let Some(importer) = &d.importer {
         let p = app.repo_base().join(importer);
@@ -582,7 +641,11 @@ pub fn clean(d: &AgentDescriptor, app: &AppContext) -> crate::Result<CleanResult
 
 // --- shared mechanics --------------------------------------------------------
 
-fn render_overlay(d: &AgentDescriptor, app: &AppContext) -> crate::Result<render::RenderOutput> {
+fn render_overlay(
+    d: &AgentDescriptor,
+    app: &AppContext,
+    workflow: Option<&Workflow>,
+) -> crate::Result<render::RenderOutput> {
     // Dry-run (and explain's dry apply) resolves dynamic fragments cache-only
     // — never executing providers/commands or writing — so it touches nothing.
     let dynamic = if app.writer.is_dry_run() {
@@ -590,22 +653,71 @@ fn render_overlay(d: &AgentDescriptor, app: &AppContext) -> crate::Result<render
     } else {
         crate::dynamic::DynamicMode::Live
     };
-    // The workflow (if any) bound by the selected profile — resolved against the
-    // config's `[[workflows]]` plus the built-in catalog. A dangling binding
-    // resolves to `None` and simply isn't rendered (doctor/run surface it).
-    let workflow = app
-        .config
-        .workflow_for_profile(app.composition.primary_profile());
     render::render(&RenderRequest {
         agent: &d.id,
         template_name: &d.template,
         context: app.context,
         composition: app.composition,
-        workflow: workflow.as_ref(),
+        workflow,
         config: app.config,
         generated_at: app.generated_at.clone(),
         dynamic,
     })
+}
+
+/// The directory loadout owns under an agent's command dir, for `wf`'s stages.
+fn command_namespace_dir(repo_base: &Path, commands_dir: &str) -> PathBuf {
+    repo_base
+        .join(commands_dir)
+        .join(commands::COMMAND_NAMESPACE)
+}
+
+/// Whether a configured `commands_dir` is safely inside the repo (relative, no
+/// `..`). A guard against a hand-rolled global `[[agents]]` override escaping the
+/// project tree; built-ins are already safe.
+fn is_repo_relative(dir: &str) -> bool {
+    let p = Path::new(dir);
+    !p.is_absolute()
+        && !p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+/// Write one slash-command file per workflow stage under the owned namespace
+/// dir, pruning any stale files left by removed/renamed stages first (we own the
+/// whole dir, so anything not in the current set is ours to clean up).
+fn write_stage_commands(
+    app: &AppContext,
+    d: &AgentDescriptor,
+    commands_dir: &str,
+    wf: &Workflow,
+    files: &mut Vec<WrittenFile>,
+) -> crate::Result<()> {
+    let format = d
+        .command_format
+        .unwrap_or(commands::CommandFormat::Markdown);
+    let ns_dir = command_namespace_dir(app.repo_base(), commands_dir);
+    let generated = commands::stage_commands(wf, format);
+    let keep: std::collections::HashSet<&str> =
+        generated.iter().map(|c| c.filename.as_str()).collect();
+
+    // Prune stale command files (a removed/renamed stage's leftover).
+    if let Ok(entries) = std::fs::read_dir(&ns_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !keep.contains(name.to_string_lossy().as_ref()) && !app.writer.is_dry_run() {
+                std::fs::remove_file(entry.path()).ok();
+            }
+        }
+    }
+
+    for cmd in &generated {
+        files.push(
+            app.writer
+                .write(&ns_dir.join(&cmd.filename), &cmd.content)?,
+        );
+    }
+    Ok(())
 }
 
 /// Write `content` to `path`, skipping when the embedded context hash already

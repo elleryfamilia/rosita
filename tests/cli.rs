@@ -175,6 +175,47 @@ fn refresh_claude_creates_overlay_marker_and_gitignore() {
 }
 
 #[test]
+fn refresh_renders_a_bound_workflow_in_both_channels_and_clean_removes_commands() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.git_init();
+    // A rust profile bound to the built-in `lean` workflow.
+    fx.author(
+        "[[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
+         [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\nworkflow = \"lean\"\n",
+    );
+
+    fx.cmd()
+        .args(["refresh", "--agent", "claude"])
+        .assert()
+        .success();
+
+    // Channel 1: the overlay carries the workflow context section.
+    let overlay = fx.read(".loadout/generated/claude.md");
+    assert!(overlay.contains("## Workflow: Explore, plan, code, commit"));
+    assert!(overlay.contains(".loadout/workflow/artifacts/"));
+
+    // Channel 2: one generated command file per stage, under the owned namespace.
+    assert!(fx.exists(".claude/commands/loadout/plan.md"));
+    assert!(fx.exists(".claude/commands/loadout/implement.md"));
+    let plan = fx.read(".claude/commands/loadout/plan.md");
+    assert!(plan.contains("$ARGUMENTS"));
+    assert!(plan.contains(".loadout/workflow/artifacts/plan.md"));
+
+    // The owned command dir is gitignored.
+    assert!(fx.read(".gitignore").contains(".claude/commands/loadout/"));
+
+    // `clean` removes the whole command namespace dir (and the overlay), but
+    // leaves the agent's own `.claude/commands/` parent alone.
+    fx.cmd()
+        .args(["clean", "--agent", "claude"])
+        .assert()
+        .success();
+    assert!(!fx.exists(".claude/commands/loadout/plan.md"));
+    assert!(!fx.exists(".claude/commands/loadout"));
+}
+
+#[test]
 fn refresh_in_non_repo_writes_overlay_but_no_gitignore() {
     // First-class non-repo use case (e.g. running in $HOME): the overlay and
     // the CLAUDE.local.md import are written, but no stray .gitignore is made.
