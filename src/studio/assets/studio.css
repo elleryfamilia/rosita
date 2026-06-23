@@ -406,13 +406,13 @@ body {
 .wf-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); color: var(--fg); font-family: inherit; cursor: pointer; transition: border-color .12s, background .12s; }
 .wf-card:hover { border-color: var(--border-strong); background: var(--hover); }
 .wf-card.focused { border-color: var(--accent-line); background: var(--accent-soft); }
-.wf-card.active { border-color: var(--accent); }
+.wf-card.active { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
 .wf-card-top { display: flex; align-items: center; gap: 8px; }
 .wf-card-glyph { display: inline-flex; color: var(--accent); flex: none; }
 .wf-card-glyph .icon { width: 17px; height: 17px; }
 .wf-card-name { font-weight: 600; font-size: 13.5px; flex: 1; min-width: 0; }
-.wf-card-dot { display: inline-flex; color: var(--accent); flex: none; }
-.wf-card-dot .icon { width: 14px; height: 14px; }
+.wf-card-dot { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border-radius: 50%; background: var(--ok); color: var(--bg); }
+.wf-card-dot .icon { width: 12px; height: 12px; }
 .wf-card-tag { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
 .wf-card-blurb { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .wf-detail-glyph { display: inline-flex; color: var(--accent); flex: none; }
@@ -427,19 +427,19 @@ body {
 .wf-source:hover { text-decoration: underline; }
 .wf-source .icon { width: 12px; height: 12px; }
 .wf-detail-actions { flex: none; }
-.wf-active-pill { font-size: 11px; padding: 4px 9px; }
+.wf-active-pill { font-size: 11px; padding: 4px 9px; color: var(--ok); background: rgba(127, 214, 160, 0.14); }
 
 /* slots — one clearly-bounded box per stage */
 .wf-slots { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.wf-slot { position: relative; border: 1px solid var(--border); border-left: 3px solid var(--accent-line); border-radius: var(--r); background: var(--panel); padding: 11px 14px; display: flex; flex-direction: column; gap: 6px; }
-.wf-slot-head { display: flex; align-items: center; gap: 9px; }
-.wf-slot-num { width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-.wf-slot-name { font-size: 13.5px; font-weight: 600; }
-.wf-slot-purpose { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
-.wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wf-slot { position: relative; border: 1px solid var(--border); border-left: 3px solid var(--accent-line); border-radius: var(--r); background: var(--panel); padding: 12px 15px; display: flex; flex-direction: column; gap: 6px; }
+.wf-slot-head { display: flex; align-items: center; gap: 10px; }
+.wf-slot-num { width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.wf-slot-cmd-lead { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: -0.2px; }
+.wf-slot-purpose { margin: 0 0 0 32px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: 32px; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }
-.stage-exit { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.stage-exit { margin: 0 0 0 32px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .stage-exit li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); }
 .stage-exit .icon { width: 11px; height: 11px; flex: none; color: var(--ok); }
 .wf-slot-cmd { align-self: flex-start; }

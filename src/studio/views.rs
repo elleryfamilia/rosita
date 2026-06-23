@@ -1053,7 +1053,7 @@ fn workflow_slot(n: usize, s: &crate::studio::state::WorkflowStageView) -> Marku
         li class="wf-slot" {
             div class="wf-slot-head" {
                 span class="wf-slot-num" { (n) }
-                span class="wf-slot-name" { (s.name) }
+                code class="wf-slot-cmd-lead" { "/loadout:" (s.name) }
                 @if s.gate { span class="tag gate-tag" { "gate" } }
             }
             @if let Some(p) = &s.purpose { p class="wf-slot-purpose" { (p) } }
@@ -1068,7 +1068,6 @@ fn workflow_slot(n: usize, s: &crate::studio::state::WorkflowStageView) -> Marku
                     @for item in &s.exit { li { (icon("check")) (item) } }
                 }
             }
-            code class="wf-slot-cmd" { "/loadout:" (s.name) }
         }
     }
 }

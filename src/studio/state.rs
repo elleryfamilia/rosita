@@ -36,6 +36,10 @@ pub struct StudioState {
     /// guided "review → you're set" beats instead of dropping straight into the
     /// Profiles tab; the first Apply disarms it.
     pub onboarding_active: bool,
+    /// The tab the user is currently on (`profiles`/`fragments`/`targets`/
+    /// `workflows`). Tracked so Apply re-renders the tab in place instead of
+    /// always bouncing back to Profiles.
+    pub active_tab: String,
 }
 
 impl StudioState {

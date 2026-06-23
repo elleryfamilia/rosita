@@ -233,6 +233,7 @@ fn handle_shell(state: &Arc<Mutex<StudioState>>) -> Resp {
 }
 
 fn handle_tab(state: &Arc<Mutex<StudioState>>, tab: &str) -> Resp {
+    state.lock().unwrap().active_tab = tab.to_string();
     if tab == "profiles" {
         return profiles_tab_resp(state, None, None, false);
     }
@@ -633,6 +634,7 @@ fn handle_target_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
 }
 
 fn handle_workflow_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    state.lock().unwrap().active_tab = "workflows".to_string();
     let (id, action) = id_and_action(&req.path, "/workflows/");
     match (req.method.as_str(), action) {
         // Focus a workflow's slots in the gallery (read).
@@ -1318,6 +1320,17 @@ fn handle_apply(state: &Arc<Mutex<StudioState>>) -> Resp {
                 msg.push_str(" · ");
                 msg.push_str(&note);
             }
+            // Stay on the Workflows tab when that's where the user is (selecting a
+            // workflow shouldn't bounce them to Profiles); other tabs land on
+            // Profiles as before.
+            if state.lock().unwrap().active_tab == "workflows" {
+                let snap = state.lock().unwrap().snapshot();
+                let mut html =
+                    views::workflows_tab(&state::workflows_view(&snap, None), Some(&msg))
+                        .into_string();
+                html.push_str(&views::staged_indicator_loader());
+                return Resp::html(html);
+            }
             profiles_tab_resp(state, None, Some(&msg), true)
         }
         Err(e) => Resp::html(views::error_fragment(&format!("apply failed: {e}"))),
@@ -1443,6 +1456,7 @@ pub fn serve(rt: &Runtime, args: &StudioArgs) -> crate::Result<()> {
         token: token.clone(),
         port,
         onboarding_active: false,
+        active_tab: "profiles".to_string(),
     }));
 
     // `0`/`0s` disables the idle shutdown; anything else is the inactivity window.
@@ -1780,6 +1794,7 @@ mod tests {
             token: "testtoken".into(),
             port: 7777,
             onboarding_active: false,
+            active_tab: "profiles".into(),
         }))
     }
 
@@ -2074,6 +2089,23 @@ mod tests {
         )
         .unwrap();
         assert!(act.contains("now your active workflow"));
+
+        // Applying stays on the Workflows tab (doesn't bounce to Profiles) and
+        // persists `[defaults].workflow = "superpowers"`.
+        let applied = String::from_utf8(
+            route(&st, &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], "")).body,
+        )
+        .unwrap();
+        assert!(
+            applied.contains("tab-workflows"),
+            "stays on the Workflows tab"
+        );
+        assert!(applied.contains("applied"), "shows the applied flash");
+        let saved = std::fs::read_to_string(global_config_path(d.path())).unwrap();
+        assert!(
+            saved.contains("workflow = \"superpowers\""),
+            "persisted to config"
+        );
     }
 
     #[test]
