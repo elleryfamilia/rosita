@@ -1,4 +1,4 @@
-# Testing rosita
+# Testing loadout
 
 Two levels: the **automated suite** (fast, zero side effects) and a **hands-on
 walkthrough** that drives the real CLI in a sandbox. The output below is real
@@ -7,8 +7,8 @@ walkthrough** that drives the real CLI in a sandbox. The output below is real
 ## Level 1 — Automated tests (~30s, no side effects)
 
 ```bash
-git clone https://github.com/elleryfamilia/rosita
-cd rosita
+git clone https://github.com/elleryfamilia/loadout
+cd loadout
 cargo test                      # → 263 tests passing
 cargo clippy --all-targets      # → no warnings
 cargo fmt --check               # → clean
@@ -23,21 +23,21 @@ redaction. All three green ⇒ the build is sound.
 
 ## Level 2 — Hands-on walkthrough (sandboxed)
 
-**Why a sandbox:** fragments and profiles are **global-only**, so rosita
-writes them into your global config dir (`~/.config/rosita`); in a repo it writes
+**Why a sandbox:** fragments and loadouts are **global-only**, so loadout
+writes them into your global config dir (`~/.config/loadout`); in a repo it writes
 only the gitignored overlay, the binding, and `.gitignore`. To kick the tires
 without touching your real config or any real project, use a throwaway git repo
-plus an isolated config dir via `ROSITA_CONFIG_DIR`.
+plus an isolated config dir via `LOADOUT_CONFIG_DIR`.
 
 ### Setup
 
 ```bash
 # Install the binary onto PATH (tests the repo end-to-end):
-cargo install --git https://github.com/elleryfamilia/rosita
+cargo install --git https://github.com/elleryfamilia/loadout
 #   …or, from a local clone:  cargo install --path .
 
 # Isolated global config (so nothing real is touched) + a throwaway rust repo:
-export ROSITA_CONFIG_DIR="$(mktemp -d)"          # isolated global library
+export LOADOUT_CONFIG_DIR="$(mktemp -d)"          # isolated global library
 SB="$(mktemp -d)"; mkdir -p "$SB/src" "$SB/infra/db"
 printf '[package]\nname="demo"\nversion="0.1.0"\n' > "$SB/Cargo.toml"
 printf 'fn main(){}\n' > "$SB/src/main.rs"
@@ -48,7 +48,7 @@ cd "$SB"
 ### 1. See what it detects
 
 ```bash
-rosita detect
+load detect
 ```
 ```
 Context
@@ -61,16 +61,16 @@ Context
   commands   :  build cargo build   test cargo test   lint cargo clippy --all-targets
   system     : <os> / <arch> · host <hostname> · user <you>
 ```
-`rosita detect --json` gives the machine-readable form. The coarse **stack**
-(`rust`) is what a profile's `targets` match against.
+`load detect --json` gives the machine-readable form. The coarse **stack**
+(`rust`) is what a loadout's `targets` match against.
 
 ### 2. Author your library (global-only)
 
-Fragments and profiles live in the **global** config, not the repo. (Normally
-you'd do this visually with `rosita studio`; here we write the file directly.)
+Fragments and loadouts live in the **global** config, not the repo. (Normally
+you'd do this visually with `load studio`; here we write the file directly.)
 
 ```bash
-cat > "$ROSITA_CONFIG_DIR/config.toml" <<'TOML'
+cat > "$LOADOUT_CONFIG_DIR/config.toml" <<'TOML'
 [[fragments]]
 id = "rust-conventions"
 guidance = "Build with cargo, lint with clippy; prefer ?/Result over unwrap()."
@@ -89,7 +89,7 @@ id = "host-info"
 provider = "host"
 guidance = "Running on {{ provider.output }}"
 
-[[profiles]]
+[[loadouts]]
 name = "rust"
 targets = ["rust"]
 fragments = ["rust-conventions", "terse-comms", "infra-caution", "host-info"]
@@ -99,28 +99,28 @@ TOML
 ### 3. Explain the selection (dry — writes nothing)
 
 ```bash
-rosita explain
+load explain
 ```
 ```
 Detected targets: [rust]
-Profile selection → rust
+Loadout selection → rust
 
 Active fragments
-  • rust-conventions   fragment 'rust-conventions' via profile 'rust'
-  • terse-comms        fragment 'terse-comms' via profile 'rust'
-  • host-info          fragment 'host-info' via profile 'rust'
+  • rust-conventions   fragment 'rust-conventions' via loadout 'rust'
+  • terse-comms        fragment 'terse-comms' via loadout 'rust'
+  • host-info          fragment 'host-info' via loadout 'rust'
 
-Profiles considered
+Loadouts considered
   → rust           targets [rust] match
 ```
-**One profile per context.** `rust` is the only profile whose `targets` match, so
+**One loadout per context.** `rust` is the only loadout whose `targets` match, so
 it's auto-selected (no prompt). `infra-caution` is absent here — its own `when`
 self-gate (`path starts_with "infra/"`) doesn't match the repo root.
 
-### 4. Within-profile gating in a subdirectory
+### 4. Within-loadout gating in a subdirectory
 
 ```bash
-rosita --cwd "$SB/infra/db" explain
+loadout --cwd "$SB/infra/db" explain
 ```
 ```
 Active fragments
@@ -129,26 +129,26 @@ Active fragments
   • infra-caution
   • host-info
 ```
-Same profile, but now `infra-caution` contributes — its `when` matches the
-`infra/` path. Gating happens **inside** the chosen profile (per-fragment
-`when`), not by composing extra profiles. (`--cwd` runs as if invoked there.)
+Same loadout, but now `infra-caution` contributes — its `when` matches the
+`infra/` path. Gating happens **inside** the chosen loadout (per-fragment
+`when`), not by composing extra loadouts. (`--cwd` runs as if invoked there.)
 
 ### 5. Render the overlay and inspect it
 
 ```bash
-rosita refresh --agent claude
-cat .rosita/generated/claude.md
+load refresh --agent claude
+cat .loadout/generated/claude.md
 ```
 ```
-claude  ·  profile rust  ·  sha256:…
-  created       .rosita/generated/claude.md
+claude  ·  loadout rust  ·  sha256:…
+  created       .loadout/generated/claude.md
   created       CLAUDE.local.md        (a gitignored @import of the overlay)
   created       .gitignore
 ```
 The overlay carries a self-healing banner, the detected context, then the
-profile's composed guidance — including the **live** `host-info` output:
+loadout's composed guidance — including the **live** `host-info` output:
 ```
-## Profile guidance — rust
+## Loadout guidance — rust
 ### rust-conventions
 Build with cargo, lint with clippy; prefer ?/Result over unwrap().
 ### terse-comms
@@ -161,8 +161,8 @@ Committed files like `AGENTS.md` are never touched.
 ### 6. Introspect the resolved sets
 
 ```bash
-rosita fragments          # ● = active here, · = available but inactive
-rosita profiles              # marks which match, and the selected one
+load list fragments     # ● = active here, · = available but inactive
+load list               # loadouts: marks which match, and the selected one
 ```
 ```
 Fragments (4 in library, 3 active for this context)
@@ -171,23 +171,23 @@ Fragments (4 in library, 3 active for this context)
   · infra-caution — infra-caution
   ● host-info — host-info  (provider: host)
 
-Profiles (1 configured; selected: rust)
+Loadouts (1 configured; selected: rust)
   → rust             targets [rust]
         fragments: rust-conventions, terse-comms, infra-caution, host-info
 ```
 
 ### 7. Global-only enforcement
 
-Fragments and profiles declared in a **repo** are ignored — `rosita doctor`
+Fragments and loadouts declared in a **repo** are ignored — `load doctor`
 flags the mistake instead of silently honoring it:
 
 ```bash
-mkdir -p .rosita
-printf '[[fragments]]\nid="repo-cap"\nguidance="x"\n' > .rosita/config.toml
-rosita doctor | grep "global-only"
-# → ⚠ .rosita/config.toml declares fragments — these are global-only and are
-#   ignored here; move them to ~/.config/rosita/config.toml
-rm .rosita/config.toml
+mkdir -p .loadout
+printf '[[fragments]]\nid="repo-cap"\nguidance="x"\n' > .loadout/config.toml
+load doctor | grep "global-only"
+# → ⚠ .loadout/config.toml declares fragments — these are global-only and are
+#   ignored here; move them to ~/.config/loadout/config.toml
+rm .loadout/config.toml
 ```
 
 ### 8. Dynamic fragments & providers
@@ -195,11 +195,11 @@ rm .rosita/config.toml
 `host-info` above is a built-in **provider** — always safe, no trust needed.
 Providers (`host`/`toolchain`/`ai-tools`/`tailnet`/`docker`) probe the live
 environment; their (redacted) output lands only in the gitignored overlay and is
-kept out of the context hash. A bare `detect` never probes; `rosita detect
+kept out of the context hash. A bare `detect` never probes; `load detect
 --probes` opts in:
 
 ```bash
-rosita detect --probes        # host/toolchain/ai-tools/(tailnet/docker if present)
+load detect --probes        # host/toolchain/ai-tools/(tailnet/docker if present)
 ```
 
 The generic escape hatch is a fragment `command` (any shell command, redacted
@@ -210,30 +210,30 @@ global-only (§7), so a `command` is always one you authored globally.
 ### 9. Freshness lifecycle
 
 ```bash
-rosita refresh    # re-render initialized overlays
-rosita doctor     # → ✓ claude: up to date  + config/agent/template health
-rosita run claude --dry-run -- chat --model sonnet
+load refresh    # re-render initialized overlays
+load doctor     # → ✓ claude: up to date  + config/agent/template health
+load run claude --dry-run -- chat --model sonnet
 # → "dry run — no files will be written" + "would update …"  (no launch)
-rosita clean      # removes the overlay + CLAUDE.local.md; never touches AGENTS.md
+load clean      # removes the overlay + CLAUDE.local.md; never touches AGENTS.md
 ```
 A **static** overlay is idempotent — re-rendering an unchanged context is a
 no-op. An overlay with a **dynamic** fragment (like `host-info`) re-probes, so
-`refresh` rewrites it. (`rosita run claude` without `--dry-run` launches the
+`refresh` rewrites it. (`load run claude` without `--dry-run` launches the
 `claude` CLI if installed, passing your args through.)
 
 ### Teardown
 
 ```bash
-cd ~ && rm -rf "$SB" "$ROSITA_CONFIG_DIR" && unset ROSITA_CONFIG_DIR
+cd ~ && rm -rf "$SB" "$LOADOUT_CONFIG_DIR" && unset LOADOUT_CONFIG_DIR
 ```
-Because the global library was isolated under `ROSITA_CONFIG_DIR`, nothing
-touched your real `~/.config/rosita`, and the only repo affected was the
+Because the global library was isolated under `LOADOUT_CONFIG_DIR`, nothing
+touched your real `~/.config/loadout`, and the only repo affected was the
 throwaway one.
 
 ## What "passing" looks like
 
 - **Level 1:** green tests / clippy / fmt (263 tests).
-- **Level 2:** `rust` auto-selected as the **one** profile; `infra-caution`
+- **Level 2:** `rust` auto-selected as the **one** loadout; `infra-caution`
   gated in only under `infra/`; the dynamic `host-info` output rendered into the
   overlay; a repo-declared fragment flagged as **ignored** (global-only); and
   `clean` removing only the generated artifacts.

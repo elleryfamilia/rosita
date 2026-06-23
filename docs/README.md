@@ -1,12 +1,12 @@
-# rosita docs
+# loadout docs
 
-`rosita` injects global context into your AI coding agents: detect the
-project/runtime context, select the **one** profile that fits, compose its
+`loadout` injects global context into your AI coding agents: detect the
+project/runtime context, select the **one** loadout that fits, compose its
 fragments into a single agent-neutral overlay, and deliver it to each agent —
 keeping it fresh and never leaking secrets.
 
 ## For consumers
-- [Concepts](concepts.md) — the mental model (context, fragments, profiles, the binding, agents, freshness, public/private).
+- [Concepts](concepts.md) — the mental model (context, fragments, loadouts, the binding, agents, freshness, public/private).
 - [Configuration](configuration.md) — the layered config and full schema reference.
 - [Security](security.md) — secrets, redaction, the public/private split, and command execution (`allow_exec`).
 

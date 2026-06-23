@@ -1,6 +1,6 @@
 # Security & trust
 
-rosita is **agent guidance, not enforced policy.** Generated files are regular
+loadout is **agent guidance, not enforced policy.** Generated files are regular
 files an agent reads — treat them as advice, not a control plane. The notes
 below are about *hygiene* (don't leak secrets, don't surprise teammates, don't
 execute untrusted code), not about constraining the agent.
@@ -24,7 +24,7 @@ private.**
 
 | Kind | Example | Where it lives |
 | --- | --- | --- |
-| Generic structure | fragment guidance, profile rules | public layer (commit / open-source) |
+| Generic structure | fragment guidance, loadout rules | public layer (commit / open-source) |
 | Sensitive specifics | real hostnames, `host_classes` globs, fragment `params` values | **private** layer (gitignored `local.toml` / private repo) |
 | Live topology | tailnet hosts, containers | **don't store** — probe at runtime via a provider |
 | Secrets | tokens, keys | **never** anywhere |
@@ -34,14 +34,14 @@ you can SSH to, your employer's internal domains, or your tailnet leaks that to
 the world. Keep the *behavior* public ("you may SSH within my tailnet, confirm
 first") and the *specifics* private or detected.
 
-**`rosita doctor` lints** the public layer and warns if a
-fragment/profile/`host_class` there contains hostname/IP/domain-looking
+**`load doctor` lints** the public layer and warns if a
+fragment/loadout/`host_class` there contains hostname/IP/domain-looking
 literals ("looks private — move it to local.toml").
 
 ## Derived artifacts are gitignored, never committed **(implemented)**
 
-Anything rosita generates is machine-specific and local: `.rosita/generated/`,
-`.rosita/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (only when rosita
+Anything loadout generates is machine-specific and local: `.loadout/generated/`,
+`.loadout/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (only when loadout
 created it — if you already track it, your gitignore is left alone). Hand-authored
 `AGENTS.md` / `GEMINI.md` / `.github/copilot-instructions.md` are committed and
 never auto-edited. Committing a derived file would either churn, leak host-
@@ -56,25 +56,25 @@ gitignore management is skipped entirely outside a git repo (no stray
 Dynamic fragments can run code at render time, so the surface is kept small:
 
 - **Built-in providers** (`host`, `toolchain`, `ai-tools`, `tailnet`, `docker`)
-  are rosita-controlled probes — they never run arbitrary commands.
+  are loadout-controlled probes — they never run arbitrary commands.
 - **`command`-backed fragments** run a shell command. The per-fragment
-  `allow_exec` flag is the off-switch: `allow_exec = false` makes rosita embed a
+  `allow_exec` flag is the off-switch: `allow_exec = false` makes loadout embed a
   skip note instead of running it.
 - **Fragments are global-only** (see [configuration](configuration.md)).
   They're honored only from your built-in / global / global-local config — *you*
   author them. A cloned repo cannot contribute a fragment at all: repo-declared
   fragments are dropped by the loader and `doctor` flags them. So there's no
   "untrusted command from a cloned repo" to gate — the global-only model removes
-  that surface rather than prompting for it (there is no `rosita allow`).
+  that surface rather than prompting for it (there is no `loadout allow`).
 - Provider/command output is treated as sensitive (see the split above):
   local/gitignored only, redacted, never committed.
 
-So `rosita refresh` in a cloned repo composes only *your* global library — it
+So `load refresh` in a cloned repo composes only *your* global library — it
 never reads or runs what the repo itself declares.
 
 ## Threat model summary
 
-rosita defends against: leaking secrets into overlays; leaking sensitive
+loadout defends against: leaking secrets into overlays; leaking sensitive
 topology into shareable/committed config; and running code a cloned repo tries
 to introduce (it can't — fragments are global-only). It does **not** attempt
 to constrain what the agent does once it reads the overlay — that is out of scope

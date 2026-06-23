@@ -4,7 +4,7 @@ Reflects the current code.
 
 ## Shape
 
-A library crate `rosita` with trait seams; the binary `rosita` is a thin shell
+A library crate `loadout` with trait seams; the binary `loadout` is a thin shell
 over it (`src/main.rs`). Everything is testable without spawning the binary;
 `tests/cli.rs` also drives the real binary end-to-end, and `tests/studio.rs`
 drives the studio handlers.
@@ -12,7 +12,7 @@ drives the studio handlers.
 ## The render pipeline
 
 ```
-cwd → repo_base → Config::load → detect_context → select (one profile by targets)
+cwd → repo_base → Config::load → detect_context → select (one loadout by targets)
     → compose (its fragments) → render overlay → AgentDescriptor.apply → write + audit
 ```
 
@@ -20,12 +20,12 @@ cwd → repo_base → Config::load → detect_context → select (one profile by
    repo, the cwd. Resolved once and reused (`context::repo_base_for`).
 2. **Config** is loaded and merged across layers (`config::Config::load`).
 3. **Context** is detected by a pipeline of best-effort `ContextDetector`s.
-4. **Selection** picks the **one** profile whose `targets` match the context
-   (`profile::select`; 0/1/many → none / auto / prompt-and-remember-the-binding).
-   **Composition** then resolves *that* profile's fragments
-   (`profile::compose_profile` → `Composition`): deduped, `requires`-resolved,
+4. **Selection** picks the **one** loadout whose `targets` match the context
+   (`loadout::select`; 0/1/many → none / auto / prompt-and-remember-the-binding).
+   **Composition** then resolves *that* loadout's fragments
+   (`loadout::compose_loadout` → `Composition`): deduped, `requires`-resolved,
    each fragment's own `when` self-gate applied, `params` merged. No
-   cross-profile union.
+   cross-loadout union.
 5. **Render** produces one agent-neutral overlay (header + a `###` section per
    fragment), filtering fragments restricted to other agents.
 6. **Delivery** is per-agent, driven by an `AgentDescriptor`.
@@ -36,12 +36,12 @@ cwd → repo_base → Config::load → detect_context → select (one profile by
 | Module | Responsibility |
 | --- | --- |
 | `cli` | clap definitions; agents selected by id string, validated at runtime. |
-| `commands/` | one file per subcommand (`detect`/`run`/`explain`/`refresh`/`clean`/`doctor`/`introspect` (`fragments`/`profiles`/`agents`)) + shared `prepare()`/`resolve_agents()` and the render/sync plumbing in `apply`. (`studio` lives in `studio/`.) |
-| `config` | layered TOML model; per-layer `RawConfig` (all-optional) merged then finalized. Built-in **agents** are defaults (merged by id); **fragments and profiles are global-only** and never injected from built-ins. `Config::from_layer_strs` assembles staged docs in-memory (origin-tagged) for studio. |
+| `commands/` | one file per subcommand (`detect`/`run`/`explain`/`refresh`/`clean`/`doctor`/`introspect` (`fragments`/`loadouts`/`agents`)) + shared `prepare()`/`resolve_agents()` and the render/sync plumbing in `apply`. (`studio` lives in `studio/`.) |
+| `config` | layered TOML model; per-layer `RawConfig` (all-optional) merged then finalized. Built-in **agents** are defaults (merged by id); **fragments and loadouts are global-only** and never injected from built-ins. `Config::from_layer_strs` assembles staged docs in-memory (origin-tagged) for studio. |
 | `context/` | `Context` (+ `Scope` repo/machine, `selection_targets()`) + the `ContextDetector` trait and detectors: `git`, `languages`, `commands`, `system`, `env`. |
 | `fragment` | `Fragment` (reusable guidance atom) + `Risk` + the read-only shipped `palette()` (starters to duplicate from, never auto-composed). |
-| `profile` | `ProfileConfig` (with `targets`), `Rule`/`Field`/`Op` (fragment `when`), `FragmentRef`, pick-one `select()`, and `compose_profile()` → `Composition` of `ResolvedFragment`s. |
-| `binding` | the per-project remembered profile choice: repo `local.toml` `[binding]` (via `toml_edit`) + a global path-keyed store; records only *which* profile (no opt-out — a legacy `none = true` is parsed but ignored). |
+| `loadout` | `LoadoutConfig` (with `targets`), `Rule`/`Field`/`Op` (fragment `when`), `FragmentRef`, pick-one `select()`, and `compose_loadout()` → `Composition` of `ResolvedFragment`s. |
+| `binding` | the per-project remembered loadout choice: repo `local.toml` `[binding]` (via `toml_edit`) + a global path-keyed store; records only *which* loadout (no opt-out — a legacy `none = true` is parsed but ignored). |
 | `providers/` | `EnvProvider` trait + built-ins (`host`/`toolchain`/`ai-tools`/`tailnet`/`docker`), `gather()`/`probe_one()`/`run_command()`, TTL cache; output redacted and excluded from the context hash. |
 | `dynamic` | resolves a dynamic fragment's `provider`/`command` output at render time (`DynamicMode` Live/ReadOnly); a `command` runs unless `allow_exec = false`. |
 | `render/` | `TemplateRenderer` trait (minijinja impl) + `header` (the self-healing banner) + the high-level `render()`. |
@@ -68,19 +68,19 @@ cwd → repo_base → Config::load → detect_context → select (one profile by
 
 ## Key invariants
 
-- **One overlay, N deliveries.** rosita renders a single agent-neutral overlay;
+- **One overlay, N deliveries.** loadout renders a single agent-neutral overlay;
   per-agent differences are *delivery*, expressed by the descriptor (target
   file, import vs embed, owned vs managed-block).
 - **Auto-wire only through local/gitignored paths.** Claude's `CLAUDE.local.md`
   (`@import`), Codex's `AGENTS.override.md` (read before the committed `AGENTS.md`),
   Gemini's `GEMINI.local.md` (`@import`, registered once in
   `~/.gemini/settings.json` `context.fileName`), and Copilot's gitignored overlay
-  (pointed at via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` by `rosita run`) are wired
-  automatically; rosita never edits a committed shared file. Agents with no wiring
+  (pointed at via `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` by `load run`) are wired
+  automatically; loadout never edits a committed shared file. Agents with no wiring
   path (only `generic`, plus any custom agent) are emit-only. (opencode registers
   the overlay path in `~/.config/opencode/opencode.json` `instructions`.)
-- **Derived artifacts are gitignored, never committed** — `.rosita/generated/`,
-  `.rosita/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (when rosita
+- **Derived artifacts are gitignored, never committed** — `.loadout/generated/`,
+  `.loadout/logs/`, `AGENTS.override.md`, and `CLAUDE.local.md` (when loadout
   created it). gitignore management is skipped entirely outside a repo.
 - **Idempotent.** Every overlay embeds a `sha256:` context hash; re-rendering an
   unchanged context is a no-op despite the per-render timestamp
@@ -92,7 +92,7 @@ cwd → repo_base → Config::load → detect_context → select (one profile by
 ## Data flow types
 
 - `context::Context` — `Serialize`d into the template model and hashed.
-- `profile::Composition` — matching profiles + ordered `ResolvedFragment`s + reasons.
+- `loadout::Composition` — matching loadouts + ordered `ResolvedFragment`s + reasons.
 - `render::RenderOutput` — `content` (header+body) + `context_hash`.
 - `adapters::ApplyResult` — files written, warnings, notes, hash.
 - `audit::AuditEvent` — one JSONL line per render.

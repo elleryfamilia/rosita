@@ -1,6 +1,6 @@
 # Configuration
 
-rosita is configured by layered TOML. Everything below ships in the current
+loadout is configured by layered TOML. Everything below ships in the current
 binary (sections are marked **(implemented)**).
 
 ## Layers (precedence: later wins)
@@ -10,27 +10,27 @@ Built-in defaults ← global `config.toml` ← global `local.toml` ← repo
 
 | Layer | Path | Shareable? |
 | --- | --- | --- |
-| global | `$ROSITA_CONFIG_DIR` or `$XDG_CONFIG_HOME/rosita` or `~/.config/rosita`, file `config.toml` | yes (commit / open-source) |
+| global | `$LOADOUT_CONFIG_DIR` or `$XDG_CONFIG_HOME/loadout` or `~/.config/loadout`, file `config.toml` | yes (commit / open-source) |
 | global-local | `<global>/local.toml` | **no** (gitignored / private) |
-| repo | `<repo_base>/.rosita/config.toml` | yes (committable) |
-| repo-local | `<repo_base>/.rosita/local.toml` | **no** (gitignored) |
+| repo | `<repo_base>/.loadout/config.toml` | yes (committable) |
+| repo-local | `<repo_base>/.loadout/local.toml` | **no** (gitignored) |
 
-**Fragments and profiles are global-only.** You author them once, in the
+**Fragments and loadouts are global-only.** You author them once, in the
 global layers, and share them across machines by committing `config.toml` to a
-synced repo. A repo's `.rosita/` carries only the per-project **`[binding]`** (in
+synced repo. A repo's `.loadout/` carries only the per-project **`[binding]`** (in
 the gitignored `local.toml`), the generated overlays, the audit log, the probe
-cache, and optional template overrides — *not* fragments or profiles.
-Fragments or profiles declared in a repo layer are ignored, and `rosita
+cache, and optional template overrides — *not* fragments or loadouts.
+Fragments or loadouts declared in a repo layer are ignored, and `loadout
 doctor` flags them.
 
-- `$ROSITA_CONFIG_DIR` overrides the global dir (used in tests / isolation).
+- `$LOADOUT_CONFIG_DIR` overrides the global dir (used in tests / isolation).
 - Templates resolve repo → global → embedded; agents merge **by id** (later
   layers override).
 - Lists like `env.allowlist` are **additive** across layers (union, deduped).
 - The merge keeps "unset" distinct from "default": each layer parses into an
   all-optional `RawConfig`, layers fold, then defaults are applied.
 
-Other directories under `<repo_base>/.rosita/`: `generated/` (overlays,
+Other directories under `<repo_base>/.loadout/`: `generated/` (overlays,
 gitignored), `logs/events.jsonl` (audit, gitignored), `templates/` (overrides),
 `cache/` (gitignored — provider caches).
 
@@ -59,13 +59,13 @@ write_override = true    # auto-write AGENTS.override.md (default; `--no-overrid
 max_output_kib = 32      # warn when generated output exceeds this
 ```
 
-## `[[profiles]]` (implemented)
+## `[[loadouts]]` (implemented)
 
-A profile is tied to one or more detected **targets** and composes a list of
-fragments. It is the unit of selection — one profile per context.
+A loadout is tied to one or more detected **targets** and composes a list of
+fragments. It is the unit of selection — one loadout per context.
 
 ```toml
-[[profiles]]
+[[loadouts]]
 name = "rust — web"
 targets = ["rust"]                                  # selected when the repo detects as rust
 fragments = [
@@ -78,42 +78,42 @@ fragments = [
 
 - **`targets`:** the coarse detected tags — `stack` values `rust`, `node`,
   `nextjs`, `go`, `python`, `java`, `ruby`, `php`, `swift`, `dotnet`, plus
-  `machine` (the no-repo context). A profile is a selection candidate when
-  **any** of its targets matches. Empty `targets` ⇒ the profile is the **catch-all
-  default**: selected whenever no targeted profile matches (and still bindable by
+  `machine` (the no-repo context). A loadout is a selection candidate when
+  **any** of its targets matches. Empty `targets` ⇒ the loadout is the **catch-all
+  default**: selected whenever no targeted loadout matches (and still bindable by
   name).
-- **Selection is pick-one:** of the profiles whose targets match, exactly one is
+- **Selection is pick-one:** of the loadouts whose targets match, exactly one is
   used — 0 → fall back to a no-targets default if you have one, else none (empty
   overlay), 1 → auto, 2+ → you pick once and it's remembered (the
-  [`[binding]`](#binding-implemented)). Profiles do **not** merge; there is no
-  `priority`, `exclude`, or `exclusive`, and no built-in profiles.
-- A saved profile needs **≥1 fragment** (studio enforces it; the parser accepts
+  [`[binding]`](#binding-implemented)). Loadouts do **not** merge; there is no
+  `priority`, `exclude`, or `exclusive`, and no built-in loadouts.
+- A saved loadout needs **≥1 fragment** (studio enforces it; the parser accepts
   zero for hand-edits).
 
-Profiles select on `targets`, not rules — a *fragment* may still self-gate with
+Loadouts select on `targets`, not rules — a *fragment* may still self-gate with
 `when` rules (see [`[[fragments]]`](#fragments-implemented)).
 
 ## `[binding]` (implemented)
 
-The per-project remembered profile choice, written when 2+ profiles match and you
+The per-project remembered loadout choice, written when 2+ loadouts match and you
 pick one. It lives in the gitignored repo `local.toml` (a global path-keyed store
-is used outside a repo); rosita manages it, so you rarely hand-edit it.
+is used outside a repo); loadout manages it, so you rarely hand-edit it.
 
 ```toml
 [binding]
-profile = "rust — web"      # the chosen profile (the only remembered choice)
-# targets_hash = "…"        # fingerprint of the profile's targets at bind time (freshness)
+loadout = "rust — web"      # the chosen loadout (the only remembered choice)
+# targets_hash = "…"        # fingerprint of the loadout's targets at bind time (freshness)
 ```
 
-There is no opt-out binding — invoking rosita means you want a profile. A legacy
-`none = true` from an older rosita still parses but is ignored, so a project
-stuck on it re-prompts the next time 2+ profiles match.
+There is no opt-out binding — invoking loadout means you want a loadout. A legacy
+`none = true` from an older loadout still parses but is ignored, so a project
+stuck on it re-prompts the next time 2+ loadouts match.
 
 ## `[sync]` (implemented)
 
 Cross-machine sync of the global config dir, git-backed (see
 [Sync across machines](../README.md#sync-across-machines)). Auto-pull/push default
-on but are **inert** until `rosita sync init` makes the dir a git repo with a
+on but are **inert** until `load sync init` makes the dir a git repo with a
 remote, so they never act on a machine that opted out.
 
 ```toml
@@ -138,13 +138,13 @@ change. Required: `id`, `generated_filename`.
 [[agents]]
 id = "gemini"
 generated_filename = "gemini.md"
-launch = "gemini"                  # program for `rosita run gemini` (omit → render-only)
+launch = "gemini"                  # program for `load run gemini` (omit → render-only)
 template = "overlay"              # body template name (repo/global override → embedded)
 # importer = "GEMINI.local.md"             # auto-wire @import into a LOCAL file
 # override_target = "AGENTS.override.md"   # auto-merge target, gitignored (default-on)
 # override_base   = "AGENTS.md"            # file whose content seeds the override
 # append_prompt_flag = "--append-system-prompt"   # run injects a freshness note via this flag
-wire_hint = "include .rosita/generated/gemini.md from your agent config"
+wire_hint = "include .loadout/generated/gemini.md from your agent config"
 ```
 
 Built-in defaults:
@@ -155,14 +155,14 @@ Built-in defaults:
 | `codex` | `agents.md` | auto → gitignored `AGENTS.override.md` (Codex prefers it); `--no-override` = emit-only | `codex` |
 | `gemini` | `gemini.md` | auto → gitignored `GEMINI.local.md` (`@import`) + registers it in `~/.gemini/settings.json` `context.fileName` | `gemini` |
 | `opencode` | `opencode.md` | registers overlay path in `~/.config/opencode/opencode.json` `instructions` | `opencode` |
-| `copilot` | `copilot/.github/instructions/rosita.instructions.md` | `rosita run` sets `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `.rosita/generated/copilot` | `copilot` |
+| `copilot` | `copilot/.github/instructions/loadout.instructions.md` | `load run` sets `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `.loadout/generated/copilot` | `copilot` |
 | `generic` | `generic.md` | emit-only | — |
 
 ## `[host_classes]` (implemented; keep mappings private)
 
 Maps hostname globs (`*`/`?`) to a class you reference in rules
 (`host_class == "work"`). **The mappings contain real hostnames/domains — keep
-them in the private layer**, even though the *reference* in a profile is public.
+them in the private layer**, even though the *reference* in a loadout is public.
 
 ```toml
 # put this in local.toml (private), not the shareable config:

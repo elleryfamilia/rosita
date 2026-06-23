@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 516" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" role="img" aria-label="Where rosita fits: one global CLAUDE.md or AGENTS.md has the same content for every project. rosita is the reusable layer in between — your context written once as fragments, and each project receives only the right slice as a gitignored overlay next to the team's committed file.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 516" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" role="img" aria-label="Where loadout fits: one global CLAUDE.md or AGENTS.md has the same content for every project. loadout is the reusable layer in between — your context written once as fragments, and each project receives only the right slice as a gitignored overlay next to the team's committed file.">
   <style>
     .bg{fill:#ffffff}
     .card{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5}
@@ -44,7 +44,7 @@
 
   <rect class="bg" x="0" y="0" width="960" height="516"/>
 
-  <text class="title t" x="480" y="36" text-anchor="middle">Where rosita fits</text>
+  <text class="title t" x="480" y="36" text-anchor="middle">Where loadout fits</text>
   <text class="sub t-muted" x="480" y="60" text-anchor="middle">write your context once — each project gets the right slice</text>
 
   <!-- one global file -->
@@ -58,9 +58,9 @@
   <text class="h1 t" x="334" y="114">one global CLAUDE.md / AGENTS.md</text>
   <text class="small t-muted" x="334" y="138">same content in every project</text>
 
-  <!-- rosita -->
+  <!-- loadout -->
   <rect class="card-accent" x="80" y="192" width="800" height="120" rx="14"/>
-  <text class="brand t-accent" x="116" y="242">rosita</text>
+  <text class="brand t-accent" x="116" y="242">loadout</text>
   <text class="sub t-muted" x="116" y="268">your reusable context — written once</text>
 
   <rect class="f-rust"   x="500" y="222" width="36" height="36" rx="9"/>
