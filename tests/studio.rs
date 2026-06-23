@@ -27,7 +27,7 @@ fn spawn_studio_args(extra: &[&str]) -> (Child, tempfile::TempDir, u16, String) 
         .args(["studio", "--no-open", "--port", "0"])
         .args(extra)
         // Isolate the global config dir so the test never touches ~/.config.
-        .env("ROSITA_CONFIG_DIR", dir.path().join("empty-global"))
+        .env("LOADOUT_CONFIG_DIR", dir.path().join("empty-global"))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -146,7 +146,7 @@ fn studio_binds_and_serves_secured_spine() {
 
     // 5. A write over the real socket: stage a fragment (exercises POST-body
     //    parsing + the Origin guard end-to-end), then apply it. Fragments are
-    //    global-only, so it lands in the global config dir (ROSITA_CONFIG_DIR).
+    //    global-only, so it lands in the global config dir (LOADOUT_CONFIG_DIR).
     let body = "name=smoke&kind=markdown&guidance=hello&visibility=public";
     let create = http(
         port,

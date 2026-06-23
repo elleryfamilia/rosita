@@ -190,7 +190,7 @@ pub enum SyncAction {
 /// `sync init` options.
 #[derive(Debug, Args)]
 pub struct SyncInitArgs {
-    /// Remote URL to push to (e.g. `git@github.com:you/rosita-config.git`).
+    /// Remote URL to push to (e.g. `git@github.com:you/loadout-config.git`).
     /// Omit to set up the repo locally only (add a remote later).
     pub remote: Option<String>,
 }
@@ -198,7 +198,7 @@ pub struct SyncInitArgs {
 /// `sync clone` options.
 #[derive(Debug, Args)]
 pub struct SyncCloneArgs {
-    /// The config repo URL to clone (e.g. `https://github.com/you/rosita-config.git`).
+    /// The config repo URL to clone (e.g. `https://github.com/you/loadout-config.git`).
     pub url: String,
 }
 

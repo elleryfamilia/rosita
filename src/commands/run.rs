@@ -6,7 +6,7 @@
 //! live virtual files are explicitly out of scope for the MVP.
 //!
 //! Because rosita is the launching parent, it passes a freshness signal to the
-//! agent: `ROSITA_RUN=1` + `ROSITA_RENDERED_AT` in the environment (so an agent
+//! agent: `LOADOUT_RUN=1` + `LOADOUT_RENDERED_AT` in the environment (so an agent
 //! that can read env — or its hook — knows the context is current), and, for
 //! agents with an `append_prompt_flag` (e.g. Claude's `--append-system-prompt`),
 //! a short "context is fresh" note injected directly into the launch.
@@ -261,7 +261,7 @@ pub fn run(rt: &Runtime, args: &RunArgs) -> crate::Result<()> {
     }
 
     // Best-effort, throttled (once/day), time-bounded "update available" hint —
-    // skipped on dry-run, non-TTY, and via `ROSITA_NO_UPDATE_CHECK`. Printed
+    // skipped on dry-run, non-TTY, and via `LOADOUT_NO_UPDATE_CHECK`. Printed
     // before the launch line since the launch `exec`s away on Unix.
     if let Some(detail) = crate::update::nudge_detail() {
         println!("{}", step(&p, p.cyan("↑"), "update", detail));
@@ -486,8 +486,8 @@ fn print_launch_step(p: &Painter, program: &str, args: &[String]) {
 
 /// Env vars `rosita run` injects so an agent with no persistent local hook finds
 /// the overlay at launch: maps `launch_context_dir_env` → the absolute
-/// `launch_context_dir` under `.rosita/generated/` (e.g. Copilot's
-/// `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `<repo>/.rosita/generated/copilot`).
+/// `launch_context_dir` under `.loadout/generated/` (e.g. Copilot's
+/// `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` → `<repo>/.loadout/generated/copilot`).
 fn launch_context_env(
     descriptor: &AgentDescriptor,
     prep: &super::Prepared,
@@ -557,8 +557,8 @@ fn launch(
     let mut cmd = Command::new(program);
     cmd.args(args)
         .current_dir(cwd)
-        .env("ROSITA_RUN", "1")
-        .env("ROSITA_RENDERED_AT", rendered_at);
+        .env("LOADOUT_RUN", "1")
+        .env("LOADOUT_RENDERED_AT", rendered_at);
     for (k, v) in extra_env {
         cmd.env(k, v);
     }

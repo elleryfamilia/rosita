@@ -1,7 +1,7 @@
 //! Append-only audit log of every render.
 //!
 //! Each `render`/`refresh`/`run` writes one JSON object per line to
-//! `.rosita/logs/events.jsonl`, capturing what was selected, why, and what was
+//! `.loadout/logs/events.jsonl`, capturing what was selected, why, and what was
 //! written (including dry-runs, flagged as such).
 
 use std::io::Write as _;
@@ -76,7 +76,7 @@ mod tests {
             fragments: vec!["rust-conventions".into()],
             stacks: vec!["rust".into()],
             files: vec![WrittenFile {
-                path: ".rosita/generated/claude.md".into(),
+                path: ".loadout/generated/claude.md".into(),
                 action: WriteAction::Created,
                 bytes: 42,
             }],

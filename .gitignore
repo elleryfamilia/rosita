@@ -1,11 +1,11 @@
 # Rust build artifacts
 /target
 
-# rosita-derived, machine-specific artifacts (regenerated on demand)
-.rosita/generated/
-.rosita/cache/
-.rosita/logs/
-.rosita/local.toml
+# loadout-derived, machine-specific artifacts (regenerated on demand)
+.loadout/generated/
+.loadout/cache/
+.loadout/logs/
+.loadout/local.toml
 
 # OS / editor noise
 .DS_Store

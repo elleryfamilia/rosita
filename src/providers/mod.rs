@@ -9,7 +9,7 @@
 //! - **redacted** ([`crate::redact::redact_secrets`]) before it leaves here,
 //! - kept **out of [`crate::context::Context`]** so it never affects the context
 //!   hash (it lives in a separate [`Probes`] value used only for display/render),
-//! - **cached** under `.rosita/cache/<id>.json` with a TTL.
+//! - **cached** under `.loadout/cache/<id>.json` with a TTL.
 //!
 //! New providers are rows in [`builtin_providers`]. Dynamic fragments embed
 //! provider output (or a shell `command`) via [`crate::dynamic`].

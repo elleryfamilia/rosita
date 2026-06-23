@@ -97,7 +97,7 @@ fn touch_stamp(dir: &Path) {
     let _ = std::fs::write(stamp_path(dir), b"");
 }
 
-/// A short, human display name for the remote (the repo name, e.g. `rosita-config`).
+/// A short, human display name for the remote (the repo name, e.g. `loadout-config`).
 pub fn remote_name(dir: &Path) -> String {
     git(dir, &["remote", "get-url", "origin"], None)
         .ok()
@@ -374,7 +374,7 @@ pub fn clone(url: &str, dir: &Path, timeout: Duration) -> Result<()> {
             .unwrap_or(false)
     {
         bail!(
-            "{} is not empty — move it aside, or set ROSITA_CONFIG_DIR to a fresh path",
+            "{} is not empty — move it aside, or set LOADOUT_CONFIG_DIR to a fresh path",
             dir.display()
         );
     }
@@ -1072,11 +1072,11 @@ mod tests {
 
     #[test]
     fn extract_github_url_from_gh_output() {
-        let s = "✓ Created repository elleryfamilia/rosita-config on github.com\n  \
-                 https://github.com/elleryfamilia/rosita-config\n";
+        let s = "✓ Created repository elleryfamilia/loadout-config on github.com\n  \
+                 https://github.com/elleryfamilia/loadout-config\n";
         assert_eq!(
             extract_github_url(s).as_deref(),
-            Some("https://github.com/elleryfamilia/rosita-config")
+            Some("https://github.com/elleryfamilia/loadout-config")
         );
         // Trailing punctuation is trimmed; no URL → None.
         assert_eq!(

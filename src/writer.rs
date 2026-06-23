@@ -123,7 +123,7 @@ pub fn atomic_write(path: &Path, contents: &str) -> crate::Result<()> {
         .with_context(|| format!("creating directory {}", parent.display()))?;
 
     let mut tmp = tempfile::Builder::new()
-        .prefix(".rosita-tmp-")
+        .prefix(".loadout-tmp-")
         .tempfile_in(&parent)
         .with_context(|| format!("creating temp file in {}", parent.display()))?;
     tmp.write_all(contents.as_bytes())
@@ -251,9 +251,9 @@ mod tests {
 
     #[test]
     fn marker_block_into_empty() {
-        let out = upsert_marker_block(None, "@.rosita/generated/claude.md");
+        let out = upsert_marker_block(None, "@.loadout/generated/claude.md");
         assert!(out.starts_with(BLOCK_BEGIN));
-        assert!(out.contains("@.rosita/generated/claude.md"));
+        assert!(out.contains("@.loadout/generated/claude.md"));
         assert!(out.trim_end().ends_with(BLOCK_END));
     }
 
@@ -303,20 +303,20 @@ mod tests {
     #[test]
     fn ensure_line_adds_when_missing() {
         assert_eq!(
-            ensure_line(None, ".rosita/generated/"),
-            Some(".rosita/generated/\n".to_string())
+            ensure_line(None, ".loadout/generated/"),
+            Some(".loadout/generated/\n".to_string())
         );
         let existing = "/target\n";
-        let out = ensure_line(Some(existing), ".rosita/generated/").unwrap();
+        let out = ensure_line(Some(existing), ".loadout/generated/").unwrap();
         assert!(out.contains("/target"));
-        assert!(out.contains(".rosita/generated/"));
+        assert!(out.contains(".loadout/generated/"));
     }
 
     #[test]
     fn ensure_line_noop_when_present() {
-        let existing = "/target\n.rosita/generated/\n";
-        assert_eq!(ensure_line(Some(existing), ".rosita/generated/"), None);
+        let existing = "/target\n.loadout/generated/\n";
+        assert_eq!(ensure_line(Some(existing), ".loadout/generated/"), None);
         // trailing-slash-insensitive
-        assert_eq!(ensure_line(Some(existing), ".rosita/generated"), None);
+        assert_eq!(ensure_line(Some(existing), ".loadout/generated"), None);
     }
 }

@@ -44,7 +44,7 @@ pub struct AgentDescriptor {
     /// Body template name (resolved repo → global → embedded overlay).
     #[serde(default = "default_template")]
     pub template: String,
-    /// Filename under `.rosita/generated/`.
+    /// Filename under `.loadout/generated/`.
     pub generated_filename: String,
     /// Program to exec for `rosita run`, if launchable.
     #[serde(default)]
@@ -75,7 +75,7 @@ pub struct AgentDescriptor {
     /// (e.g. Copilot's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`).
     #[serde(default)]
     pub launch_context_dir_env: Option<String>,
-    /// Directory (relative to `.rosita/generated/`) that [`launch_context_dir_env`]
+    /// Directory (relative to `.loadout/generated/`) that [`launch_context_dir_env`]
     /// points at. The agent scans it for its own instruction layout, so the
     /// `generated_filename` is written *inside* this dir in the shape the agent
     /// expects — e.g. Copilot scans `<dir>/.github/instructions/**/*.instructions.md`,
@@ -108,7 +108,7 @@ pub struct ImporterRegistry {
     pub default_name: Option<String>,
     /// The literal value to register. When `None`, the [`AgentDescriptor::importer`]
     /// basename is registered instead (Gemini registers `GEMINI.local.md`; opencode
-    /// has no importer and registers the overlay path `.rosita/generated/opencode.md`).
+    /// has no importer and registers the overlay path `.loadout/generated/opencode.md`).
     #[serde(default)]
     pub value: Option<String>,
 }
@@ -176,7 +176,7 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             }),
             wire_hint: Some(
                 "Gemini reads GEMINI.md (and resolves @imports). To wire this overlay \
-                 manually instead, add `@.rosita/generated/gemini.md` to a GEMINI.md."
+                 manually instead, add `@.loadout/generated/gemini.md` to a GEMINI.md."
                     .into(),
             ),
             ..d("gemini", "gemini.md")
@@ -193,10 +193,10 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
                 settings_file: ".config/opencode/opencode.json".into(),
                 key_path: vec!["instructions".into()],
                 default_name: None,
-                value: Some(".rosita/generated/opencode.md".into()),
+                value: Some(".loadout/generated/opencode.md".into()),
             }),
             wire_hint: Some(
-                "opencode reads AGENTS.md; add \".rosita/generated/opencode.md\" to the \
+                "opencode reads AGENTS.md; add \".loadout/generated/opencode.md\" to the \
                  `instructions` array in opencode.json (rosita registers it globally)."
                     .into(),
             ),
@@ -216,7 +216,7 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
             launch_context_dir: Some("copilot".into()),
             wire_hint: Some(
                 "`rosita run copilot` wires this via COPILOT_CUSTOM_INSTRUCTIONS_DIRS. \
-                 For other entry points, point that env at .rosita/generated/copilot."
+                 For other entry points, point that env at .loadout/generated/copilot."
                     .into(),
             ),
             ..d(
@@ -227,7 +227,7 @@ pub fn builtin_agents() -> Vec<AgentDescriptor> {
         AgentDescriptor {
             display_name: Some("Generic (AGENTS.md-style)".into()),
             wire_hint: Some(
-                "Include .rosita/generated/generic.md from your agent's instruction file.".into(),
+                "Include .loadout/generated/generic.md from your agent's instruction file.".into(),
             ),
             ..d("generic", "generic.md")
         },
@@ -357,7 +357,7 @@ pub fn apply(
         // Auto-wire: managed @import block in a local file.
         let path = app.repo_base().join(importer);
         let existed = path.exists();
-        let import_line = format!("@.rosita/generated/{}", d.generated_filename);
+        let import_line = format!("@.loadout/generated/{}", d.generated_filename);
         let existing = std::fs::read_to_string(&path).ok();
         let new_content = writer::upsert_marker_block(existing.as_deref(), &import_line);
         let wf = app.writer.write(&path, &new_content)?;
@@ -450,10 +450,10 @@ pub fn apply(
     // keeps a repo clean automatically on every render — there is no `init`.
     if app.in_repo() {
         let mut entries = vec![
-            ".rosita/generated/".to_string(),
-            ".rosita/cache/".to_string(),
-            ".rosita/logs/".to_string(),
-            ".rosita/local.toml".to_string(),
+            ".loadout/generated/".to_string(),
+            ".loadout/cache/".to_string(),
+            ".loadout/logs/".to_string(),
+            ".loadout/local.toml".to_string(),
         ];
         entries.extend(gitignore_extra);
         if let Some(wf) = ensure_gitignored(app, &entries)? {
@@ -856,14 +856,14 @@ mod register_tests {
             None,
             &["instructions".to_string()],
             None,
-            ".rosita/generated/opencode.md",
+            ".loadout/generated/opencode.md",
         )
         .unwrap()
         .expect("should write");
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(
             v["instructions"],
-            serde_json::json!([".rosita/generated/opencode.md"])
+            serde_json::json!([".loadout/generated/opencode.md"])
         );
     }
 

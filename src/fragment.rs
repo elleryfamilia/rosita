@@ -30,9 +30,9 @@ pub enum Layer {
     Global,
     /// Global `local.toml`.
     GlobalLocal,
-    /// Repo `.rosita/config.toml`.
+    /// Repo `.loadout/config.toml`.
     Repo,
-    /// Repo `.rosita/local.toml`.
+    /// Repo `.loadout/local.toml`.
     RepoLocal,
 }
 

@@ -3,7 +3,7 @@
 //! There is **one** agent-neutral body template (`overlay.md.j2`); the
 //! agent-specific freshness/provenance header is prepended in Rust. Resolution
 //! order for a given template name (first hit wins):
-//! 1. repo templates dir — `<repo>/.rosita/templates/<name>.md.j2`
+//! 1. repo templates dir — `<repo>/.loadout/templates/<name>.md.j2`
 //! 2. global templates dir — `…/rosita/templates/<name>.md.j2`
 //! 3. the embedded default overlay.
 //!

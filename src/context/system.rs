@@ -184,7 +184,7 @@ mod tests {
     fn env_detector_respects_denylist() {
         // SECRET_TOKEN matches the default name denylist even if allowlisted.
         let mut cfg = crate::config::Config::defaults();
-        cfg.env.allowlist = vec!["ROSITA_TEST_PLAIN".into(), "ROSITA_TEST_SECRET".into()];
+        cfg.env.allowlist = vec!["LOADOUT_TEST_PLAIN".into(), "LOADOUT_TEST_SECRET".into()];
         // We can't reliably set process env in parallel tests; assert the name
         // filter directly instead.
         let deny: Vec<regex::Regex> = cfg
@@ -193,7 +193,7 @@ mod tests {
             .iter()
             .map(|p| regex::Regex::new(p).unwrap())
             .collect();
-        assert!(deny.iter().any(|re| re.is_match("ROSITA_TEST_SECRET")));
-        assert!(!deny.iter().any(|re| re.is_match("ROSITA_TEST_PLAIN")));
+        assert!(deny.iter().any(|re| re.is_match("LOADOUT_TEST_SECRET")));
+        assert!(!deny.iter().any(|re| re.is_match("LOADOUT_TEST_PLAIN")));
     }
 }

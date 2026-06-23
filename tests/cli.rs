@@ -1,7 +1,7 @@
 //! End-to-end CLI tests driving the real `rosita` binary against temp repos.
 //!
-//! Each test isolates the global config via `ROSITA_CONFIG_DIR` so it never
-//! reads the developer's real `~/.config/rosita`.
+//! Each test isolates the global config via `LOADOUT_CONFIG_DIR` so it never
+//! reads the developer's real `~/.config/loadout`.
 
 use std::fs;
 
@@ -59,7 +59,7 @@ impl Fixture {
     fn cmd(&self) -> Command {
         let mut c = Command::cargo_bin("load").unwrap();
         // Point the global config dir at an empty location → no global layer.
-        c.env("ROSITA_CONFIG_DIR", self.global.path().join("empty"));
+        c.env("LOADOUT_CONFIG_DIR", self.global.path().join("empty"));
         // Isolate $HOME so agent dotfile writes (e.g. Gemini's
         // ~/.gemini/settings.json registration) never touch the real home.
         c.env("HOME", self.global.path().join("home"));
@@ -109,7 +109,7 @@ impl Fixture {
     }
 
     /// Write a file into the isolated global config dir (the one `cmd()` points
-    /// `ROSITA_CONFIG_DIR` at), e.g. a trusted global `config.toml`.
+    /// `LOADOUT_CONFIG_DIR` at), e.g. a trusted global `config.toml`.
     fn write_global(&self, rel: &str, content: &str) {
         let p = self.global.path().join("empty").join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -153,8 +153,8 @@ fn refresh_claude_creates_overlay_marker_and_gitignore() {
         .stdout(predicate::str::contains("profile rust"));
 
     // Generated overlay exists and carries the header + a detected command.
-    assert!(fx.exists(".rosita/generated/claude.md"));
-    let overlay = fx.read(".rosita/generated/claude.md");
+    assert!(fx.exists(".loadout/generated/claude.md"));
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("rosita:generated"));
     assert!(overlay.contains("cargo test"));
     assert!(overlay.contains("not enforced policy"));
@@ -162,14 +162,14 @@ fn refresh_claude_creates_overlay_marker_and_gitignore() {
     // CLAUDE.local.md has the managed import block.
     let local = fx.read("CLAUDE.local.md");
     assert!(local.contains("BEGIN rosita (managed)"));
-    assert!(local.contains("@.rosita/generated/claude.md"));
+    assert!(local.contains("@.loadout/generated/claude.md"));
 
     // gitignore covers the generated dir.
-    assert!(fx.read(".gitignore").contains(".rosita/generated/"));
+    assert!(fx.read(".gitignore").contains(".loadout/generated/"));
 
     // Audit log written.
-    assert!(fx.exists(".rosita/logs/events.jsonl"));
-    let audit = fx.read(".rosita/logs/events.jsonl");
+    assert!(fx.exists(".loadout/logs/events.jsonl"));
+    let audit = fx.read(".loadout/logs/events.jsonl");
     assert!(audit.contains("\"agent\":\"claude\""));
     assert!(audit.contains("\"profile\":\"rust\""));
 }
@@ -188,7 +188,7 @@ fn refresh_in_non_repo_writes_overlay_but_no_gitignore() {
         .success()
         .stdout(predicate::str::contains("profile rust"));
 
-    assert!(fx.exists(".rosita/generated/claude.md"));
+    assert!(fx.exists(".loadout/generated/claude.md"));
     assert!(fx.exists("CLAUDE.local.md"));
     // The key guarantee: no .gitignore is created outside a repo.
     assert!(!fx.exists(".gitignore"));
@@ -219,7 +219,7 @@ fn refresh_at_home_withholds_the_bleeding_importer() {
         .stdout(predicate::str::contains("$HOME"));
 
     assert!(
-        fx.exists(".rosita/generated/claude.md"),
+        fx.exists(".loadout/generated/claude.md"),
         "overlay still written"
     );
     assert!(
@@ -262,7 +262,7 @@ fn editing_the_global_library_re_renders_a_repo_with_unchanged_context() {
         .assert()
         .success();
     assert!(fx
-        .read(".rosita/generated/claude.md")
+        .read(".loadout/generated/claude.md")
         .contains("VERSION-ONE"));
 
     // No change → still idempotent.
@@ -284,7 +284,7 @@ fn editing_the_global_library_re_renders_a_repo_with_unchanged_context() {
         .success();
 
     // The overlay must reflect the edit — proof the cache was invalidated.
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(
         overlay.contains("VERSION-TWO"),
         "a global-config edit must re-render the overlay; got:\n{overlay}"
@@ -348,7 +348,7 @@ fn codex_no_override_is_emit_only() {
         "# Hand-written AGENTS\n\nDo not clobber.\n"
     );
     assert!(!fx.exists("AGENTS.override.md"));
-    assert!(fx.exists(".rosita/generated/agents.md"));
+    assert!(fx.exists(".loadout/generated/agents.md"));
 }
 
 #[test]
@@ -411,10 +411,10 @@ fn dry_run_writes_nothing() {
         .stdout(predicate::str::contains("dry run"))
         .stdout(predicate::str::contains("would create"));
 
-    assert!(!fx.exists(".rosita/generated/claude.md"));
+    assert!(!fx.exists(".loadout/generated/claude.md"));
     assert!(!fx.exists("CLAUDE.local.md"));
     // Dry-run writes nothing at all — not even the audit log.
-    assert!(!fx.exists(".rosita/logs/events.jsonl"));
+    assert!(!fx.exists(".loadout/logs/events.jsonl"));
 }
 
 #[test]
@@ -454,10 +454,10 @@ fn refresh_auto_manages_gitignore_and_init_is_gone() {
         .assert()
         .success();
     let gi = fx.read(".gitignore");
-    assert!(gi.contains(".rosita/generated/"));
-    assert!(gi.contains(".rosita/cache/"));
-    assert!(gi.contains(".rosita/logs/"));
-    assert!(gi.contains(".rosita/local.toml"));
+    assert!(gi.contains(".loadout/generated/"));
+    assert!(gi.contains(".loadout/cache/"));
+    assert!(gi.contains(".loadout/logs/"));
+    assert!(gi.contains(".loadout/local.toml"));
 }
 
 #[test]
@@ -481,7 +481,7 @@ fn local_toml_supplies_private_params_to_fragments() {
     // Private params still come from the repo's local.toml (merged by id onto
     // the global fragment).
     fx.write(
-        ".rosita/local.toml",
+        ".loadout/local.toml",
         "[fragment_params.deploy]\nhost = \"box.private.example\"\nuser = \"deployer\"\n",
     );
 
@@ -490,7 +490,7 @@ fn local_toml_supplies_private_params_to_fragments() {
         .assert()
         .success();
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("Deploy as deployer@box.private.example."));
     // The shareable (global) config never contained the private host.
     assert!(!fx
@@ -504,7 +504,7 @@ fn doctor_leak_lint_flags_public_but_not_local() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.write(
-        ".rosita/config.toml",
+        ".loadout/config.toml",
         "[host_classes]\nwork = [\"*.corp.example.com\"]\n",
     );
     fx.cmd()
@@ -517,9 +517,9 @@ fn doctor_leak_lint_flags_public_but_not_local() {
     // …but the same literal in the PRIVATE local.toml is not.
     let fx2 = Fixture::new();
     fx2.rust_project();
-    fx2.write(".rosita/config.toml", "[defaults]\nagent = \"claude\"\n");
+    fx2.write(".loadout/config.toml", "[defaults]\nagent = \"claude\"\n");
     fx2.write(
-        ".rosita/local.toml",
+        ".loadout/local.toml",
         "[host_classes]\nwork = [\"*.corp.example.com\"]\n",
     );
     fx2.cmd()
@@ -559,7 +559,7 @@ fn doctor_flags_repo_declared_caps_and_profiles() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.write(
-        ".rosita/config.toml",
+        ".loadout/config.toml",
         "[[fragments]]\nid = \"x\"\nguidance = \"hi\"\n\
          \n[[profiles]]\nname = \"p\"\ntargets = [\"rust\"]\nfragments = [\"x\"]\n",
     );
@@ -598,7 +598,7 @@ fn run_dry_run_reports_would_exec_without_launching() {
         .stdout(predicate::str::contains("chat --model sonnet"));
 
     // dry-run preflight wrote nothing.
-    assert!(!fx.exists(".rosita/generated/claude.md"));
+    assert!(!fx.exists(".loadout/generated/claude.md"));
 }
 
 #[test]
@@ -719,7 +719,7 @@ fn refresh_all_six_agents_emit_gitignored_overlays() {
         "copilot/.github/instructions/rosita.instructions.md",
         "generic.md",
     ] {
-        assert!(fx.exists(&format!(".rosita/generated/{f}")), "missing {f}");
+        assert!(fx.exists(&format!(".loadout/generated/{f}")), "missing {f}");
     }
     // Committed instruction files are never touched.
     assert!(!fx.exists("AGENTS.md"));
@@ -749,7 +749,7 @@ fn gemini_auto_wires_local_import_and_registers_settings() {
     // Local @import file created (gitignored), pointing at the overlay.
     assert!(fx.exists("GEMINI.local.md"));
     let local = fx.read("GEMINI.local.md");
-    assert!(local.contains("@.rosita/generated/gemini.md"));
+    assert!(local.contains("@.loadout/generated/gemini.md"));
     assert!(local.contains("BEGIN rosita (managed)"));
     assert!(fx.read(".gitignore").contains("GEMINI.local.md"));
     // Committed GEMINI.md untouched.
@@ -803,7 +803,7 @@ fn opencode_registers_overlay_path_in_global_config() {
         .success();
 
     // Overlay written (gitignored); committed opencode.json untouched.
-    assert!(fx.exists(".rosita/generated/opencode.md"));
+    assert!(fx.exists(".loadout/generated/opencode.md"));
     assert_eq!(fx.read("opencode.json"), "{\"$schema\":\"x\"}\n");
 
     // Global ~/.config/opencode/opencode.json registers the overlay PATH directly
@@ -811,7 +811,7 @@ fn opencode_registers_overlay_path_in_global_config() {
     let settings: serde_json::Value =
         serde_json::from_str(&fx.read_home(".config/opencode/opencode.json")).unwrap();
     let instr = settings["instructions"].as_array().unwrap();
-    assert!(instr.iter().any(|v| v == ".rosita/generated/opencode.md"));
+    assert!(instr.iter().any(|v| v == ".loadout/generated/opencode.md"));
 
     // Idempotent: a second render leaves the global config byte-identical.
     let before = fx.read_home(".config/opencode/opencode.json");
@@ -841,7 +841,7 @@ fn run_fails_gracefully_when_cli_not_on_path() {
         .stderr(predicate::str::contains("isn't on your PATH"));
 
     // Failed before doing any work: no overlay rendered for the missing tool.
-    assert!(!fx.exists(".rosita/generated/ghost.md"));
+    assert!(!fx.exists(".loadout/generated/ghost.md"));
 }
 
 #[test]
@@ -857,7 +857,7 @@ fn copilot_render_writes_nested_overlay_without_touching_committed_files() {
 
     // Overlay is a `.instructions.md` (no applyTo → Copilot inlines it) under the
     // gitignored generated dir's .github/instructions.
-    let rel = ".rosita/generated/copilot/.github/instructions/rosita.instructions.md";
+    let rel = ".loadout/generated/copilot/.github/instructions/rosita.instructions.md";
     assert!(fx.exists(rel));
     let overlay = fx.read(rel);
     assert!(overlay.contains("rosita:generated"));
@@ -881,7 +881,7 @@ fn copilot_run_injects_custom_instructions_dirs_env() {
         .stdout(predicate::str::contains(
             "COPILOT_CUSTOM_INSTRUCTIONS_DIRS=",
         ))
-        .stdout(predicate::str::contains(".rosita/generated/copilot"))
+        .stdout(predicate::str::contains(".loadout/generated/copilot"))
         .stdout(predicate::str::contains("would exec:"));
 }
 
@@ -893,10 +893,10 @@ fn overlay_has_self_healing_banner() {
         .args(["refresh", "--agent", "claude"])
         .assert()
         .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("rosita refresh"));
     assert!(overlay.contains("rosita clean"));
-    assert!(overlay.contains("$ROSITA_RUN"));
+    assert!(overlay.contains("$LOADOUT_RUN"));
 }
 
 #[test]
@@ -911,7 +911,7 @@ fn refresh_in_repo_gitignores_the_importer() {
     // We created CLAUDE.local.md, so it must be gitignored (it's a derived,
     // machine-specific artifact).
     let gi = fx.read(".gitignore");
-    assert!(gi.contains(".rosita/generated/"));
+    assert!(gi.contains(".loadout/generated/"));
     assert!(gi.contains("CLAUDE.local.md"));
 }
 
@@ -924,7 +924,7 @@ fn clean_removes_rosita_artifacts() {
         .args(["refresh", "--agent", "claude"])
         .assert()
         .success();
-    assert!(fx.exists(".rosita/generated/claude.md"));
+    assert!(fx.exists(".loadout/generated/claude.md"));
     assert!(fx.exists("CLAUDE.local.md"));
 
     fx.cmd()
@@ -932,7 +932,7 @@ fn clean_removes_rosita_artifacts() {
         .assert()
         .success();
     // Generated overlay gone; CLAUDE.local.md (only our block) removed.
-    assert!(!fx.exists(".rosita/generated/claude.md"));
+    assert!(!fx.exists(".loadout/generated/claude.md"));
     assert!(!fx.exists("CLAUDE.local.md"));
 }
 
@@ -955,7 +955,7 @@ fn clean_preserves_user_content_in_importer() {
     let local = fx.read("CLAUDE.local.md");
     assert!(local.contains("keep this"));
     assert!(!local.contains("BEGIN rosita"));
-    assert!(!fx.exists(".rosita/generated/claude.md"));
+    assert!(!fx.exists(".loadout/generated/claude.md"));
 }
 
 #[test]
@@ -1024,8 +1024,8 @@ fn use_pins_a_loadout_binding() {
             "pinned this project to loadout 'rust'",
         ));
 
-    assert!(fx.exists(".rosita/local.toml"));
-    let binding = fx.read(".rosita/local.toml");
+    assert!(fx.exists(".loadout/local.toml"));
+    let binding = fx.read(".loadout/local.toml");
     assert!(binding.contains("profile = \"rust\""), "got:\n{binding}");
 }
 
@@ -1117,7 +1117,7 @@ fn custom_agent_via_config_is_first_class() {
         .args(["refresh", "--agent", "myagent"])
         .assert()
         .success();
-    assert!(fx.exists(".rosita/generated/myagent.md"));
+    assert!(fx.exists(".loadout/generated/myagent.md"));
 
     // …and it's launchable via `run` (dry-run shows the configured program).
     fx.cmd()
@@ -1157,7 +1157,7 @@ fn profile_composes_its_fragment_set_with_no_baseline() {
         .success()
         .stdout(predicate::str::contains("profile rust"));
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     // Both of the profile's fragments render, each its own section…
     assert!(overlay.contains("### Rust conventions"));
     assert!(overlay.contains("### Terse communication"));
@@ -1167,7 +1167,7 @@ fn profile_composes_its_fragment_set_with_no_baseline() {
     assert!(!overlay.contains("### Baseline"));
 
     // The audit log records exactly the composed fragment set.
-    let audit = fx.read(".rosita/logs/events.jsonl");
+    let audit = fx.read(".loadout/logs/events.jsonl");
     assert!(audit.contains("rust-conventions"));
     assert!(audit.contains("terse"));
     assert!(!audit.contains("baseline"));
@@ -1200,14 +1200,14 @@ fn user_fragment_via_config_is_composed() {
         .assert()
         .success();
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     // The custom fragment renders with its body…
     assert!(overlay.contains("### House style"));
     assert!(overlay.contains("Always run the formatter before committing."));
     // …and still composes alongside the stack fragment.
     assert!(overlay.contains("### Rust conventions"));
 
-    let audit = fx.read(".rosita/logs/events.jsonl");
+    let audit = fx.read(".loadout/logs/events.jsonl");
     assert!(audit.contains("house-style"));
 }
 
@@ -1263,7 +1263,7 @@ fn dynamic_provider_fragment_renders_live_output() {
         .args(["refresh", "--agent", "claude"])
         .assert()
         .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains(&format!("OS={}", std::env::consts::OS)));
 }
 
@@ -1289,7 +1289,7 @@ fn global_layer_command_runs() {
         .args(["refresh", "--agent", "claude"])
         .assert()
         .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("global-ok"));
     assert!(!overlay.contains("skipped untrusted"));
 }
@@ -1302,7 +1302,7 @@ fn repo_command_fragment_is_ignored() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.write(
-        ".rosita/config.toml",
+        ".loadout/config.toml",
         "[[fragments]]\n\
          id = \"greet\"\n\
          command = \"echo hello-rosita\"\n\
@@ -1317,7 +1317,7 @@ fn repo_command_fragment_is_ignored() {
         .args(["refresh", "--agent", "claude"])
         .assert()
         .success();
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     // The command output never appears — the repo-declared cap is dropped.
     assert!(!overlay.contains("hello-rosita"));
 }
@@ -1459,7 +1459,7 @@ fn ambiguous_profiles_render_empty_and_warn() {
         .stderr(predicate::str::contains("loadouts match this project"))
         .stdout(predicate::str::contains("profile none"));
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(!overlay.contains("AAA guidance"));
     assert!(!overlay.contains("BBB guidance"));
 }
@@ -1470,9 +1470,9 @@ fn binding_in_local_toml_selects_profile_without_prompt() {
     // straight to that profile — no prompt, no ambiguity warning.
     let fx = Fixture::new();
     fx.rust_project();
-    fx.git_init(); // repo scope → binding is read from .rosita/local.toml
+    fx.git_init(); // repo scope → binding is read from .loadout/local.toml
     fx.author(TWO_RUST_PROFILES);
-    fx.write(".rosita/local.toml", "[binding]\nprofile = \"rust-b\"\n");
+    fx.write(".loadout/local.toml", "[binding]\nprofile = \"rust-b\"\n");
 
     fx.cmd()
         .args(["refresh", "--agent", "claude"])
@@ -1481,7 +1481,7 @@ fn binding_in_local_toml_selects_profile_without_prompt() {
         .stdout(predicate::str::contains("profile rust-b"))
         .stderr(predicate::str::contains("loadouts match").not());
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("BBB guidance"));
     assert!(!overlay.contains("AAA guidance"));
 }
@@ -1497,7 +1497,7 @@ fn stale_binding_targets_hash_redetects() {
     fx.git_init();
     fx.author(TWO_RUST_PROFILES);
     fx.write(
-        ".rosita/local.toml",
+        ".loadout/local.toml",
         "[binding]\nprofile = \"rust-b\"\ntargets_hash = \"sha256:stale\"\n",
     );
 
@@ -1508,7 +1508,7 @@ fn stale_binding_targets_hash_redetects() {
         .stderr(predicate::str::contains("loadouts match this project"))
         .stdout(predicate::str::contains("profile none"));
 
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(!overlay.contains("BBB guidance"));
 }
 
@@ -1739,7 +1739,7 @@ fn refresh_auto_pulls_synced_global_config() {
         .assert()
         .success()
         .stdout(predicate::str::contains("pulled"));
-    let overlay = fx.read(".rosita/generated/claude.md");
+    let overlay = fx.read(".loadout/generated/claude.md");
     assert!(
         overlay.contains("SYNC-TWO"),
         "refresh must compose the freshly-pulled config; got:\n{overlay}"

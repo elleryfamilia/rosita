@@ -3,7 +3,7 @@
 //! When 2+ profiles match a project, rosita asks once which to use and remembers
 //! the answer so it never asks again. Where the answer lives depends on scope:
 //!
-//! - **Repo** → the repo's gitignored `.rosita/local.toml` `[binding]` table
+//! - **Repo** → the repo's gitignored `.loadout/local.toml` `[binding]` table
 //!   (per-checkout; a teammate's checkout makes its own choice). Written with
 //!   `toml_edit` so the rest of the private layer is preserved.
 //! - **Machine** (no repo) → a global, path-keyed store `bindings.toml`, keyed
@@ -120,7 +120,7 @@ pub fn write(ctx: &Context, b: &Binding) -> Result<()> {
     }
 }
 
-// --- repo scope: the `[binding]` table in `.rosita/local.toml` ---------------
+// --- repo scope: the `[binding]` table in `.loadout/local.toml` ---------------
 
 /// Lenient view over `local.toml` that extracts only `[binding]` (every other
 /// table — `host_classes`, `fragment_params`, … — is ignored).

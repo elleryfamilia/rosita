@@ -98,7 +98,7 @@ fn offer_gh(dir: &Path, p: &Painter) -> Result<()> {
         let _ = sync::amend_reset_author(dir);
     }
 
-    let mut name = prompt_line("  Repo name", "rosita-config")?;
+    let mut name = prompt_line("  Repo name", "loadout-config")?;
     // config.toml is secret-free by design, so public is a safe, zero-auth option.
     let public = prompt_yes(
         "  Make it public? (config.toml carries no secrets; public = no git auth on other boxes)",

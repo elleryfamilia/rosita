@@ -30,7 +30,7 @@ pub struct HeaderMeta<'a> {
 ///
 /// Includes a **self-healing** banner: it tells the agent when/where the
 /// snapshot was made and the exact commands to verify, refresh, or remove it —
-/// plus the `$ROSITA_RUN` signal so an agent launched via `rosita run` knows the
+/// plus the `$LOADOUT_RUN` signal so an agent launched via `rosita run` knows the
 /// context is current, and one launched directly knows to check freshness.
 pub fn build(meta: &HeaderMeta) -> String {
     let sources = if meta.sources.is_empty() {
@@ -59,7 +59,7 @@ pub fn build(meta: &HeaderMeta) -> String {
          > 🕒 rosita snapshot — **{host}**, **{generated_at}**, profile **{profile}** (context {hash}).\n\
          > This is point-in-time **agent guidance, not enforced policy**, and may be stale.\n\
          > Check freshness with `rosita doctor`; regenerate with `rosita refresh`; remove with `rosita clean`.\n\
-         > If `$ROSITA_RUN` is unset and the project changed since the time above, refresh before relying on this.\n\
+         > If `$LOADOUT_RUN` is unset and the project changed since the time above, refresh before relying on this.\n\
          \n",
         hash = meta.context_hash,
         generated_at = meta.generated_at,
@@ -107,7 +107,7 @@ mod tests {
             profile: "rust",
             context_hash: "sha256:abcdef1234567890",
             template_source: "embedded",
-            sources: &[".rosita/config.toml".to_string()],
+            sources: &[".loadout/config.toml".to_string()],
         })
     }
 
@@ -127,7 +127,7 @@ mod tests {
         // self-healing instructions + launch-mode signal
         assert!(h.contains("rosita refresh"));
         assert!(h.contains("rosita clean"));
-        assert!(h.contains("$ROSITA_RUN"));
+        assert!(h.contains("$LOADOUT_RUN"));
     }
 
     #[test]

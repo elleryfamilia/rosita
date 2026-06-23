@@ -36,7 +36,7 @@ pub fn run(rt: &Runtime, args: &UseArgs) -> crate::Result<()> {
     }
 
     let where_ = match context.scope() {
-        Scope::Repo => ".rosita/local.toml",
+        Scope::Repo => ".loadout/local.toml",
         Scope::Machine => "the global bindings store",
     };
 

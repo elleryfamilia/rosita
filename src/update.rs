@@ -2,7 +2,7 @@
 //! best-effort "a newer rosita is available" nudge for `rosita run`.
 //!
 //! axoupdater works off the *install receipt* the cargo-dist shell installer
-//! writes to the config dir (`~/.config/rosita/`). A binary installed any other
+//! writes to the config dir (`~/.config/loadout/`). A binary installed any other
 //! way (`cargo install`, a package manager, hand-copied) has no receipt, so
 //! self-update degrades gracefully to [`Outcome::NotManaged`] — rosita never
 //! pretends to update something it can't.
@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 const APP: &str = "rosita";
 
 /// Opt out of the `rosita run` update nudge (any value disables it).
-pub const NUDGE_OPT_OUT_ENV: &str = "ROSITA_NO_UPDATE_CHECK";
+pub const NUDGE_OPT_OUT_ENV: &str = "LOADOUT_NO_UPDATE_CHECK";
 
 /// How often the `run` nudge re-checks for a newer release.
 const NUDGE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);

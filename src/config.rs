@@ -2,9 +2,9 @@
 //! ← repo `config.toml` ← repo `local.toml` (later wins).
 //!
 //! - Global: `$XDG_CONFIG_HOME/rosita/config.toml` (falls back to
-//!   `~/.config/rosita/config.toml`). Overridable via `ROSITA_CONFIG_DIR`
+//!   `~/.config/loadout/config.toml`). Overridable via `LOADOUT_CONFIG_DIR`
 //!   (used in tests and for isolation).
-//! - Repo: `<repo_base>/.rosita/config.toml`, where `repo_base` is the git
+//! - Repo: `<repo_base>/.loadout/config.toml`, where `repo_base` is the git
 //!   root (or the cwd when not in a repo).
 //! - `local.toml` (in either dir) is the **private**, gitignored layer for
 //!   sensitive specifics (real hostnames, `host_classes`, fragment `params`);
@@ -212,7 +212,7 @@ impl Config {
     }
 }
 
-/// Enforce the global-only model. A repo (`.rosita/config.toml` / `local.toml`)
+/// Enforce the global-only model. A repo (`.loadout/config.toml` / `local.toml`)
 /// is an untrusted, committed/shareable layer: it may contribute only a private
 /// `[binding]`, `fragment_params`, and `host_classes`. Everything else is owned
 /// by your global config and is stripped from repo layers here so a cloned repo
@@ -226,7 +226,7 @@ fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
         parsed.targets.clear();
         // Agent descriptors carry an executable `launch` (and path-bearing
         // `importer`/`override_target`/`importer_registry.settings_file`).
-        // Honoring one from a committed `.rosita/config.toml` would let a cloned
+        // Honoring one from a committed `.loadout/config.toml` would let a cloned
         // repo override the built-in `claude`/`codex`/… descriptor and hijack
         // `rosita run` into executing attacker code, or write/delete files outside
         // the project. Agents are global-only, exactly like fragments and targets.
@@ -542,18 +542,18 @@ impl Default for CodexConfig {
 
 /// Directory holding the global config and templates.
 ///
-/// Honors `ROSITA_CONFIG_DIR`, then `$XDG_CONFIG_HOME/rosita`, then
-/// `~/.config/rosita`. Returns `None` only if no home can be determined.
+/// Honors `LOADOUT_CONFIG_DIR`, then `$XDG_CONFIG_HOME/loadout`, then
+/// `~/.config/loadout`. Returns `None` only if no home can be determined.
 pub fn global_config_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("ROSITA_CONFIG_DIR") {
+    if let Some(dir) = std::env::var_os("LOADOUT_CONFIG_DIR") {
         return Some(PathBuf::from(dir));
     }
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg).join("rosita"));
+            return Some(PathBuf::from(xdg).join("loadout"));
         }
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join("rosita"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join("loadout"))
 }
 
 /// The user's home directory (`$HOME`), if set. Used to resolve other tools'
@@ -581,9 +581,9 @@ pub fn global_templates_dir() -> Option<PathBuf> {
     global_config_dir().map(|d| d.join("templates"))
 }
 
-/// The `.rosita` directory for a repo base.
+/// The `.loadout` directory for a repo base.
 pub fn repo_dir(repo_base: &Path) -> PathBuf {
-    repo_base.join(".rosita")
+    repo_base.join(".loadout")
 }
 
 /// Repo `config.toml` path.
@@ -828,7 +828,7 @@ mod tests {
         [[agents]]
         id = "claude"
         generated_filename = "claude.md"
-        launch = "./.rosita/pwn"
+        launch = "./.loadout/pwn"
     "#;
 
     #[test]
@@ -869,7 +869,7 @@ mod tests {
 
         let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
         let claude = c.agents.iter().find(|a| a.id == "claude").unwrap();
-        assert_eq!(claude.launch.as_deref(), Some("./.rosita/pwn"));
+        assert_eq!(claude.launch.as_deref(), Some("./.loadout/pwn"));
         assert_eq!(c.default_agent, "codex");
     }
 
@@ -880,7 +880,7 @@ mod tests {
         use crate::fragment::Layer;
         let c = Config::from_layer_strs(vec![(
             Layer::Repo,
-            PathBuf::from("/r/.rosita/config.toml"),
+            PathBuf::from("/r/.loadout/config.toml"),
             AGENT_OVERRIDE.to_string(),
         )])
         .unwrap();
@@ -945,7 +945,7 @@ mod tests {
         use crate::fragment::Layer;
         let c = Config::from_layer_strs(vec![(
             Layer::Repo,
-            PathBuf::from("/r/.rosita/config.toml"),
+            PathBuf::from("/r/.loadout/config.toml"),
             OPERATIONAL_TABLES.to_string(),
         )])
         .unwrap();
@@ -1034,7 +1034,7 @@ mod tests {
             ),
             (
                 Layer::Repo,
-                PathBuf::from("/r/.rosita/config.toml"),
+                PathBuf::from("/r/.loadout/config.toml"),
                 "[[fragments]]\nid = \"repo-cap\"\nguidance = \"nope\"\n\
                  \n[[profiles]]\nname = \"repo-prof\"\ntargets = [\"rust\"]\n"
                     .to_string(),
@@ -1060,7 +1060,7 @@ mod tests {
             ),
             (
                 Layer::Repo,
-                PathBuf::from("/r/.rosita/config.toml"),
+                PathBuf::from("/r/.loadout/config.toml"),
                 "[[targets]]\nid = \"evil\"\nrule = { kind = \"file_exists\", path = \"x\" }\n"
                     .to_string(),
             ),

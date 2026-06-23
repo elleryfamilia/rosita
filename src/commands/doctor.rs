@@ -82,7 +82,7 @@ pub fn run(rt: &Runtime) -> crate::Result<()> {
     if prep.config.sources.is_empty() {
         c.line(
             Status::Warn,
-            "no config files found; author fragments and loadouts in ~/.config/rosita/config.toml (or run `rosita studio`)",
+            "no config files found; author fragments and loadouts in ~/.config/loadout/config.toml (or run `rosita studio`)",
         );
     } else {
         for s in &prep.config.sources {
@@ -337,7 +337,7 @@ fn on_path(program: &str) -> bool {
 
 fn writable(dir: &Path) -> bool {
     tempfile::Builder::new()
-        .prefix(".rosita-doctor-")
+        .prefix(".loadout-doctor-")
         .tempfile_in(dir)
         .is_ok()
 }
@@ -438,7 +438,7 @@ fn check_repo_global_only(c: &mut Checks, repo_base: &Path) {
             c.line(
                 Status::Warn,
                 format!(
-                    ".rosita/{label} declares {what} — these are global-only and are ignored here; move them to ~/.config/rosita/config.toml"
+                    ".loadout/{label} declares {what} — these are global-only and are ignored here; move them to ~/.config/loadout/config.toml"
                 ),
             );
         }
@@ -475,13 +475,13 @@ fn check_gitignore(c: &mut Checks, repo_base: &Path) {
     let gi = std::fs::read_to_string(repo_base.join(".gitignore")).unwrap_or_default();
     if gi
         .lines()
-        .any(|l| l.trim().trim_end_matches('/') == ".rosita/generated")
+        .any(|l| l.trim().trim_end_matches('/') == ".loadout/generated")
     {
-        c.line(Status::Ok, ".gitignore covers .rosita/generated/");
+        c.line(Status::Ok, ".gitignore covers .loadout/generated/");
     } else {
         c.line(
             Status::Warn,
-            ".gitignore missing .rosita/generated/ (render an agent to manage it)",
+            ".gitignore missing .loadout/generated/ (render an agent to manage it)",
         );
     }
 }
