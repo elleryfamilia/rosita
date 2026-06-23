@@ -2028,9 +2028,9 @@ mod tests {
         ] {
             assert!(body.contains(name), "gallery lists '{name}'");
         }
-        // …with a brief description blurb on each.
+        // …with a marketing blurb on each.
         assert!(
-            body.contains("Explore, plan, code, commit"),
+            body.contains("Anthropic's recommended starting point."),
             "card blurb shown"
         );
         assert!(body.contains("active workflow"), "active marker");

@@ -336,7 +336,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         wf(
             "superpowers",
             "Superpowers",
-            "Brainstorm, plan, then subagent-driven build",
+            "The community's most-starred agent framework.",
             "bolt",
             "obra/superpowers (Jesse Vincent)",
             "https://github.com/obra/superpowers",
@@ -386,7 +386,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         wf(
             "boris",
             "Boris's workflow",
-            "Plan mode, auto-accept, verify, ship",
+            "The workflow Claude Code's creator uses daily.",
             "rocket",
             "Boris Cherny (Claude Code's creator)",
             "https://howborisusesclaudecode.com/",
@@ -431,7 +431,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         wf(
             "lean",
             "Lean",
-            "Explore, plan, code, commit",
+            "Anthropic's recommended starting point.",
             "git-branch",
             "Anthropic explore-plan-code-commit",
             "https://www.anthropic.com/engineering/claude-code-best-practices",
@@ -478,7 +478,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         wf(
             "spec-driven",
             "Spec-driven",
-            "Spec first, then plan and build against it",
+            "The spec-first method behind Spec Kit & Kiro.",
             "book",
             "GitHub Spec Kit / AWS Kiro",
             "https://github.com/github/spec-kit",
@@ -526,7 +526,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         wf(
             "loop",
             "Ralph loop",
-            "Backlog loop — one item at a time until done",
+            "The viral 'Ralph' loop for long autonomous runs.",
             "refresh",
             "the Ralph single-prompt loop",
             "https://ghuntley.com/ralph/",
