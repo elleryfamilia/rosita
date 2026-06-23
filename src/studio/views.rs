@@ -16,7 +16,7 @@ use pulldown_cmark::{html as md_html, Event, Options, Parser};
 
 use crate::context::Scope;
 use crate::fragment::{Fragment, Layer};
-use crate::profile::ProfileConfig;
+use crate::profile::LoadoutConfig;
 use crate::studio::edit::FileDiff;
 use crate::studio::state::{
     AtomDot, AtomState, FragmentView, LibraryView, Onboarding, PackView, PreviewCap,
@@ -1743,7 +1743,7 @@ fn lives_in(layer: Layer) -> Markup {
 /// picker, an inline quick-create, and a live preview (right). `draft` carries
 /// the in-progress values (so an inline add re-renders without losing state).
 pub fn profile_editor(
-    draft: &ProfileConfig,
+    draft: &LoadoutConfig,
     is_new: bool,
     original_name: Option<&str>,
     lib: &LibraryView,

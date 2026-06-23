@@ -27,7 +27,7 @@ use crate::context;
 use crate::dynamic::DynamicMode;
 use crate::fragment::{palette, Layer};
 use crate::pack::Pack;
-use crate::profile::ProfileConfig;
+use crate::profile::LoadoutConfig;
 use crate::studio::assets;
 use crate::studio::edit::{Session, StagedOp};
 use crate::studio::state::{self, LibraryView, PreviewOutcome, StudioState};
@@ -544,7 +544,7 @@ fn handle_fragment_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
         };
         let cfg = s.session.staged_config()?;
         let affected = profiles_using(&cfg, id);
-        let cleaned: Vec<ProfileConfig> = cfg
+        let cleaned: Vec<LoadoutConfig> = cfg
             .profiles
             .iter()
             .filter(|p| affected.contains(&p.name))
@@ -1177,7 +1177,7 @@ fn handle_profile_delete(state: &Arc<Mutex<StudioState>>, name: &str) -> Resp {
 /// Render a draft/profile for the editor preview, or an empty outcome on error.
 fn profile_preview_or_empty(
     snap: &state::Snapshot,
-    profile: &crate::profile::ProfileConfig,
+    profile: &crate::profile::LoadoutConfig,
     agent: &str,
 ) -> PreviewOutcome {
     state::render_profile_config(snap, profile, agent, DynamicMode::ReadOnly).unwrap_or_else(|e| {

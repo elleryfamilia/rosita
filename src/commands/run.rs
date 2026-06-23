@@ -30,7 +30,7 @@ use crate::binding::SkillDecision;
 use crate::cli::{RunArgs, StudioArgs};
 use crate::context::Context;
 use crate::hash;
-use crate::profile::ProfileConfig;
+use crate::profile::LoadoutConfig;
 use crate::skills::{self, LinkState, SkillState};
 use crate::style::Painter;
 use crate::vlog;
@@ -41,7 +41,7 @@ use crate::vlog;
 struct StdinChooser;
 
 impl ProfileChooser for StdinChooser {
-    fn choose(&self, ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice> {
+    fn choose(&self, ctx: &Context, candidates: &[LoadoutConfig]) -> crate::Result<Choice> {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             crate::warn_user!(
                 "{} profiles match but this isn't an interactive terminal — applying none. \

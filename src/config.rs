@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::adapters::AgentDescriptor;
 use crate::fragment::Fragment;
-use crate::profile::ProfileConfig;
+use crate::profile::LoadoutConfig;
 use crate::target::TargetDef;
 
 /// Fully-resolved configuration used by the rest of the program.
@@ -36,7 +36,7 @@ pub struct Config {
     /// Codex-adapter knobs.
     pub codex: CodexConfig,
     /// Your profiles (entirely user-authored; one is selected per context).
-    pub profiles: Vec<ProfileConfig>,
+    pub profiles: Vec<LoadoutConfig>,
     /// Your fragment library (the `[[fragments]]` you authored, merged by
     /// id across layers). The shipped [`palette`](crate::fragment::palette) is
     /// a separate read-only catalog and is **not** included here.
@@ -257,8 +257,12 @@ struct RawConfig {
     env: Option<RawEnv>,
     codex: Option<RawCodex>,
     sync: Option<RawSync>,
-    #[serde(default)]
-    profiles: Vec<ProfileConfig>,
+    // The user-authored loadouts. Canonical TOML key is `[[loadouts]]`; the old
+    // `[[profiles]]` key is still accepted (legacy alias) so existing configs
+    // keep loading. The Rust field stays `profiles` — it's internal and renaming
+    // it would churn ~30 call sites and the studio view models for no user gain.
+    #[serde(default, rename = "loadouts", alias = "profiles")]
+    profiles: Vec<LoadoutConfig>,
     #[serde(default)]
     fragments: Vec<Fragment>,
     #[serde(default)]
@@ -974,6 +978,28 @@ mod tests {
         let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
         assert!(c.fragments.iter().any(|x| x.id == "x"));
         assert!(c.profiles.iter().any(|p| p.name == "p"));
+    }
+
+    #[test]
+    fn loadouts_is_canonical_key_and_profiles_is_a_legacy_alias() {
+        // The new canonical key is `[[loadouts]]`. The fixtures above already
+        // prove the old `[[profiles]]` key still parses (legacy alias); this
+        // proves a config authored with `[[loadouts]]` loads the same way.
+        let global = tempfile::tempdir().unwrap();
+        let gcfg = global.path().join("config.toml");
+        std::fs::write(
+            &gcfg,
+            "[[fragments]]\nid = \"x\"\nguidance = \"hi\"\n\n\
+             [[loadouts]]\nname = \"p\"\ntargets = [\"rust\"]\nfragments = [\"x\"]\n",
+        )
+        .unwrap();
+        let repo = tempfile::tempdir().unwrap();
+
+        let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
+        assert!(
+            c.profiles.iter().any(|p| p.name == "p"),
+            "a [[loadouts]] table must load as a loadout"
+        );
     }
 
     #[test]

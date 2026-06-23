@@ -12,7 +12,7 @@ use super::{prepare, Runtime};
 use crate::adapters::AgentDescriptor;
 use crate::cli::{AgentsArgs, FragmentsAction, FragmentsArgs, ListArgs, ListKind, ProfilesArgs};
 use crate::fragment::{Fragment, Layer};
-use crate::profile::{self, ProfileConfig};
+use crate::profile::{self, LoadoutConfig};
 
 // --- list (consolidated front door) -----------------------------------------
 
@@ -286,8 +286,8 @@ pub fn profiles(rt: &Runtime, args: &ProfilesArgs) -> crate::Result<()> {
     let prep = prepare(rt)?;
     let tags = prep.context.selection_targets();
     let selected = prep.composition.profile.clone();
-    let is_selected = |p: &ProfileConfig| selected.as_deref() == Some(p.name.as_str());
-    let is_candidate = |p: &ProfileConfig| profile::profile_matches_targets(p, &tags);
+    let is_selected = |p: &LoadoutConfig| selected.as_deref() == Some(p.name.as_str());
+    let is_candidate = |p: &LoadoutConfig| profile::profile_matches_targets(p, &tags);
 
     if args.json {
         let rows: Vec<_> = prep
@@ -348,7 +348,7 @@ struct ProfileRow {
     fragments: Vec<String>,
 }
 
-fn profile_row(p: &ProfileConfig, candidate: bool, selected: bool) -> ProfileRow {
+fn profile_row(p: &LoadoutConfig, candidate: bool, selected: bool) -> ProfileRow {
     ProfileRow {
         name: p.name.clone(),
         targets: p.targets.clone(),

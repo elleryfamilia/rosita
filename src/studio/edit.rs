@@ -26,7 +26,7 @@ use toml_edit::{value, Array, ArrayOfTables, DocumentMut, InlineTable, Item, Tab
 
 use crate::config::{self, Config};
 use crate::fragment::{palette, Fragment, Layer};
-use crate::profile::ProfileConfig;
+use crate::profile::LoadoutConfig;
 use crate::target::TargetDef;
 use crate::writer::{atomic_write, AtomicWriter, Writer, WrittenFile};
 
@@ -46,13 +46,13 @@ pub enum StagedOp {
     /// Add a new profile to a layer.
     CreateProfile {
         layer: Layer,
-        profile: Box<ProfileConfig>,
+        profile: Box<LoadoutConfig>,
     },
     /// Replace the profile with this name in a layer (created if absent).
     EditProfile {
         layer: Layer,
         name: String,
-        profile: Box<ProfileConfig>,
+        profile: Box<LoadoutConfig>,
     },
     /// Remove the profile with this name from a layer.
     DeleteProfile { layer: Layer, name: String },
@@ -205,7 +205,7 @@ impl Session {
     }
 
     /// Which open layer currently holds the fragment with this id (in the
-    /// staged docs), if any. Used to target a delete (`ProfileConfig` has no
+    /// staged docs), if any. Used to target a delete (`LoadoutConfig` has no
     /// origin field, so studio looks the layer up rather than guessing).
     pub fn fragment_layer(&self, id: &str) -> Option<Layer> {
         self.layers
@@ -518,7 +518,7 @@ fn fragment_table(c: &Fragment) -> Result<Table> {
 }
 
 /// Build a clean array-of-tables entry for a profile.
-fn profile_table(p: &ProfileConfig) -> Result<Table> {
+fn profile_table(p: &LoadoutConfig) -> Result<Table> {
     let mut t = Table::new();
     t["name"] = value(p.name.as_str());
     if !p.targets.is_empty() {
@@ -725,7 +725,7 @@ mod tests {
     fn create_profile_with_targets_and_caps() {
         let d = repo_with_config("");
         let mut s = session(d.path());
-        let profile = ProfileConfig {
+        let profile = LoadoutConfig {
             name: "rust".into(),
             targets: vec!["rust".into()],
             fragments: vec![crate::profile::FragmentRef::Id("a".into())],

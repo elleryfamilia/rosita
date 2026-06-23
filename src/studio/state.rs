@@ -14,7 +14,7 @@ use crate::context::{Context, Scope};
 use crate::dynamic::DynamicMode;
 use crate::fragment::{palette, Fragment, Layer};
 use crate::pack::{self, Pack};
-use crate::profile::{self, FragmentRef, ProfileConfig, Selection};
+use crate::profile::{self, FragmentRef, LoadoutConfig, Selection};
 use crate::render::{self, RenderRequest};
 use crate::studio::edit::{Session, StagedOp};
 
@@ -228,7 +228,7 @@ pub fn render_profile(
 /// `mode` gates dynamic execution (ReadOnly = placeholder cards; Live = run now).
 pub fn render_profile_config(
     snap: &Snapshot,
-    profile: &ProfileConfig,
+    profile: &LoadoutConfig,
     agent: &str,
     mode: DynamicMode,
 ) -> crate::Result<PreviewOutcome> {
@@ -263,7 +263,7 @@ pub fn render_pack(
 fn render_profile_in_config(
     cfg: &Config,
     base_context: &Context,
-    profile: &ProfileConfig,
+    profile: &LoadoutConfig,
     agent: &str,
     mode: DynamicMode,
 ) -> crate::Result<PreviewOutcome> {
@@ -392,7 +392,7 @@ pub fn run_fragment(
 
 /// Synthesize a context from a profile's targets so its fragments gate as
 /// intended when previewed (a `machine`-only profile previews as machine scope).
-fn context_for_profile(base: &Context, profile: &ProfileConfig) -> Context {
+fn context_for_profile(base: &Context, profile: &LoadoutConfig) -> Context {
     let mut ctx = base.clone();
     ctx.stacks = profile
         .targets
@@ -1132,9 +1132,9 @@ pub fn fragment_from_form(
     })
 }
 
-/// Build a [`ProfileConfig`] from a posted composer form. Enforces the ≥1
+/// Build a [`LoadoutConfig`] from a posted composer form. Enforces the ≥1
 /// fragment rule (§3) — a profile with no fragments can't be saved.
-pub fn profile_from_form(pairs: &[(String, String)]) -> crate::Result<ProfileConfig> {
+pub fn profile_from_form(pairs: &[(String, String)]) -> crate::Result<LoadoutConfig> {
     let name =
         opt(value_of(pairs, "name")).ok_or_else(|| anyhow::anyhow!("profile name is required"))?;
     let fragments: Vec<FragmentRef> = values_for(pairs, "fragments")
@@ -1144,7 +1144,7 @@ pub fn profile_from_form(pairs: &[(String, String)]) -> crate::Result<ProfileCon
     if fragments.is_empty() {
         anyhow::bail!("a profile needs at least one fragment");
     }
-    Ok(ProfileConfig {
+    Ok(LoadoutConfig {
         name,
         targets: values_for(pairs, "targets"),
         fragments,
@@ -1197,8 +1197,8 @@ pub fn inline_fragment_from_form(pairs: &[(String, String)]) -> Option<(Fragment
 
 /// A lenient profile built from an in-progress editor form — no ≥1-fragment
 /// rule — used only to render the editor's live preview (never staged).
-pub fn draft_profile_from_form(pairs: &[(String, String)]) -> ProfileConfig {
-    ProfileConfig {
+pub fn draft_profile_from_form(pairs: &[(String, String)]) -> LoadoutConfig {
+    LoadoutConfig {
         name: opt(value_of(pairs, "name")).unwrap_or_else(|| "(unnamed)".to_string()),
         targets: values_for(pairs, "targets"),
         fragments: values_for(pairs, "fragments")

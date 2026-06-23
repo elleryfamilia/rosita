@@ -26,7 +26,7 @@ use crate::adapters;
 use crate::binding::{self, Binding};
 use crate::config::Config;
 use crate::context::{self, Context};
-use crate::profile::{self, Composition, ProfileConfig, Selection};
+use crate::profile::{self, Composition, LoadoutConfig, Selection};
 
 /// Per-invocation runtime settings derived from global args.
 pub struct Runtime {
@@ -78,7 +78,7 @@ pub fn program_on_path(program: &str) -> bool {
 /// [`SkipChooser`] never prompts; `rosita run` injects an interactive one.
 pub trait ProfileChooser {
     /// Pick among `candidates` for `ctx`. Implementations may prompt the user.
-    fn choose(&self, ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice>;
+    fn choose(&self, ctx: &Context, candidates: &[LoadoutConfig]) -> crate::Result<Choice>;
 }
 
 /// A chooser's answer to an ambiguous selection.
@@ -121,7 +121,7 @@ pub enum MissingPolicy {
 pub struct SkipChooser;
 
 impl ProfileChooser for SkipChooser {
-    fn choose(&self, _ctx: &Context, candidates: &[ProfileConfig]) -> crate::Result<Choice> {
+    fn choose(&self, _ctx: &Context, candidates: &[LoadoutConfig]) -> crate::Result<Choice> {
         let names: Vec<&str> = candidates.iter().map(|p| p.name.as_str()).collect();
         crate::warn_user!(
             "{} profiles match this project ({}); none chosen — overlay is empty. \

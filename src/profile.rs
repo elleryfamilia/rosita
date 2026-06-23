@@ -26,7 +26,7 @@ use crate::fragment::Fragment;
 /// composes when selected.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProfileConfig {
+pub struct LoadoutConfig {
     /// Profile name (also used to find `profiles/<name>.md.j2` templates).
     pub name: String,
     /// Detected language/platform tags this profile is for (`rust`, `node`,
@@ -220,19 +220,19 @@ pub enum Selection {
     None,
     /// Exactly one profile applies, or a remembered binding resolved to one.
     /// Auto-used with no prompt.
-    Use(ProfileConfig),
+    Use(LoadoutConfig),
     /// 2+ profiles match and there is no remembered choice — the caller must
     /// prompt the user and then persist the answer as a [`Binding`].
-    Ambiguous(Vec<ProfileConfig>),
+    Ambiguous(Vec<LoadoutConfig>),
     /// Nothing targeted matched, so a no-targets "catch-all" profile applies as
     /// the default. Composes like [`Selection::Use`]; the distinct variant lets
     /// callers say "defaulting to X". Never persisted as a binding.
-    Default(ProfileConfig),
+    Default(LoadoutConfig),
 }
 
 /// Whether `profile` is a selection candidate for the given context `tags`
 /// (any target matches). Empty `targets` never matches.
-pub fn profile_matches_targets(profile: &ProfileConfig, tags: &[String]) -> bool {
+pub fn profile_matches_targets(profile: &LoadoutConfig, tags: &[String]) -> bool {
     profile
         .targets
         .iter()
@@ -245,7 +245,7 @@ pub fn profile_matches_targets(profile: &ProfileConfig, tags: &[String]) -> bool
 ///    renamed, or retargeted binding falls through to fresh detection).
 /// 2. Otherwise match `ctx`'s coarse targets: 0 ⇒ [`Selection::None`], exactly 1
 ///    ⇒ [`Selection::Use`] (no prompt), 2+ ⇒ [`Selection::Ambiguous`].
-pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Binding>) -> Selection {
+pub fn select(ctx: &Context, profiles: &[LoadoutConfig], binding: Option<&Binding>) -> Selection {
     if let Some(Binding::Profile { name, targets_hash }) = binding {
         // Honor the bound profile only while it still exists, is enabled, and
         // hasn't been retargeted since it was bound. A stale `targets_hash` (the
@@ -266,7 +266,7 @@ pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Bindin
     }
 
     let tags = ctx.selection_targets();
-    let candidates: Vec<ProfileConfig> = profiles
+    let candidates: Vec<LoadoutConfig> = profiles
         .iter()
         .filter(|p| !p.disabled && profile_matches_targets(p, &tags))
         .cloned()
@@ -280,7 +280,7 @@ pub fn select(ctx: &Context, profiles: &[ProfileConfig], binding: Option<&Bindin
         // user pick (same as any ambiguity). A profile with no targets is thus
         // the implicit "applies everywhere nothing else does" default.
         _ => {
-            let defaults: Vec<ProfileConfig> = profiles
+            let defaults: Vec<LoadoutConfig> = profiles
                 .iter()
                 .filter(|p| !p.disabled && p.targets.is_empty())
                 .cloned()
@@ -327,7 +327,7 @@ pub fn compose_selection(
 /// `fragment_params[id]` (private/local) overrides.
 pub fn compose_profile(
     ctx: &Context,
-    profile: &ProfileConfig,
+    profile: &LoadoutConfig,
     fragments: &[Fragment],
     fragment_params: &BTreeMap<String, toml::Value>,
 ) -> Composition {
@@ -517,8 +517,8 @@ mod tests {
         }
     }
 
-    fn prof(name: &str, targets: &[&str], caps: &[&str]) -> ProfileConfig {
-        ProfileConfig {
+    fn prof(name: &str, targets: &[&str], caps: &[&str]) -> LoadoutConfig {
+        LoadoutConfig {
             name: name.into(),
             targets: targets.iter().map(|s| s.to_string()).collect(),
             fragments: caps
@@ -530,7 +530,7 @@ mod tests {
         }
     }
 
-    fn compose_t(ctx: &Context, profile: &ProfileConfig, caps: &[Fragment]) -> Composition {
+    fn compose_t(ctx: &Context, profile: &LoadoutConfig, caps: &[Fragment]) -> Composition {
         compose_profile(ctx, profile, caps, &BTreeMap::new())
     }
 

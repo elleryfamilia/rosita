@@ -11,7 +11,7 @@
 //! baked into each one. Duplicating an already-owned fragment is a no-op, so
 //! applying several packs never conflicts.
 
-use crate::profile::{FragmentRef, ProfileConfig};
+use crate::profile::{FragmentRef, LoadoutConfig};
 
 /// A curated starter bundle: fragments to duplicate + a profile to create.
 #[derive(Debug, Clone)]
@@ -40,8 +40,8 @@ pub struct Pack {
 impl Pack {
     /// The self-contained profile this pack creates (composes every `fragments` id, in
     /// order). `origin`/layer is assigned when the staged config is assembled.
-    pub fn profile(&self) -> ProfileConfig {
-        ProfileConfig {
+    pub fn profile(&self) -> LoadoutConfig {
+        LoadoutConfig {
             name: self.profile_name.to_string(),
             targets: self.targets.iter().map(|s| s.to_string()).collect(),
             fragments: self
