@@ -57,6 +57,11 @@ pub struct Workflow {
     /// Provenance: a short note on the research behind it. Display-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub researched: Option<String>,
+    /// Upstream source URL (the repo or writeup this is drawn from). Display-only
+    /// for now; the future "keep curated workflows in sync with their source
+    /// repos" milestone hangs off this. Set on the curated built-ins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// Off-switch: kept in config, never selected. Only serialized when set.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
@@ -292,6 +297,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         id: &str,
         description: &str,
         modeled_on: &str,
+        source: &str,
         researched: &str,
         stages: Vec<WorkflowStage>,
     ) -> Workflow {
@@ -301,16 +307,110 @@ pub fn builtin_workflows() -> Vec<Workflow> {
             stages,
             modeled_on: Some(modeled_on.to_string()),
             researched: Some(researched.to_string()),
+            source: Some(source.to_string()),
             disabled: false,
             origin: Layer::BuiltIn,
         }
     }
 
     vec![
+        // --- superpowers — obra/superpowers (the biggest community framework) ---
+        wf(
+            "superpowers",
+            "Brainstorm, plan, then subagent-driven build",
+            "obra/superpowers (Jesse Vincent)",
+            "https://github.com/obra/superpowers",
+            "The biggest community Claude Code skills framework (~41k★): refine the idea, \
+             write a tight plan of tiny tasks, then execute with fresh subagents + review.",
+            vec![
+                WorkflowStage {
+                    writes: Some("design.md".to_string()),
+                    ..stage(
+                        "brainstorm",
+                        "Refine the rough idea through questions, explore alternatives, and \
+                         agree a design before any code.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("design.md".to_string()),
+                    writes: Some("plan.md".to_string()),
+                    ..stage(
+                        "plan",
+                        "Break the approved design into bite-sized tasks — each a few \
+                         minutes, with exact file paths and a verification step.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    ..stage(
+                        "implement",
+                        "Dispatch a fresh subagent per task; work test-first and keep each \
+                         task isolated.",
+                    )
+                },
+                WorkflowStage {
+                    gate: true,
+                    exit: vec![
+                        "each task reviewed for spec compliance".to_string(),
+                        "then reviewed for code quality".to_string(),
+                    ],
+                    ..stage(
+                        "review",
+                        "Two-stage review — does it match the spec, then is the code good \
+                         — before merging.",
+                    )
+                },
+            ],
+        ),
+        // --- boris — how Claude Code's creator works -----------------------
+        wf(
+            "boris",
+            "Plan mode, auto-accept, verify, ship",
+            "Boris Cherny (Claude Code's creator)",
+            "https://howborisusesclaudecode.com/",
+            "Nail the plan in plan-mode, let it implement in one pass, lean hard on a \
+             verify loop, then /commit-push-pr.",
+            vec![
+                WorkflowStage {
+                    writes: Some("plan.md".to_string()),
+                    ..stage(
+                        "plan",
+                        "Work in plan mode; iterate on the plan until it's right before \
+                         touching code.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    ..stage(
+                        "implement",
+                        "Switch to auto-accept and let it execute the whole plan in one pass.",
+                    )
+                },
+                WorkflowStage {
+                    gate: true,
+                    exit: vec![
+                        "the agent verified its own work (tests / browser)".to_string(),
+                        "the behavior and UX actually check out".to_string(),
+                    ],
+                    ..stage(
+                        "verify",
+                        "Give the agent a way to check its own work — run tests, open the \
+                         browser, iterate until it's right. The biggest quality lever.",
+                    )
+                },
+                stage(
+                    "ship",
+                    "Commit, push, and open the PR in one step (Boris's /commit-push-pr \
+                     runs dozens of times a day).",
+                ),
+            ],
+        ),
+        // --- lean — Anthropic explore-plan-code-commit ---------------------
         wf(
             "lean",
             "Explore, plan, code, commit",
             "Anthropic explore-plan-code-commit",
+            "https://www.anthropic.com/engineering/claude-code-best-practices",
             "Anthropic's agent best-practices loop: read first, plan on paper, then build.",
             vec![
                 stage(
@@ -355,6 +455,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
             "spec-driven",
             "Spec first, then plan and build against it",
             "GitHub Spec Kit / AWS Kiro",
+            "https://github.com/github/spec-kit",
             "Spec-driven development: a written spec is the source of truth that the plan, \
              implementation, and verification all answer to.",
             vec![
@@ -400,6 +501,7 @@ pub fn builtin_workflows() -> Vec<Workflow> {
             "loop",
             "Backlog loop — one item at a time until done",
             "the Ralph single-prompt loop",
+            "https://ghuntley.com/ralph/",
             "The Ralph technique: keep a durable backlog and repeatedly take the next item, \
              so a long task survives across many short agent runs.",
             vec![
@@ -444,6 +546,9 @@ mod tests {
             assert!(w.description.is_some(), "{} lacks a description", w.id);
             assert!(w.modeled_on.is_some(), "{} lacks provenance", w.id);
             assert!(w.researched.is_some(), "{} lacks a research note", w.id);
+            // Curated built-ins carry an upstream source (for display + the
+            // future source-sync milestone).
+            assert!(w.source.is_some(), "{} lacks a source link", w.id);
             assert_eq!(w.origin, Layer::BuiltIn, "{} should be built-in", w.id);
             // Every shipped workflow must itself validate.
             assert!(
@@ -453,7 +558,8 @@ mod tests {
                 w.validate()
             );
         }
-        for needed in ["lean", "spec-driven", "loop"] {
+        // The curated gallery: the recognizable named ones + the generic spines.
+        for needed in ["superpowers", "boris", "lean", "spec-driven", "loop"] {
             assert!(ids.contains(needed), "missing built-in workflow {needed}");
         }
     }
@@ -489,6 +595,7 @@ mod tests {
             }],
             modeled_on: None,
             researched: None,
+            source: None,
             disabled: false,
             origin: Layer::Global,
         };
@@ -618,6 +725,7 @@ mod tests {
             }],
             modeled_on: None,
             researched: None,
+            source: None,
             disabled: false,
             origin: Layer::Global,
         }];

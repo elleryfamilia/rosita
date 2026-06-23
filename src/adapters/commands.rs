@@ -273,6 +273,7 @@ mod tests {
             }],
             modeled_on: None,
             researched: None,
+            source: None,
             disabled: false,
             origin: crate::fragment::Layer::Global,
         };
@@ -298,6 +299,7 @@ mod tests {
             }],
             modeled_on: None,
             researched: None,
+            source: None,
             disabled: false,
             origin: crate::fragment::Layer::Global,
         };

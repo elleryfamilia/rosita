@@ -235,6 +235,28 @@ fn run_workflow_override_sets_handoff_env_in_dry_run() {
 }
 
 #[test]
+fn global_active_workflow_renders_without_any_binding() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.git_init();
+    // A rust loadout with NO workflow binding, plus a global active workflow.
+    // The single house workflow should still render for this repo.
+    fx.author(
+        "[defaults]\nworkflow = \"boris\"\n\n\
+         [[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
+         [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\n",
+    );
+    fx.cmd()
+        .args(["refresh", "--agent", "claude"])
+        .assert()
+        .success();
+    let overlay = fx.read(".loadout/generated/claude.md");
+    assert!(overlay.contains("## Workflow: Plan mode, auto-accept, verify, ship"));
+    // And the per-stage commands are generated for the active workflow.
+    assert!(fx.exists(".claude/commands/loadout/ship.md"));
+}
+
+#[test]
 fn doctor_flags_a_dangling_workflow_binding() {
     let fx = Fixture::new();
     fx.rust_project();
