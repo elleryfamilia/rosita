@@ -220,18 +220,24 @@ pub struct WorkflowView {
     pub private: bool,
     /// The ordered stages.
     pub stages: Vec<WorkflowStageView>,
+    /// Upstream source URL (the repo/writeup this is drawn from), for display.
+    pub source: Option<String>,
     /// Distinct handoff artifacts the workflow passes between stages.
     pub artifacts: Vec<String>,
     /// Names of the loadouts that bind this workflow (empty = bound by none).
     pub bound_by: Vec<String>,
+    /// Whether this is the global **active** workflow (`[defaults].workflow`).
+    pub active: bool,
     /// Validation problems (malformed workflow); empty when well-formed.
     pub problems: Vec<String>,
 }
 
-/// The Workflows tab snapshot: the built-in catalog plus your own, each with the
-/// loadouts that bind it.
+/// The Workflows tab snapshot: the curated catalog plus your own (the gallery),
+/// which one's slots are shown (`focused_id`), and which is the global active.
 pub struct WorkflowsView {
     pub workflows: Vec<WorkflowView>,
+    /// The workflow whose slots are shown below the gallery.
+    pub focused_id: Option<String>,
 }
 
 /// Assemble the staged config (origin-tagged) from a snapshot.
@@ -647,11 +653,13 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
     TargetsView { targets }
 }
 
-/// Build the Workflows tab view: the built-in catalog plus your own
-/// `[[workflows]]` (yours override a built-in of the same id), each annotated
-/// with the loadouts that bind it and any validation problems. Read-only in v1.
-pub fn workflows_view(snap: &Snapshot) -> WorkflowsView {
+/// Build the Workflows tab view: the curated catalog plus your own (the gallery
+/// cards), with the global active workflow flagged and one workflow `focus`ed
+/// (its slots shown below). `focus` is the card the user clicked; it falls back
+/// to the active workflow, then the first card.
+pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
     let cfg = staged_config(snap).ok();
+    let active_id = cfg.as_ref().and_then(|c| c.default_workflow.clone());
     let effective = cfg
         .as_ref()
         .map(|c| c.effective_workflows())
@@ -667,7 +675,7 @@ pub fn workflows_view(snap: &Snapshot) -> WorkflowsView {
         })
         .unwrap_or_default();
 
-    let workflows = effective
+    let workflows: Vec<WorkflowView> = effective
         .into_iter()
         .map(|w| {
             let problems = w.validate();
@@ -693,7 +701,9 @@ pub fn workflows_view(snap: &Snapshot) -> WorkflowsView {
                 title: w.title().to_string(),
                 builtin: w.origin == Layer::BuiltIn,
                 private: matches!(w.origin, Layer::GlobalLocal),
+                active: active_id.as_deref() == Some(w.id.as_str()),
                 modeled_on: w.modeled_on.clone(),
+                source: w.source.clone(),
                 id: w.id,
                 stages,
                 artifacts,
@@ -702,7 +712,19 @@ pub fn workflows_view(snap: &Snapshot) -> WorkflowsView {
             }
         })
         .collect();
-    WorkflowsView { workflows }
+
+    // Focus the requested card if it exists, else the active one, else the first.
+    let exists = |id: &str| workflows.iter().any(|w| w.id == id);
+    let focused_id = focus
+        .filter(|id| exists(id))
+        .map(str::to_string)
+        .or_else(|| active_id.filter(|id| exists(id)))
+        .or_else(|| workflows.first().map(|w| w.id.clone()));
+
+    WorkflowsView {
+        workflows,
+        focused_id,
+    }
 }
 
 /// First-launch onboarding readout for a fresh config (no profiles **and** no

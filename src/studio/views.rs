@@ -924,91 +924,146 @@ pub fn targets_tab_fragment(view: &TargetsView) -> String {
 
 // --- Workflows tab -----------------------------------------------------------
 
-/// The Workflows tab: the named stage spines a loadout can bind, each shown as a
-/// card with its ordered stages, the handoff files passed between them, and the
-/// loadouts that use it. Read-only in v1 — edit by hand in `config.toml`.
-pub fn workflows_tab(view: &WorkflowsView) -> Markup {
+/// The Workflows tab: an always-visible gallery of curated + your own workflows
+/// (tiny named cards across the top), and below it the focused one shown as its
+/// ordered slots. Picking one makes it your single global active workflow.
+pub fn workflows_tab(view: &WorkflowsView, flash: Option<&str>) -> Markup {
+    let focused = view
+        .focused_id
+        .as_deref()
+        .and_then(|id| view.workflows.iter().find(|w| w.id == id));
     html! {
         div class="tab-workflows" {
             div class="dash-head" {
                 h1 { "Workflows" }
             }
+            @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
             p class="muted workflows-lead" {
-                "A " strong { "workflow" } " is a named, ordered set of stages a loadout binds (bind it with "
-                code { "workflow = \"<id>\"" } " on a loadout). loadout renders the spine into every agent — as an always-on map, and as one "
-                code { "/loadout:<stage>" } " slash command per stage. Stages hand off through files under "
-                code { ".loadout/workflow/artifacts/" } ". Built-ins are read-only starting points; copy one into "
-                code { "[[workflows]]" } " to make your own. "
-                em { "Editing in the studio lands in a later release — for now, edit config.toml." }
+                "A " strong { "workflow" } " is a named set of stages your agent moves through. Pick one — it becomes your "
+                strong { "active workflow" } " and applies in every repo: loadout renders its stages into each agent as an always-on map plus one "
+                code { "/loadout:<stage>" } " command per stage, handing off through files under "
+                code { ".loadout/workflow/artifacts/" } ". Browse the popular ones below — click a card to read it, then select to use it."
             }
-            div class="workflow-list" {
-                @for w in &view.workflows { (workflow_card(w)) }
+            // The gallery: tiny named cards across the top, always visible.
+            div class="wf-gallery" {
+                @for w in &view.workflows {
+                    (workflow_gallery_card(w, view.focused_id.as_deref() == Some(w.id.as_str())))
+                }
+            }
+            // The focused workflow, shown as its ordered slots.
+            @if let Some(w) = focused {
+                (workflow_detail(w))
+            } @else {
+                p class="muted" { "No workflows available yet." }
             }
         }
     }
 }
 
 pub fn workflows_tab_fragment(view: &WorkflowsView) -> String {
-    workflows_tab(view).into_string()
+    workflows_tab(view, None).into_string()
 }
 
-/// One workflow card: heading + provenance + binding loadouts, then the ordered
-/// stage list with each stage's handoff artifacts, gate marker, and checklist.
-fn workflow_card(w: &WorkflowView) -> Markup {
+/// Re-render the Workflows tab after selecting an active workflow: the tab (with
+/// a flash) plus a staged-changes indicator refresh.
+pub fn workflows_result(view: &WorkflowsView, flash: &str) -> String {
     html! {
-        div class="workflow-card" {
-            div class="workflow-head" {
-                span class="workflow-glyph" { (icon("git-branch")) }
-                div class="workflow-titles" {
-                    span class="workflow-top" {
-                        span class="workflow-id" { (w.title) }
+        (workflows_tab(view, Some(flash)))
+        (staged_refresh())
+    }
+    .into_string()
+}
+
+/// One tiny gallery card: the workflow name + an active marker; click to focus.
+fn workflow_gallery_card(w: &WorkflowView, focused: bool) -> Markup {
+    let mut cls = String::from("wf-card");
+    if focused {
+        cls.push_str(" focused");
+    }
+    if w.active {
+        cls.push_str(" active");
+    }
+    html! {
+        button class=(cls) hx-get=(format!("/workflows/{}", enc(&w.id))) hx-target="#main" {
+            span class="wf-card-name" { (w.id) }
+            @if w.active { span class="wf-card-dot" title="active workflow" { (icon("check")) } }
+            @else if !w.builtin { span class="wf-card-tag" { "yours" } }
+        }
+    }
+}
+
+/// The focused workflow in full: title + provenance + the slot spine + a "use
+/// this" action that sets it as the global active workflow.
+fn workflow_detail(w: &WorkflowView) -> Markup {
+    html! {
+        div class="wf-detail" {
+            div class="wf-detail-head" {
+                div class="wf-detail-titles" {
+                    h2 { (w.title) }
+                    span class="wf-detail-meta muted" {
                         code class="workflow-bind" { (w.id) }
-                        @if w.builtin { span class="tag" { "built-in" } }
-                        @if w.private { span class="tag" { (icon("lock")) "private" } }
-                        @if let Some(m) = &w.modeled_on { span class="tag" { "modeled on " (m) } }
-                    }
-                    span class="workflow-bound muted" {
-                        @if w.bound_by.is_empty() {
-                            (icon("alert")) "Not bound to any loadout yet — add " code { (format!("workflow = \"{}\"", w.id)) } " to one."
-                        } @else {
-                            (icon("layers")) "Bound by " (w.bound_by.join(", "))
+                        @if let Some(m) = &w.modeled_on { " · " (m) }
+                        @if let Some(s) = &w.source {
+                            " · " a class="wf-source" href=(s) target="_blank" rel="noopener noreferrer" { (icon("globe")) "source" }
                         }
+                        @if w.builtin { " · " span class="tag" { "built-in" } }
+                        @if w.private { " · " span class="tag" { (icon("lock")) "private" } }
+                    }
+                }
+                div class="wf-detail-actions" {
+                    @if w.active {
+                        span class="tag rec-tag wf-active-pill" { (icon("check")) "active workflow" }
+                    } @else {
+                        button class="btn btn-primary" hx-post=(format!("/workflows/{}/activate", enc(&w.id))) hx-target="#main" { (icon("check")) "Use this workflow" }
                     }
                 }
             }
             @for prob in &w.problems { p class="flash flash-warn" { (icon("alert")) (prob) } }
-            ol class="workflow-stages" {
-                @for s in &w.stages { (workflow_stage_row(s)) }
+            // The slots — one box per stage, in order.
+            ol class="wf-slots" {
+                @for (i, s) in w.stages.iter().enumerate() { (workflow_slot(i + 1, s)) }
             }
-            @if !w.artifacts.is_empty() {
-                p class="workflow-artifacts muted" {
-                    (icon("file")) "Handoff: "
-                    @for (i, a) in w.artifacts.iter().enumerate() {
-                        @if i > 0 { ", " }
-                        code { (a) }
+            div class="wf-detail-foot" {
+                @if !w.artifacts.is_empty() {
+                    span class="muted wf-foot-item" {
+                        (icon("file")) "Handoff files: "
+                        @for (i, a) in w.artifacts.iter().enumerate() {
+                            @if i > 0 { ", " }
+                            code { (a) }
+                        }
                     }
+                }
+                @if !w.bound_by.is_empty() {
+                    span class="muted wf-foot-item" { (icon("layers")) "Pinned on loadout: " (w.bound_by.join(", ")) }
                 }
             }
         }
     }
 }
 
-/// One `<li>` in a workflow card's stage list.
-fn workflow_stage_row(s: &crate::studio::state::WorkflowStageView) -> Markup {
+/// One slot box in the focused workflow's spine: number, name, gate, purpose,
+/// handoff, exit checklist, and the slash command it generates.
+fn workflow_slot(n: usize, s: &crate::studio::state::WorkflowStageView) -> Markup {
     html! {
-        li class="workflow-stage" {
-            div class="stage-line" {
-                code class="stage-name" { "/loadout:" (s.name) }
+        li class="wf-slot" {
+            div class="wf-slot-head" {
+                span class="wf-slot-num" { (n) }
+                span class="wf-slot-name" { (s.name) }
                 @if s.gate { span class="tag gate-tag" { "gate" } }
-                @if let Some(r) = &s.reads { span class="stage-io" { (icon("arrow-right")) "reads " code { (r) } } }
-                @if let Some(wr) = &s.writes { span class="stage-io" { (icon("arrow-right")) "writes " code { (wr) } } }
             }
-            @if let Some(p) = &s.purpose { span class="stage-purpose muted" { (p) } }
+            @if let Some(p) = &s.purpose { p class="wf-slot-purpose" { (p) } }
+            @if s.reads.is_some() || s.writes.is_some() {
+                div class="wf-slot-io" {
+                    @if let Some(r) = &s.reads { span class="stage-io" { (icon("arrow-right")) "reads " code { (r) } } }
+                    @if let Some(wr) = &s.writes { span class="stage-io" { (icon("arrow-right")) "writes " code { (wr) } } }
+                }
+            }
             @if !s.exit.is_empty() {
                 ul class="stage-exit" {
                     @for item in &s.exit { li { (icon("check")) (item) } }
                 }
             }
+            code class="wf-slot-cmd" { "/loadout:" (s.name) }
         }
     }
 }

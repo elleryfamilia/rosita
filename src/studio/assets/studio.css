@@ -397,35 +397,49 @@ body {
 
 /* --- workflows tab --------------------------------------------------------- */
 .workflows-lead { max-width: 64rem; margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
-.workflows-lead code, .workflow-bound code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
-.workflow-list { display: flex; flex-direction: column; gap: 12px; }
-.workflow-card { border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
-.workflow-head { display: flex; align-items: flex-start; gap: 12px; }
-.workflow-glyph { color: var(--accent); display: inline-flex; margin-top: 2px; }
-.workflow-glyph .icon { width: 24px; height: 24px; }
-.workflow-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.workflow-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.workflow-id { font-size: 14px; font-weight: 600; }
-.workflow-bind { font-family: var(--mono); font-size: 12px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 6px; }
-.workflow-bound { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.workflow-bound .icon { width: 13px; height: 13px; flex: none; }
-.workflow-stages { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 11px; counter-reset: stage; }
-.workflow-stage { position: relative; padding-left: 28px; display: flex; flex-direction: column; gap: 3px; }
-.workflow-stage::before { counter-increment: stage; content: counter(stage); position: absolute; left: 0; top: 0; width: 19px; height: 19px; border-radius: 50%; background: var(--elevated); color: var(--muted); font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-.stage-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.stage-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.workflows-lead code, .wf-detail-meta code, .wf-foot-item code, .stage-io code, .wf-slot-cmd { font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
+.flash-warn { background: var(--caution-soft); color: var(--caution); }
 .gate-tag { color: var(--caution); background: var(--caution-soft); }
+
+/* gallery — always-visible tiny cards across the top */
+.wf-gallery { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+.wf-card { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); color: var(--fg); font-family: inherit; font-size: 13px; cursor: pointer; transition: border-color .12s, background .12s; }
+.wf-card:hover { border-color: var(--border-strong); background: var(--hover); }
+.wf-card.focused { border-color: var(--accent-line); background: var(--accent-soft); }
+.wf-card.active { border-color: var(--accent); }
+.wf-card-name { font-weight: 600; }
+.wf-card-dot { display: inline-flex; color: var(--accent); }
+.wf-card-dot .icon { width: 13px; height: 13px; }
+.wf-card-tag { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
+
+/* detail — the focused workflow's slot spine */
+.wf-detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel-2); padding: 18px 20px; }
+.wf-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.wf-detail-titles h2 { margin: 0 0 5px; font-size: 17px; font-weight: 600; }
+.wf-detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.wf-source { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); text-decoration: none; }
+.wf-source:hover { text-decoration: underline; }
+.wf-source .icon { width: 12px; height: 12px; }
+.wf-detail-actions { flex: none; }
+.wf-active-pill { font-size: 11px; padding: 4px 9px; }
+
+/* slots — one clearly-bounded box per stage */
+.wf-slots { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.wf-slot { position: relative; border: 1px solid var(--border); border-left: 3px solid var(--accent-line); border-radius: var(--r); background: var(--panel); padding: 11px 14px; display: flex; flex-direction: column; gap: 6px; }
+.wf-slot-head { display: flex; align-items: center; gap: 9px; }
+.wf-slot-num { width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.wf-slot-name { font-size: 13.5px; font-weight: 600; }
+.wf-slot-purpose { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }
-.stage-io code { font-family: var(--mono); color: var(--muted); }
-.stage-purpose { font-size: 12.5px; line-height: 1.4; color: var(--muted); }
-.stage-exit { margin: 2px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.stage-exit { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .stage-exit li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); }
 .stage-exit .icon { width: 11px; height: 11px; flex: none; color: var(--ok); }
-.workflow-artifacts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--faint); border-top: 1px solid var(--border); padding-top: 10px; margin: 0; }
-.workflow-artifacts .icon { width: 13px; height: 13px; }
-.workflow-artifacts code { font-family: var(--mono); color: var(--muted); }
-.flash-warn { background: var(--caution-soft); color: var(--caution); }
+.wf-slot-cmd { align-self: flex-start; }
+.wf-detail-foot { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.wf-foot-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint); }
+.wf-foot-item .icon { width: 13px; height: 13px; }
 
 /* --- modal dialog ---------------------------------------------------------- */
 .modal-root { position: fixed; inset: 0; z-index: 50; display: none; }

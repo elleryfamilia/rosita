@@ -160,6 +160,7 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         },
         (_, p) if p.starts_with("/fragments/") => handle_fragment_param(state, req),
         (_, p) if p.starts_with("/targets/") => handle_target_param(state, req),
+        (_, p) if p.starts_with("/workflows/") => handle_workflow_param(state, req),
         (_, p) if p.starts_with("/profiles/") => handle_profile_param(state, req),
         (_, p) if p.starts_with("/packs/") => handle_pack_param(state, req),
         _ => Resp::not_found(),
@@ -241,7 +242,9 @@ fn handle_tab(state: &Arc<Mutex<StudioState>>, tab: &str) -> Resp {
     }
     if tab == "workflows" {
         let snap = state.lock().unwrap().snapshot();
-        return Resp::html(views::workflows_tab_fragment(&state::workflows_view(&snap)));
+        return Resp::html(views::workflows_tab_fragment(&state::workflows_view(
+            &snap, None,
+        )));
     }
     let snap = state.lock().unwrap().snapshot();
     match state::library_view(&snap) {
@@ -626,6 +629,45 @@ fn handle_target_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("GET", "edit") => handle_target_edit(state, &id),
         ("DELETE", "") => handle_target_delete(state, &id),
         _ => Resp::not_found(),
+    }
+}
+
+fn handle_workflow_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let (id, action) = id_and_action(&req.path, "/workflows/");
+    match (req.method.as_str(), action) {
+        // Focus a workflow's slots in the gallery (read).
+        ("GET", "") => {
+            let snap = state.lock().unwrap().snapshot();
+            Resp::html(views::workflows_tab_fragment(&state::workflows_view(
+                &snap,
+                Some(&id),
+            )))
+        }
+        // Make it the global active workflow (staged like any other edit).
+        ("POST", "activate") => handle_workflow_activate(state, &id),
+        _ => Resp::not_found(),
+    }
+}
+
+/// Stage setting `[defaults].workflow` to `id`, then re-render the tab focused on
+/// it with a flash + a staged-changes refresh.
+fn handle_workflow_activate(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let res = state
+        .lock()
+        .unwrap()
+        .session
+        .stage(StagedOp::SetActiveWorkflow {
+            id: Some(id.to_string()),
+        });
+    match res {
+        Ok(()) => {
+            let snap = state.lock().unwrap().snapshot();
+            Resp::html(views::workflows_result(
+                &state::workflows_view(&snap, Some(id)),
+                &format!("“{id}” is now your active workflow — Apply to save"),
+            ))
+        }
+        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
     }
 }
 
@@ -1959,36 +2001,65 @@ mod tests {
     }
 
     #[test]
-    fn workflows_tab_lists_builtins_and_bindings() {
+    fn workflows_tab_gallery_focus_and_activate() {
         let d = rust_repo();
-        // A loadout that binds the built-in `lean` workflow.
+        // `lean` is the global active workflow; a loadout also pins spec-driven.
         let st = state_for(
             d.path(),
             Some(
-                "[[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
-                 [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\nworkflow = \"lean\"\n",
+                "[defaults]\nworkflow = \"lean\"\n\n\
+                 [[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
+                 [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\nworkflow = \"spec-driven\"\n",
             ),
         );
+
+        // The tab: a gallery of named cards; the active one (lean) is focused.
         let r = route(&st, &req("GET", "/tab/workflows", "", &[HOST, COOKIE], ""));
         assert_eq!(r.status, 200);
         let body = String::from_utf8(r.body).unwrap();
         assert!(body.contains("Workflows"), "tab heading");
-        // The built-in catalog is listed with titles + stages.
+        for name in ["superpowers", "boris", "lean", "spec-driven", "loop"] {
+            assert!(body.contains(name), "gallery lists '{name}'");
+        }
         assert!(
             body.contains("Explore, plan, code, commit"),
-            "lists the lean workflow"
+            "the active workflow's slots are shown"
         );
+        assert!(body.contains("active workflow"), "active marker");
         assert!(
-            body.contains("spec-driven"),
-            "lists the spec-driven workflow"
+            body.contains("/loadout:explore"),
+            "renders a slot's command"
         );
-        assert!(
-            body.contains("/loadout:plan"),
-            "renders a stage as a command name"
-        );
-        assert!(body.contains("built-in"), "marks built-ins read-only");
-        // The lean workflow shows the loadout that binds it.
-        assert!(body.contains("Bound by rust"), "shows the binding loadout");
+
+        // Focusing another card shows ITS slots + a 'Use this workflow' action.
+        let sp = String::from_utf8(
+            route(
+                &st,
+                &req("GET", "/workflows/superpowers", "", &[HOST, COOKIE], ""),
+            )
+            .body,
+        )
+        .unwrap();
+        assert!(sp.contains("Brainstorm, plan, then subagent-driven build"));
+        assert!(sp.contains("Use this workflow"));
+        assert!(sp.contains("/loadout:brainstorm"));
+
+        // Activating it stages the change (re-render confirms it's now active).
+        let act = String::from_utf8(
+            route(
+                &st,
+                &req(
+                    "POST",
+                    "/workflows/superpowers/activate",
+                    "",
+                    &[HOST, COOKIE, ORIGIN],
+                    "",
+                ),
+            )
+            .body,
+        )
+        .unwrap();
+        assert!(act.contains("now your active workflow"));
     }
 
     #[test]
