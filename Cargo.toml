@@ -1,5 +1,5 @@
 [package]
-name = "rosita"
+name = "loadout"
 version = "0.7.2"
 edition = "2021"
 rust-version = "1.85"
@@ -10,13 +10,13 @@ readme = "README.md"
 keywords = ["cli", "ai", "agents", "context", "claude"]
 categories = ["command-line-utilities", "development-tools"]
 
-# The repo/project is "rosita"; the user-facing command is "rosita".
+# The repo/project is "loadout"; the user-facing command is "load".
 [[bin]]
-name = "rosita"
+name = "load"
 path = "src/main.rs"
 
 [lib]
-name = "rosita"
+name = "loadout"
 path = "src/lib.rs"
 
 [dependencies]

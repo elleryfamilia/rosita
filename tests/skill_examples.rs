@@ -4,8 +4,8 @@
 
 use std::path::PathBuf;
 
-use rosita::config::Config;
-use rosita::fragment::Layer;
+use loadout::config::Config;
+use loadout::fragment::Layer;
 
 /// Every fenced ```toml block in `md`, trimmed.
 fn toml_blocks(md: &str) -> Vec<String> {
@@ -20,7 +20,7 @@ fn toml_blocks(md: &str) -> Vec<String> {
     out
 }
 
-fn parse_global(toml: &str) -> rosita::Result<Config> {
+fn parse_global(toml: &str) -> loadout::Result<Config> {
     Config::from_layer_strs(vec![(
         Layer::Global,
         PathBuf::from("/g/config.toml"),

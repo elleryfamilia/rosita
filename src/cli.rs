@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 /// renders an agent-specific instruction overlay, writes it safely, and can
 /// launch the agent. Generated files are agent *guidance*, not enforced policy.
 #[derive(Debug, Parser)]
-#[command(name = "rosita", version, about, long_about = None)]
+#[command(name = "load", version, about, long_about = None)]
 pub struct Cli {
     /// Global options shared by all subcommands.
     #[command(flatten)]

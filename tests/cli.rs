@@ -57,7 +57,7 @@ impl Fixture {
 
     /// A configured `rosita` command pointed at this repo, globally isolated.
     fn cmd(&self) -> Command {
-        let mut c = Command::cargo_bin("rosita").unwrap();
+        let mut c = Command::cargo_bin("load").unwrap();
         // Point the global config dir at an empty location → no global layer.
         c.env("ROSITA_CONFIG_DIR", self.global.path().join("empty"));
         // Isolate $HOME so agent dotfile writes (e.g. Gemini's

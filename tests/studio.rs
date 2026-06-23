@@ -20,7 +20,7 @@ fn spawn_studio() -> (Child, tempfile::TempDir, u16, String) {
 /// `--idle-timeout`).
 fn spawn_studio_args(extra: &[&str]) -> (Child, tempfile::TempDir, u16, String) {
     let dir = tempfile::tempdir().unwrap();
-    let bin = assert_cmd::cargo::cargo_bin("rosita");
+    let bin = assert_cmd::cargo::cargo_bin("load");
     let mut child = Command::new(bin)
         .args(["--cwd"])
         .arg(dir.path())

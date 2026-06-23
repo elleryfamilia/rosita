@@ -1001,6 +1001,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "loadout"
+version = "0.7.2"
+dependencies = [
+ "anstyle",
+ "anyhow",
+ "assert_cmd",
+ "axoupdater",
+ "chrono",
+ "clap",
+ "gethostname",
+ "libc",
+ "maud",
+ "minijinja",
+ "predicates",
+ "pulldown-cmark",
+ "regex",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "tempfile",
+ "tiny_http",
+ "toml",
+ "toml_edit",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1501,34 +1529,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rosita"
-version = "0.7.2"
-dependencies = [
- "anstyle",
- "anyhow",
- "assert_cmd",
- "axoupdater",
- "chrono",
- "clap",
- "gethostname",
- "libc",
- "maud",
- "minijinja",
- "predicates",
- "pulldown-cmark",
- "regex",
- "rust-embed",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "tempfile",
- "tiny_http",
- "toml",
- "toml_edit",
 ]
 
 [[package]]
