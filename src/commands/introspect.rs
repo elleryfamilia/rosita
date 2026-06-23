@@ -10,9 +10,87 @@ use serde::Serialize;
 
 use super::{prepare, Runtime};
 use crate::adapters::AgentDescriptor;
-use crate::cli::{AgentsArgs, FragmentsAction, FragmentsArgs, ProfilesArgs};
+use crate::cli::{AgentsArgs, FragmentsAction, FragmentsArgs, ListArgs, ListKind, ProfilesArgs};
 use crate::fragment::{Fragment, Layer};
 use crate::profile::{self, ProfileConfig};
+
+// --- list (consolidated front door) -----------------------------------------
+
+/// Entry point for `load list [kind]` — one command over the introspection
+/// views. `loadouts` is the default; the others map to the standalone commands.
+pub fn list(rt: &Runtime, args: &ListArgs) -> crate::Result<()> {
+    match args.kind {
+        ListKind::Loadouts => profiles(rt, &ProfilesArgs { json: args.json }),
+        ListKind::Fragments => fragments(
+            rt,
+            &FragmentsArgs {
+                action: None,
+                json: args.json,
+            },
+        ),
+        ListKind::Agents => agents(rt, &AgentsArgs { json: args.json }),
+        ListKind::Targets => targets(rt, args.json),
+    }
+}
+
+// --- targets -----------------------------------------------------------------
+
+#[derive(Serialize)]
+struct TargetRow {
+    id: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    active: bool,
+}
+
+/// `load list targets` — the built-in detection targets plus any custom ones,
+/// marking which apply to the current project.
+fn targets(rt: &Runtime, json: bool) -> crate::Result<()> {
+    use std::collections::HashSet;
+    let prep = prepare(rt)?;
+    let active: HashSet<String> = prep.context.selection_targets().into_iter().collect();
+
+    let mut rows: Vec<TargetRow> = Vec::new();
+    for t in crate::target::builtin_targets() {
+        let is_active = active.contains(&t.id);
+        rows.push(TargetRow {
+            id: t.id,
+            kind: "built-in",
+            description: t.description,
+            active: is_active,
+        });
+    }
+    for t in &prep.config.targets {
+        rows.push(TargetRow {
+            id: t.id.clone(),
+            kind: "custom",
+            description: t.description.clone(),
+            active: active.contains(&t.id),
+        });
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+
+    let active_n = rows.iter().filter(|r| r.active).count();
+    println!(
+        "Targets ({} known, {active_n} active for this context)",
+        rows.len()
+    );
+    for r in &rows {
+        let mark = if r.active { "●" } else { "·" };
+        let tag = if r.kind == "custom" { "  (custom)" } else { "" };
+        let desc = match &r.description {
+            Some(d) if !d.is_empty() => format!(" — {d}"),
+            _ => String::new(),
+        };
+        println!("  {mark} {}{tag}{desc}", r.id);
+    }
+    Ok(())
+}
 
 // --- fragments ------------------------------------------------------------
 

@@ -5,9 +5,11 @@
 //! target agent set — lives here.
 
 pub mod apply;
+pub mod bind;
 pub mod clean;
 pub mod detect;
 pub mod doctor;
+pub mod edit;
 pub mod explain;
 pub mod introspect;
 pub mod refresh;

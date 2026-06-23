@@ -17,7 +17,10 @@ use clap::{Args, Parser, Subcommand};
     long_about = None,
     after_help = "Examples:\n  \
         load claude              Equip the matching loadout and launch Claude\n  \
-        load run claude -- -p    Same, but pass `-p` through to the agent\n\n\
+        load run claude -- -p    Same, but pass `-p` through to the agent\n  \
+        load use nextjs          Pin this project to the \"nextjs\" loadout\n  \
+        load list                List your loadouts\n  \
+        load edit nextjs         Open your config to edit a loadout or fragment\n\n\
         Tip: `load <agent>` is shorthand for `load run <agent>`."
 )]
 pub struct Cli {
@@ -81,6 +84,12 @@ pub enum Command {
     Skill(SkillArgs),
     /// Update rosita to the latest release (installer-based installs only).
     Update(UpdateArgs),
+    /// Pin this project to a loadout (remembers the choice; `load use <name>`).
+    Use(UseArgs),
+    /// List your loadouts (default), fragments, agents, or targets.
+    List(ListArgs),
+    /// Open your global config to edit a loadout or fragment in `$EDITOR`.
+    Edit(EditArgs),
     /// Launch an agent by id — the implicit form of `run` (e.g. `load claude`).
     /// Any first token that isn't a known command is treated as an agent id;
     /// the rest pass through to the agent.
@@ -120,6 +129,44 @@ pub struct UpdateArgs {
     /// Only report whether a newer release exists; don't install it.
     #[arg(long)]
     pub check: bool,
+}
+
+/// `use` options — pin this project to a named loadout.
+#[derive(Debug, Args)]
+pub struct UseArgs {
+    /// The loadout (profile) name to pin for this project.
+    pub loadout: String,
+}
+
+/// `list` options.
+#[derive(Debug, Args)]
+pub struct ListArgs {
+    /// What to list (default: loadouts).
+    #[arg(value_enum, default_value_t = ListKind::Loadouts)]
+    pub kind: ListKind,
+    /// Emit JSON instead of a human summary.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// What `load list` shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ListKind {
+    /// Your loadouts and which one matches the current project.
+    Loadouts,
+    /// Your fragment library.
+    Fragments,
+    /// Configured agents and how each receives the overlay.
+    Agents,
+    /// Detectable project/environment targets.
+    Targets,
+}
+
+/// `edit` options.
+#[derive(Debug, Args)]
+pub struct EditArgs {
+    /// Optional loadout or fragment name to confirm exists before opening.
+    pub name: Option<String>,
 }
 
 /// `sync` options. Bare `rosita sync` pulls the latest and pushes local edits.

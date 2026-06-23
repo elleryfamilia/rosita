@@ -1010,6 +1010,98 @@ fn reserved_subcommand_wins_over_implicit_launch() {
 }
 
 #[test]
+fn use_pins_a_loadout_binding() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.rust_profile();
+    fx.git_init();
+
+    fx.cmd()
+        .args(["use", "rust"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "pinned this project to loadout 'rust'",
+        ));
+
+    assert!(fx.exists(".rosita/local.toml"));
+    let binding = fx.read(".rosita/local.toml");
+    assert!(binding.contains("profile = \"rust\""), "got:\n{binding}");
+}
+
+#[test]
+fn use_unknown_loadout_is_an_error() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.rust_profile();
+    fx.git_init();
+
+    fx.cmd()
+        .args(["use", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown loadout 'nope'"));
+}
+
+#[test]
+fn list_defaults_to_loadouts_and_routes_kinds() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.rust_profile();
+
+    // Default kind is loadouts → lists the rust loadout.
+    fx.cmd()
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust"));
+
+    fx.cmd()
+        .args(["list", "fragments"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust-conventions"));
+
+    fx.cmd()
+        .args(["list", "agents"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude"));
+
+    // `targets` marks the rust target active in a cargo project.
+    fx.cmd()
+        .args(["list", "targets"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust"));
+}
+
+#[test]
+fn edit_opens_config_and_validates_name() {
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.rust_profile();
+
+    // A known loadout is confirmed, then the config opens (EDITOR=true exits 0).
+    fx.cmd()
+        .env("EDITOR", "true")
+        .args(["edit", "rust"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("look for the loadout 'rust'"));
+
+    // An unknown name errors before opening anything.
+    fx.cmd()
+        .env("EDITOR", "true")
+        .args(["edit", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "no loadout or fragment named 'nope'",
+        ));
+}
+
+#[test]
 fn custom_agent_via_config_is_first_class() {
     let fx = Fixture::new();
     fx.rust_project();
