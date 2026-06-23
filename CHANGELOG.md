@@ -8,6 +8,41 @@ All notable changes to loadout are documented here. The format follows
 keep entries user-facing. When cutting a release, rename **Unreleased** to the
 version and date (see [RELEASING.md](RELEASING.md)).
 
+## 0.8.0 — 2026-06-22
+
+**rosita is now Loadout, and the command is `load`.** This is a clean-break
+rename — there is no backwards compatibility. Existing setups must migrate (see
+below).
+
+### Changed
+
+- **The binary is `load`** (was `rosita`). `load <agent>` equips the loadout
+  that matches the current project and launches the agent — `load claude` is the
+  everyday command; `load run claude` is the explicit form.
+- **"profiles" are now "loadouts".** A loadout is the named bundle of fragments
+  selected per project. The config key is `[[loadouts]]` (was `[[profiles]]`).
+- **New commands:** `load use <loadout>` pins a loadout for a project,
+  `load list [loadouts|fragments|agents|targets]` is one inspector, and
+  `load edit [name]` opens your config in `$EDITOR`.
+- **Paths and env moved:** global config `~/.config/loadout` (was
+  `~/.config/rosita`), per-repo `.loadout/` (was `.rosita/`), and `LOADOUT_*`
+  environment variables (were `ROSITA_*`).
+- **Studio rebrand:** the web UI is "Loadout studio" with a backpack mark and an
+  Alfa Slab One wordmark; it writes the `[[loadouts]]` key.
+
+### Migrating from rosita
+
+There is no auto-migration. Move your config and rewrite the old keys:
+
+```bash
+mv ~/.config/rosita ~/.config/loadout
+sed -i '' 's/\[\[profiles\]\]/[[loadouts]]/g' ~/.config/loadout/config.toml
+```
+
+Per repo, the gitignored `.rosita/` is regenerated as `.loadout/` on the next
+`load refresh` / `load run`; remove the old directory. Reinstall the agent
+skills (now `loadout-migrate` / `loadout-remember`) with `load skill install`.
+
 ## 0.7.2 — 2026-06-17
 
 ### Changed
