@@ -1,0 +1,702 @@
+//! Workflows — a named, ordered stage spine bound to a profile.
+//!
+//! A **workflow** is loadout's house process spine: an ordered list of
+//! **stages** (e.g. Research → Specify → Plan → Implement → Verify → Review)
+//! that travels across every agent through the same per-agent render pipeline a
+//! profile already uses. A profile binds exactly one workflow by id
+//! ([`crate::profile::LoadoutConfig::workflow`]); selection stays deterministic.
+//!
+//! Each stage carries a short contract — a free-string `name`, a `purpose`,
+//! optional `reads`/`writes` of a **handoff artifact**, an optional `gate`, and
+//! an optional `exit` checklist. The handoff artifact is the load-bearing part:
+//! a file under `.loadout/workflow/artifacts/` (e.g. Plan writes `plan.md`,
+//! Implement reads it) that carries state from one stage to the next. It is what
+//! makes a workflow more than "a profile with subheadings".
+//!
+//! loadout owns the path convention and renders the spine, but it never
+//! enforces, judges completion, or tracks a live "current stage" — this is
+//! guidance, not policy, with no runtime and no LLM.
+//!
+//! Workflows are **global-only**, exactly like fragments and profiles: a repo
+//! layer may *declare* `[[workflows]]` but the loader strips them (see
+//! [`crate::fragment::Layer::contributes_workflows`] and
+//! `strip_global_only`), so a cloned repo can never inject a workflow.
+//!
+//! This module is the data model: the types, validation, the artifact-path
+//! convention, a content hash, the shipped [`builtin_workflows`] catalog, and
+//! [`resolve_workflow`]. Rendering — the context section and the per-stage slash
+//! commands — lives in a later slice and is intentionally absent here.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::fragment::Layer;
+
+/// Subdirectory of a repo's `.loadout/` that holds workflow handoff artifacts.
+/// A stage's `reads`/`writes` name a file directly inside it.
+pub const ARTIFACT_SUBDIR: &str = "workflow/artifacts";
+
+/// A named, ordered stage spine a profile can bind.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workflow {
+    /// Stable id referenced by `loadouts[].workflow` (e.g. `spec-driven`).
+    pub id: String,
+    /// Human-readable summary; doubles as the rendered section heading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The ordered stages. A workflow needs ≥1 (enforced by [`Workflow::validate`],
+    /// surfaced by `doctor`/studio rather than rejected by the parser).
+    #[serde(default)]
+    pub stages: Vec<WorkflowStage>,
+    /// Provenance: the suite this workflow is modeled on (e.g. `Spec Kit`). Set
+    /// on built-ins; optional on your own. Display-only — never affects render.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modeled_on: Option<String>,
+    /// Provenance: a short note on the research behind it. Display-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub researched: Option<String>,
+    /// Off-switch: kept in config, never selected. Only serialized when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+    /// Which config layer defined it (set at load, not deserialized) — drives
+    /// global-only enforcement, like [`crate::fragment::Fragment::origin`].
+    #[serde(skip)]
+    pub origin: Layer,
+}
+
+/// One stage in a [`Workflow`]: a free-string name plus a short contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowStage {
+    /// Free-string stage name (e.g. `plan`, `implement`). **Not** a closed enum
+    /// — you can add your own stages. Becomes the generated slash-command name
+    /// in the render slice.
+    pub name: String,
+    /// What this stage is for — the one-line contract rendered into the spine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    /// Handoff artifact this stage reads: a bare filename under
+    /// `.loadout/workflow/artifacts/` (e.g. `plan.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reads: Option<String>,
+    /// Handoff artifact this stage writes: a bare filename under
+    /// `.loadout/workflow/artifacts/` (e.g. `plan.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writes: Option<String>,
+    /// Whether this stage is a checkpoint the user is expected to review before
+    /// moving on. Guidance only — loadout never blocks. Serialized only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gate: bool,
+    /// An optional "done when" checklist rendered alongside the stage.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exit: Vec<String>,
+}
+
+impl Workflow {
+    /// The heading title for this workflow: its description, else its id.
+    pub fn title(&self) -> &str {
+        self.description.as_deref().unwrap_or(&self.id)
+    }
+
+    /// A stable fingerprint of this workflow's content (id + stages + …). The
+    /// render layer folds it into the overlay fingerprint so editing a bound
+    /// workflow invalidates a repo's cached overlay even when the detected
+    /// context is unchanged. Independent of any live state — it hashes the
+    /// source, so it's deterministic across renders.
+    pub fn content_hash(&self) -> String {
+        crate::hash::context_hash(self)
+    }
+
+    /// Validate a workflow, returning a list of human-readable problems (empty =
+    /// well-formed). Surfaced by `doctor`/studio; never panics, never rejects at
+    /// parse time (a malformed workflow degrades, it doesn't break the load).
+    pub fn validate(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.id.trim().is_empty() {
+            problems.push("workflow has an empty id".to_string());
+        }
+        if self.stages.is_empty() {
+            problems.push(format!("workflow '{}' has no stages", self.id));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for stage in &self.stages {
+            let name = stage.name.trim();
+            if name.is_empty() {
+                problems.push(format!(
+                    "workflow '{}' has a stage with an empty name",
+                    self.id
+                ));
+                continue;
+            }
+            if !seen.insert(name.to_string()) {
+                problems.push(format!(
+                    "workflow '{}' has a duplicate stage name '{name}'",
+                    self.id
+                ));
+            }
+            for (verb, artifact) in [("reads", &stage.reads), ("writes", &stage.writes)] {
+                if let Some(a) = artifact {
+                    if !is_safe_artifact_name(a) {
+                        problems.push(format!(
+                            "workflow '{}' stage '{name}' {verb} an unsafe artifact name '{a}' \
+                             (use a plain filename like `plan.md`)",
+                            self.id
+                        ));
+                    }
+                }
+            }
+        }
+        problems
+    }
+
+    /// Every distinct handoff artifact this workflow touches (read or written),
+    /// in first-seen order. The render/run layer uses this to set one
+    /// `LOADOUT_<NAME>_PATH` env var per artifact and to ensure the artifacts
+    /// dir exists. Unsafe names are skipped (they never become paths).
+    pub fn artifacts(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for stage in &self.stages {
+            for artifact in [&stage.reads, &stage.writes].into_iter().flatten() {
+                if is_safe_artifact_name(artifact) && seen.insert(artifact.clone()) {
+                    out.push(artifact.clone());
+                }
+            }
+        }
+        out
+    }
+}
+
+impl WorkflowStage {
+    /// The full path to this stage's read artifact under `repo_base`, if it
+    /// names one safely.
+    pub fn read_path(&self, repo_base: &Path) -> Option<PathBuf> {
+        self.reads
+            .as_deref()
+            .and_then(|a| artifact_path(repo_base, a))
+    }
+
+    /// The full path to this stage's write artifact under `repo_base`, if it
+    /// names one safely.
+    pub fn write_path(&self, repo_base: &Path) -> Option<PathBuf> {
+        self.writes
+            .as_deref()
+            .and_then(|a| artifact_path(repo_base, a))
+    }
+}
+
+/// The directory holding a repo's workflow handoff artifacts:
+/// `<repo>/.loadout/workflow/artifacts`.
+pub fn artifacts_dir(repo_base: &Path) -> PathBuf {
+    crate::config::repo_dir(repo_base).join(ARTIFACT_SUBDIR)
+}
+
+/// The full path to a named handoff artifact under `repo_base`, or `None` when
+/// the name isn't a safe bare filename. The guard keeps a workflow — even a
+/// malformed or hostile one — from writing or pointing an env var outside the
+/// artifacts dir (mirrors the repo-confinement [`crate::target`] applies to
+/// detection paths).
+pub fn artifact_path(repo_base: &Path, name: &str) -> Option<PathBuf> {
+    if !is_safe_artifact_name(name) {
+        return None;
+    }
+    Some(artifacts_dir(repo_base).join(name))
+}
+
+/// Whether `name` is a safe handoff-artifact filename: a single non-empty path
+/// component, not hidden, with no separators and no `.`/`..`. So `plan.md` is
+/// fine; `../x`, `a/b`, `/etc/passwd`, `.`, and `.hidden` are not.
+pub fn is_safe_artifact_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('.') {
+        return false;
+    }
+    // A bare filename only: reject any path separator outright (so `a/b`, the
+    // trailing-slash `x/` that `Path` would otherwise normalize away, and
+    // Windows-style `a\b` are all out) before the component check.
+    if name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    let mut comps = Path::new(name).components();
+    matches!(
+        (comps.next(), comps.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
+}
+
+/// The environment variable loadout sets to a handoff artifact's path, so a
+/// stage command can reference the artifact without hardcoding its location: the
+/// filename stem, uppercased and non-alphanumerics folded to `_`, wrapped as
+/// `LOADOUT_<STEM>_PATH` (e.g. `plan.md` → `LOADOUT_PLAN_PATH`). `None` for an
+/// unsafe name or one with no alphanumeric stem.
+pub fn artifact_env_var(name: &str) -> Option<String> {
+    if !is_safe_artifact_name(name) {
+        return None;
+    }
+    let stem = Path::new(name).file_stem()?.to_str()?;
+    let key: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let key = key.trim_matches('_');
+    if key.is_empty() {
+        return None;
+    }
+    Some(format!("LOADOUT_{key}_PATH"))
+}
+
+/// Resolve a workflow id against your library plus the built-in catalog: your
+/// own `[[workflows]]` **shadow** a built-in of the same id (the "copy a
+/// built-in and hand-edit it" story — your copy wins even if you then disable
+/// it). A disabled match, or an unknown id, yields `None` — a dangling
+/// `workflow = "typo"` binding that degrades gracefully.
+pub fn resolve_workflow<'a>(
+    id: &str,
+    user: &'a [Workflow],
+    builtins: &'a [Workflow],
+) -> Option<&'a Workflow> {
+    let chosen = user
+        .iter()
+        .find(|w| w.id == id)
+        .or_else(|| builtins.iter().find(|w| w.id == id))?;
+    (!chosen.disabled).then_some(chosen)
+}
+
+/// The shipped workflow catalog: read-only starting points you bind directly or
+/// **copy and hand-edit** (a user `[[workflows]]` of the same id shadows the
+/// built-in). Each is modeled on a real suite and stamped with provenance.
+///
+/// Three opinionated spines covering the common shapes:
+/// - `lean` — Anthropic's explore → plan → code → commit.
+/// - `spec-driven` — write-the-spec-first (GitHub Spec Kit, AWS Kiro).
+/// - `loop` — a single-prompt backlog loop (the "Ralph" technique).
+pub fn builtin_workflows() -> Vec<Workflow> {
+    fn stage(name: &str, purpose: &str) -> WorkflowStage {
+        WorkflowStage {
+            name: name.to_string(),
+            purpose: Some(purpose.to_string()),
+            reads: None,
+            writes: None,
+            gate: false,
+            exit: Vec::new(),
+        }
+    }
+    fn wf(
+        id: &str,
+        description: &str,
+        modeled_on: &str,
+        researched: &str,
+        stages: Vec<WorkflowStage>,
+    ) -> Workflow {
+        Workflow {
+            id: id.to_string(),
+            description: Some(description.to_string()),
+            stages,
+            modeled_on: Some(modeled_on.to_string()),
+            researched: Some(researched.to_string()),
+            disabled: false,
+            origin: Layer::BuiltIn,
+        }
+    }
+
+    vec![
+        wf(
+            "lean",
+            "Explore, plan, code, commit",
+            "Anthropic explore-plan-code-commit",
+            "Anthropic's agent best-practices loop: read first, plan on paper, then build.",
+            vec![
+                stage(
+                    "explore",
+                    "Read the code paths and tests involved before changing anything. \
+                     Don't write code yet — build a map of what's there.",
+                ),
+                WorkflowStage {
+                    writes: Some("plan.md".to_string()),
+                    exit: vec![
+                        "objective stated in one sentence".to_string(),
+                        "approach and key risks listed".to_string(),
+                        "validation steps named".to_string(),
+                    ],
+                    ..stage(
+                        "plan",
+                        "Write a short plan: objective, approach, risks, and how you'll validate.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    ..stage(
+                        "implement",
+                        "Build the change following the plan; keep edits focused and matched to \
+                         the surrounding code.",
+                    )
+                },
+                WorkflowStage {
+                    gate: true,
+                    exit: vec![
+                        "build, tests, and linter pass".to_string(),
+                        "commit message follows Conventional Commits".to_string(),
+                    ],
+                    ..stage(
+                        "commit",
+                        "Run the build, tests, and linter, then commit at a logical checkpoint.",
+                    )
+                },
+            ],
+        ),
+        wf(
+            "spec-driven",
+            "Spec first, then plan and build against it",
+            "GitHub Spec Kit / AWS Kiro",
+            "Spec-driven development: a written spec is the source of truth that the plan, \
+             implementation, and verification all answer to.",
+            vec![
+                stage(
+                    "research",
+                    "Gather the context and constraints; note open questions and unknowns.",
+                ),
+                WorkflowStage {
+                    writes: Some("spec.md".to_string()),
+                    ..stage(
+                        "specify",
+                        "Write what to build and why — requirements and acceptance criteria, \
+                         not implementation detail.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("spec.md".to_string()),
+                    writes: Some("plan.md".to_string()),
+                    ..stage(
+                        "plan",
+                        "Turn the spec into a technical plan and an ordered task list.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    ..stage("implement", "Work the plan task by task, in order.")
+                },
+                WorkflowStage {
+                    reads: Some("spec.md".to_string()),
+                    gate: true,
+                    exit: vec![
+                        "every acceptance criterion in the spec is met".to_string(),
+                        "no known regressions".to_string(),
+                    ],
+                    ..stage(
+                        "verify",
+                        "Check the result against the spec's acceptance criteria.",
+                    )
+                },
+            ],
+        ),
+        wf(
+            "loop",
+            "Backlog loop — one item at a time until done",
+            "the Ralph single-prompt loop",
+            "The Ralph technique: keep a durable backlog and repeatedly take the next item, \
+             so a long task survives across many short agent runs.",
+            vec![
+                WorkflowStage {
+                    writes: Some("backlog.md".to_string()),
+                    ..stage(
+                        "plan",
+                        "Break the work into a checklist of small, independently shippable items.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("backlog.md".to_string()),
+                    writes: Some("backlog.md".to_string()),
+                    ..stage(
+                        "iterate",
+                        "Take the next unchecked item, implement it, verify it, then check it \
+                         off. Repeat until the backlog is clear.",
+                    )
+                },
+                WorkflowStage {
+                    gate: true,
+                    ..stage(
+                        "verify",
+                        "Run the full build and test suite; confirm nothing regressed.",
+                    )
+                },
+            ],
+        ),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_catalog_is_well_formed() {
+        let workflows = builtin_workflows();
+        let mut ids = std::collections::HashSet::new();
+        for w in &workflows {
+            assert!(ids.insert(w.id.clone()), "duplicate workflow id {}", w.id);
+            assert!(w.description.is_some(), "{} lacks a description", w.id);
+            assert!(w.modeled_on.is_some(), "{} lacks provenance", w.id);
+            assert!(w.researched.is_some(), "{} lacks a research note", w.id);
+            assert_eq!(w.origin, Layer::BuiltIn, "{} should be built-in", w.id);
+            // Every shipped workflow must itself validate.
+            assert!(
+                w.validate().is_empty(),
+                "{} fails validation: {:?}",
+                w.id,
+                w.validate()
+            );
+        }
+        for needed in ["lean", "spec-driven", "loop"] {
+            assert!(ids.contains(needed), "missing built-in workflow {needed}");
+        }
+    }
+
+    #[test]
+    fn lean_has_the_plan_implement_handoff() {
+        // The load-bearing part: the plan stage writes plan.md and the implement
+        // stage reads it. Without this handoff the feature is just headings.
+        let lean = builtin_workflows()
+            .into_iter()
+            .find(|w| w.id == "lean")
+            .unwrap();
+        let plan = lean.stages.iter().find(|s| s.name == "plan").unwrap();
+        let implement = lean.stages.iter().find(|s| s.name == "implement").unwrap();
+        assert_eq!(plan.writes.as_deref(), Some("plan.md"));
+        assert_eq!(implement.reads.as_deref(), Some("plan.md"));
+        // plan.md is surfaced once in the workflow's artifact set.
+        assert_eq!(lean.artifacts(), vec!["plan.md".to_string()]);
+    }
+
+    #[test]
+    fn validate_flags_empty_id_no_stages_dupes_and_unsafe_artifacts() {
+        let ok = Workflow {
+            id: "ok".into(),
+            description: None,
+            stages: vec![WorkflowStage {
+                name: "plan".into(),
+                purpose: None,
+                reads: None,
+                writes: Some("plan.md".into()),
+                gate: false,
+                exit: vec![],
+            }],
+            modeled_on: None,
+            researched: None,
+            disabled: false,
+            origin: Layer::Global,
+        };
+        assert!(ok.validate().is_empty());
+
+        // Empty id + no stages.
+        let empty = Workflow {
+            id: "  ".into(),
+            stages: vec![],
+            ..ok.clone()
+        };
+        assert_eq!(empty.validate().len(), 2);
+
+        // Duplicate stage names.
+        let dupe = Workflow {
+            stages: vec![
+                WorkflowStage {
+                    name: "plan".into(),
+                    purpose: None,
+                    reads: None,
+                    writes: None,
+                    gate: false,
+                    exit: vec![],
+                },
+                WorkflowStage {
+                    name: "plan".into(),
+                    purpose: None,
+                    reads: None,
+                    writes: None,
+                    gate: false,
+                    exit: vec![],
+                },
+            ],
+            ..ok.clone()
+        };
+        assert!(dupe
+            .validate()
+            .iter()
+            .any(|p| p.contains("duplicate stage")));
+
+        // Path-traversal / nested artifact names are rejected.
+        let unsafe_artifact = Workflow {
+            stages: vec![WorkflowStage {
+                name: "x".into(),
+                purpose: None,
+                reads: None,
+                writes: Some("../escape.md".into()),
+                gate: false,
+                exit: vec![],
+            }],
+            ..ok.clone()
+        };
+        assert!(unsafe_artifact
+            .validate()
+            .iter()
+            .any(|p| p.contains("unsafe artifact")));
+    }
+
+    #[test]
+    fn is_safe_artifact_name_confines_to_a_bare_filename() {
+        assert!(is_safe_artifact_name("plan.md"));
+        assert!(is_safe_artifact_name("spec_v2.md"));
+        for bad in ["", ".", "..", ".hidden", "a/b", "../x", "/etc/passwd", "x/"] {
+            assert!(!is_safe_artifact_name(bad), "{bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn artifact_path_joins_under_artifacts_dir_and_rejects_escapes() {
+        let repo = Path::new("/repo");
+        let p = artifact_path(repo, "plan.md").unwrap();
+        assert!(p.ends_with(".loadout/workflow/artifacts/plan.md"));
+        assert_eq!(artifact_path(repo, "../escape.md"), None);
+        // The stage helpers thread through the same guard.
+        let stage = WorkflowStage {
+            name: "plan".into(),
+            purpose: None,
+            reads: None,
+            writes: Some("plan.md".into()),
+            gate: false,
+            exit: vec![],
+        };
+        assert_eq!(stage.write_path(repo), Some(p));
+        assert_eq!(stage.read_path(repo), None);
+    }
+
+    #[test]
+    fn artifact_env_var_derives_from_the_stem() {
+        assert_eq!(
+            artifact_env_var("plan.md").as_deref(),
+            Some("LOADOUT_PLAN_PATH")
+        );
+        assert_eq!(
+            artifact_env_var("spec.md").as_deref(),
+            Some("LOADOUT_SPEC_PATH")
+        );
+        // Non-alphanumerics in the stem fold to underscores.
+        assert_eq!(
+            artifact_env_var("design-notes.md").as_deref(),
+            Some("LOADOUT_DESIGN_NOTES_PATH")
+        );
+        assert_eq!(artifact_env_var("../escape.md"), None);
+    }
+
+    #[test]
+    fn resolve_prefers_user_then_builtin_and_honors_disabled() {
+        let builtins = builtin_workflows();
+        // A built-in resolves directly (bind without copying).
+        assert_eq!(
+            resolve_workflow("lean", &[], &builtins).map(|w| w.id.as_str()),
+            Some("lean")
+        );
+        // Unknown id → None (dangling binding degrades).
+        assert!(resolve_workflow("nope", &[], &builtins).is_none());
+
+        // A user workflow shadows a built-in of the same id.
+        let user = vec![Workflow {
+            id: "lean".into(),
+            description: Some("my lean".into()),
+            stages: vec![WorkflowStage {
+                name: "go".into(),
+                purpose: None,
+                reads: None,
+                writes: None,
+                gate: false,
+                exit: vec![],
+            }],
+            modeled_on: None,
+            researched: None,
+            disabled: false,
+            origin: Layer::Global,
+        }];
+        assert_eq!(
+            resolve_workflow("lean", &user, &builtins).map(|w| w.description.clone()),
+            Some(Some("my lean".into()))
+        );
+
+        // A disabled user copy shadows AND suppresses the built-in (off means off).
+        let disabled = vec![Workflow {
+            disabled: true,
+            ..user[0].clone()
+        }];
+        assert!(resolve_workflow("lean", &disabled, &builtins).is_none());
+    }
+
+    #[test]
+    fn content_hash_is_stable_and_tracks_edits() {
+        let mut w = builtin_workflows()
+            .into_iter()
+            .find(|w| w.id == "lean")
+            .unwrap();
+        let base = w.content_hash();
+        assert_eq!(base, w.content_hash(), "deterministic for the same content");
+        // The skipped `origin` field doesn't affect the hash.
+        w.origin = Layer::Repo;
+        assert_eq!(base, w.content_hash(), "origin is skipped from the hash");
+        // Editing a stage's purpose changes it.
+        w.stages[0].purpose = Some("edited".into());
+        assert_ne!(base, w.content_hash(), "editing a stage changes the hash");
+    }
+
+    #[test]
+    fn deserializes_minimal_and_full() {
+        let minimal: Workflow = toml::from_str(
+            r#"
+            id = "x"
+            [[stages]]
+            name = "plan"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(minimal.id, "x");
+        assert_eq!(minimal.stages.len(), 1);
+        assert!(!minimal.stages[0].gate);
+
+        let full: Workflow = toml::from_str(
+            r#"
+            id = "spec"
+            description = "Spec first"
+            modeled_on = "Spec Kit"
+            [[stages]]
+            name = "specify"
+            purpose = "write the spec"
+            writes = "spec.md"
+            [[stages]]
+            name = "implement"
+            reads = "spec.md"
+            gate = true
+            exit = ["criteria met"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(full.description.as_deref(), Some("Spec first"));
+        assert_eq!(full.stages[0].writes.as_deref(), Some("spec.md"));
+        assert!(full.stages[1].gate);
+        assert_eq!(full.stages[1].exit, vec!["criteria met".to_string()]);
+        // origin defaults to BuiltIn (it is `#[serde(skip)]`); the loader re-tags it.
+        assert_eq!(full.origin, Layer::BuiltIn);
+    }
+
+    #[test]
+    fn unknown_field_is_rejected() {
+        // deny_unknown_fields guards against typos in a hand-written workflow.
+        let err = toml::from_str::<Workflow>("id = \"x\"\nstagez = []\n");
+        assert!(err.is_err(), "unknown top-level field must be rejected");
+        let err = toml::from_str::<Workflow>(
+            "id = \"x\"\n[[stages]]\nname = \"p\"\nwritez = \"plan.md\"\n",
+        );
+        assert!(err.is_err(), "unknown stage field must be rejected");
+    }
+}

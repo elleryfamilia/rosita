@@ -11,6 +11,7 @@
 //! - [`config`]     — layered TOML config (global + repo) and the merged model.
 //! - [`fragment`]   — reusable guidance atoms (your library + the shipped palette).
 //! - [`profile`]    — targeted profiles + pick-one selection & composition.
+//! - [`workflow`]   — named stage spine + handoff artifacts a profile can bind.
 //! - [`binding`]    — the per-project remembered profile choice.
 //! - [`render`]   — template rendering (minijinja) + generated header.
 //! - [`providers`]— native environment discovery (host/tailnet/docker/…).
@@ -49,6 +50,7 @@ pub mod target;
 pub mod templates;
 pub mod tui;
 pub mod update;
+pub mod workflow;
 pub mod writer;
 
 /// Crate-wide result alias built on [`anyhow`].

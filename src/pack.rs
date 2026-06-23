@@ -49,6 +49,7 @@ impl Pack {
                 .iter()
                 .map(|s| FragmentRef::Id(s.to_string()))
                 .collect(),
+            workflow: None,
             template: None,
             disabled: false,
         }

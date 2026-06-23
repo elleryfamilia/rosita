@@ -51,6 +51,15 @@ impl Layer {
     pub fn contributes_profiles(self) -> bool {
         matches!(self, Layer::BuiltIn | Layer::Global)
     }
+
+    /// Whether `[[workflows]]` defined in this layer are honored. Workflows are a
+    /// **global** concept, gated exactly like fragments (built-in, global
+    /// `config.toml`, or global `local.toml`): a repo layer that declares one is
+    /// stripped (and `doctor` flags it) so a cloned repo can never inject a
+    /// workflow into your agents.
+    pub fn contributes_workflows(self) -> bool {
+        matches!(self, Layer::BuiltIn | Layer::Global | Layer::GlobalLocal)
+    }
 }
 
 /// A reusable unit of guidance composed by profiles.

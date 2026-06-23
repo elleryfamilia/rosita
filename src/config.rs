@@ -25,6 +25,7 @@ use crate::adapters::AgentDescriptor;
 use crate::fragment::Fragment;
 use crate::profile::LoadoutConfig;
 use crate::target::TargetDef;
+use crate::workflow::Workflow;
 
 /// Fully-resolved configuration used by the rest of the program.
 #[derive(Debug, Clone, Serialize)]
@@ -46,6 +47,12 @@ pub struct Config {
     /// ([`builtin_targets`](crate::target::builtin_targets)) are a separate
     /// read-only catalog and are **not** included here.
     pub targets: Vec<TargetDef>,
+    /// Your custom workflows (the `[[workflows]]` you authored, merged by id
+    /// across layers). The shipped
+    /// [`builtin_workflows`](crate::workflow::builtin_workflows) are a separate
+    /// read-only catalog and are **not** included here. Workflows are
+    /// global-only: a repo layer that declares them is stripped at load.
+    pub workflows: Vec<Workflow>,
     /// Per-fragment `params` overrides keyed by fragment id, deep-merged
     /// across layers. The private (`local.toml`) place for sensitive values
     /// a public fragment's guidance references.
@@ -148,6 +155,9 @@ impl Config {
                 for cap in &mut parsed.fragments {
                     cap.origin = layer;
                 }
+                for w in &mut parsed.workflows {
+                    w.origin = layer;
+                }
                 raw.merge(parsed);
                 sources.push(path);
             }
@@ -183,6 +193,9 @@ impl Config {
             }
             for t in &mut parsed.targets {
                 t.origin = layer;
+            }
+            for w in &mut parsed.workflows {
+                w.origin = layer;
             }
             raw.merge(parsed);
             sources.push(path);
@@ -246,6 +259,12 @@ fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
     if !layer.contributes_profiles() {
         parsed.profiles.clear();
     }
+    if !layer.contributes_workflows() {
+        // Workflows are global-only, like fragments: a committed repo layer must
+        // never inject a process spine — its stage contracts, artifact paths, or
+        // (once rendered) generated commands — into a cloned repo's agents.
+        parsed.workflows.clear();
+    }
 }
 
 // --- raw (per-layer) parsing -------------------------------------------------
@@ -267,6 +286,8 @@ struct RawConfig {
     fragments: Vec<Fragment>,
     #[serde(default)]
     targets: Vec<TargetDef>,
+    #[serde(default)]
+    workflows: Vec<Workflow>,
     #[serde(default)]
     fragment_params: BTreeMap<String, toml::Value>,
     #[serde(default)]
@@ -388,6 +409,13 @@ impl RawConfig {
                 None => self.targets.push(t),
             }
         }
+        // Later-layer workflows replace earlier ones of the same id.
+        for w in other.workflows {
+            match self.workflows.iter_mut().find(|e| e.id == w.id) {
+                Some(existing) => *existing = w,
+                None => self.workflows.push(w),
+            }
+        }
         // Fragment params deep-merge across layers (later wins per key), so a
         // private layer can supply just the sensitive values.
         for (id, params) in other.fragment_params {
@@ -422,6 +450,7 @@ impl RawConfig {
         let profiles = self.profiles;
         let fragments = self.fragments;
         let targets = self.targets;
+        let workflows = self.workflows;
 
         // Built-in agents form the base; user `[[agents]]` override by id.
         let mut agents = crate::adapters::builtin_agents();
@@ -448,6 +477,7 @@ impl RawConfig {
             profiles,
             fragments,
             targets,
+            workflows,
             fragment_params: self.fragment_params,
             agents,
             host_classes: self.host_classes,
@@ -626,6 +656,8 @@ mod tests {
         // owns an empty library (the palette is a separate catalog).
         assert!(c.profiles.is_empty());
         assert!(c.fragments.is_empty());
+        // Same for workflows — the built-in catalog is separate, not merged in.
+        assert!(c.workflows.is_empty());
     }
 
     #[test]
@@ -1080,5 +1112,102 @@ mod tests {
         let eff: Vec<String> = c.effective_targets().into_iter().map(|t| t.id).collect();
         assert!(eff.contains(&"rust".to_string()), "built-ins present");
         assert!(eff.contains(&"deno".to_string()), "custom present");
+    }
+
+    // --- workflows (global-only, like fragments) -----------------------------
+
+    /// A minimal `[[workflows]]` table with one stage, for the layer fixtures.
+    fn workflow_toml(id: &str, stage: &str) -> String {
+        format!("[[workflows]]\nid = \"{id}\"\n[[workflows.stages]]\nname = \"{stage}\"\n")
+    }
+
+    #[test]
+    fn workflows_merge_by_id_across_layers() {
+        // A later layer replaces an earlier workflow by id and adds new ones.
+        let mut base: RawConfig = toml::from_str(
+            "[[workflows]]\nid = \"lean\"\ndescription = \"base\"\n\
+             [[workflows.stages]]\nname = \"plan\"\n",
+        )
+        .unwrap();
+        let overlay: RawConfig = toml::from_str(
+            "[[workflows]]\nid = \"lean\"\ndescription = \"override\"\n\
+             [[workflows.stages]]\nname = \"plan\"\n\n\
+             [[workflows]]\nid = \"loop\"\n[[workflows.stages]]\nname = \"iterate\"\n",
+        )
+        .unwrap();
+        base.merge(overlay);
+        let c = base.finalize(vec![]);
+        let lean = c.workflows.iter().find(|w| w.id == "lean").unwrap();
+        assert_eq!(lean.description.as_deref(), Some("override"));
+        assert!(c.workflows.iter().any(|w| w.id == "loop"));
+        assert_eq!(c.workflows.len(), 2);
+    }
+
+    #[test]
+    fn repo_layer_workflows_are_dropped_by_loader() {
+        // A repo `config.toml` may *declare* `[[workflows]]` (the strict parser
+        // accepts the table), but the loader strips them — workflows are global.
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
+        std::fs::write(repo_config_path(repo.path()), workflow_toml("evil", "pwn")).unwrap();
+
+        let c = Config::load_from(None, repo.path()).unwrap();
+        assert!(c.workflows.is_empty(), "repo workflows must be dropped");
+    }
+
+    #[test]
+    fn global_and_global_local_contribute_workflows_with_origin() {
+        // Public global config and the private global local.toml both contribute
+        // workflows, each origin-tagged by its layer (drives global-only
+        // enforcement and studio display).
+        let global = tempfile::tempdir().unwrap();
+        let gcfg = global.path().join("config.toml");
+        std::fs::write(&gcfg, workflow_toml("pub", "plan")).unwrap();
+        std::fs::write(
+            global.path().join("local.toml"),
+            workflow_toml("priv", "plan"),
+        )
+        .unwrap();
+        let repo = tempfile::tempdir().unwrap();
+
+        let c = Config::load_from(Some(&gcfg), repo.path()).unwrap();
+        let public = c.workflows.iter().find(|w| w.id == "pub").unwrap();
+        let private = c.workflows.iter().find(|w| w.id == "priv").unwrap();
+        assert_eq!(public.origin, crate::fragment::Layer::Global);
+        assert_eq!(private.origin, crate::fragment::Layer::GlobalLocal);
+    }
+
+    #[test]
+    fn from_layer_strs_workflows_global_honored_repo_stripped() {
+        // The studio (in-memory) path enforces the same global-only rule and
+        // re-tags origin — a repo-declared workflow must never slip through.
+        use crate::fragment::Layer;
+        let c = Config::from_layer_strs(vec![
+            (
+                Layer::Global,
+                PathBuf::from("/g/config.toml"),
+                workflow_toml("mine", "plan"),
+            ),
+            (
+                Layer::Repo,
+                PathBuf::from("/r/.loadout/config.toml"),
+                workflow_toml("evil", "pwn"),
+            ),
+        ])
+        .unwrap();
+        let mine = c
+            .workflows
+            .iter()
+            .find(|w| w.id == "mine")
+            .expect("global workflow kept");
+        assert_eq!(
+            mine.origin,
+            Layer::Global,
+            "origin re-tagged on the studio path"
+        );
+        assert!(
+            !c.workflows.iter().any(|w| w.id == "evil"),
+            "repo workflow stripped"
+        );
     }
 }

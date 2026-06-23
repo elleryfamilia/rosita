@@ -42,6 +42,13 @@ pub struct LoadoutConfig {
     /// profile needs ≥1 (enforced by studio validation, not the parser).
     #[serde(default)]
     pub fragments: Vec<FragmentRef>,
+    /// The workflow this profile binds, by id (a built-in or a user
+    /// `[[workflows]]`). At most one. When set, its stage spine + handoff
+    /// artifacts render alongside the fragments; a dangling id degrades
+    /// gracefully (doctor warns, run notes it, the workflow simply doesn't
+    /// apply). Only serialized when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<String>,
     /// Optional base-template override (per agent the renderer appends the
     /// agent suffix). Rarely needed.
     #[serde(default)]
@@ -525,6 +532,7 @@ mod tests {
                 .iter()
                 .map(|s| FragmentRef::Id(s.to_string()))
                 .collect(),
+            workflow: None,
             template: None,
             disabled: false,
         }

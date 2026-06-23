@@ -1148,6 +1148,7 @@ pub fn profile_from_form(pairs: &[(String, String)]) -> crate::Result<LoadoutCon
         name,
         targets: values_for(pairs, "targets"),
         fragments,
+        workflow: None,
         template: opt(value_of(pairs, "template")),
         disabled: value_of(pairs, "disabled").is_some(),
     })
@@ -1205,6 +1206,7 @@ pub fn draft_profile_from_form(pairs: &[(String, String)]) -> LoadoutConfig {
             .into_iter()
             .map(FragmentRef::Id)
             .collect(),
+        workflow: None,
         template: None,
         disabled: value_of(pairs, "disabled").is_some(),
     }

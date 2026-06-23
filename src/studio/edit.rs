@@ -729,6 +729,7 @@ mod tests {
             name: "rust".into(),
             targets: vec!["rust".into()],
             fragments: vec![crate::profile::FragmentRef::Id("a".into())],
+            workflow: None,
             template: None,
             disabled: false,
         };
