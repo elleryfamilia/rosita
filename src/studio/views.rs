@@ -983,11 +983,16 @@ fn workflow_gallery_card(w: &WorkflowView, focused: bool) -> Markup {
     if w.active {
         cls.push_str(" active");
     }
+    let glyph = w.icon.as_deref().unwrap_or("git-branch");
     html! {
         button class=(cls) hx-get=(format!("/workflows/{}", enc(&w.id))) hx-target="#main" {
-            span class="wf-card-name" { (w.id) }
-            @if w.active { span class="wf-card-dot" title="active workflow" { (icon("check")) } }
-            @else if !w.builtin { span class="wf-card-tag" { "yours" } }
+            span class="wf-card-top" {
+                span class="wf-card-glyph" { (icon(glyph)) }
+                span class="wf-card-name" { (w.title) }
+                @if w.active { span class="wf-card-dot" title="active workflow" { (icon("check")) } }
+                @else if !w.builtin { span class="wf-card-tag" { "yours" } }
+            }
+            @if let Some(b) = &w.blurb { span class="wf-card-blurb" { (b) } }
         }
     }
 }
@@ -999,7 +1004,7 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
         div class="wf-detail" {
             div class="wf-detail-head" {
                 div class="wf-detail-titles" {
-                    h2 { (w.title) }
+                    h2 { span class="wf-detail-glyph" { (icon(w.icon.as_deref().unwrap_or("git-branch"))) } (w.title) }
                     span class="wf-detail-meta muted" {
                         code class="workflow-bind" { (w.id) }
                         @if let Some(m) = &w.modeled_on { " · " (m) }

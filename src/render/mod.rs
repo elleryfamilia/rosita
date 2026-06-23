@@ -642,9 +642,7 @@ mod tests {
         })
         .unwrap();
         // The section renders with its title, the ordered stages, and the handoff.
-        assert!(out
-            .content
-            .contains("## Workflow: Explore, plan, code, commit"));
+        assert!(out.content.contains("## Workflow: Lean"));
         assert!(out.content.contains("**plan**"));
         assert!(out.content.contains("writes `plan.md`"));
         assert!(out.content.contains("reads `plan.md`"));

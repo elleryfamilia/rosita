@@ -401,21 +401,27 @@ body {
 .flash-warn { background: var(--caution-soft); color: var(--caution); }
 .gate-tag { color: var(--caution); background: var(--caution-soft); }
 
-/* gallery — always-visible tiny cards across the top */
-.wf-gallery { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
-.wf-card { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); color: var(--fg); font-family: inherit; font-size: 13px; cursor: pointer; transition: border-color .12s, background .12s; }
+/* gallery — always-visible cards across the top: icon + title + brief */
+.wf-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 0 0 18px; }
+.wf-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); color: var(--fg); font-family: inherit; cursor: pointer; transition: border-color .12s, background .12s; }
 .wf-card:hover { border-color: var(--border-strong); background: var(--hover); }
 .wf-card.focused { border-color: var(--accent-line); background: var(--accent-soft); }
 .wf-card.active { border-color: var(--accent); }
-.wf-card-name { font-weight: 600; }
-.wf-card-dot { display: inline-flex; color: var(--accent); }
-.wf-card-dot .icon { width: 13px; height: 13px; }
-.wf-card-tag { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
+.wf-card-top { display: flex; align-items: center; gap: 8px; }
+.wf-card-glyph { display: inline-flex; color: var(--accent); flex: none; }
+.wf-card-glyph .icon { width: 17px; height: 17px; }
+.wf-card-name { font-weight: 600; font-size: 13.5px; flex: 1; min-width: 0; }
+.wf-card-dot { display: inline-flex; color: var(--accent); flex: none; }
+.wf-card-dot .icon { width: 14px; height: 14px; }
+.wf-card-tag { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
+.wf-card-blurb { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.wf-detail-glyph { display: inline-flex; color: var(--accent); flex: none; }
+.wf-detail-glyph .icon { width: 18px; height: 18px; }
 
 /* detail — the focused workflow's slot spine */
 .wf-detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel-2); padding: 18px 20px; }
 .wf-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.wf-detail-titles h2 { margin: 0 0 5px; font-size: 17px; font-weight: 600; }
+.wf-detail-titles h2 { margin: 0 0 5px; font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .wf-detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .wf-source { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); text-decoration: none; }
 .wf-source:hover { text-decoration: underline; }

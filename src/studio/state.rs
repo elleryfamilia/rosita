@@ -210,8 +210,13 @@ pub struct WorkflowStageView {
 pub struct WorkflowView {
     /// Stable id a profile binds (e.g. `lean`).
     pub id: String,
-    /// Heading title (description, else the id).
+    /// Display title (name, else description, else id).
     pub title: String,
+    /// The brief one-line description shown under the title on the gallery card
+    /// (only when there's a distinct `name`, so it never duplicates the title).
+    pub blurb: Option<String>,
+    /// Studio glyph name for the card, or `None` for the default glyph.
+    pub icon: Option<String>,
     /// Provenance: the suite this is modeled on, if any.
     pub modeled_on: Option<String>,
     /// Built-in (read-only) vs your own `[[workflows]]`.
@@ -699,6 +704,10 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 .collect();
             WorkflowView {
                 title: w.title().to_string(),
+                // Show the description as a card blurb only when a distinct
+                // display name exists, so it never repeats the title.
+                blurb: w.name.as_ref().and(w.description.clone()),
+                icon: w.icon.clone(),
                 builtin: w.origin == Layer::BuiltIn,
                 private: matches!(w.origin, Layer::GlobalLocal),
                 active: active_id.as_deref() == Some(w.id.as_str()),

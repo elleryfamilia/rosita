@@ -262,7 +262,9 @@ mod tests {
         // A purpose with a quote/colon must not break the markdown frontmatter.
         let wf = Workflow {
             id: "x".into(),
+            name: None,
             description: None,
+            icon: None,
             stages: vec![WorkflowStage {
                 name: "plan".into(),
                 purpose: Some("Write the \"spec\": be precise".into()),
@@ -288,7 +290,9 @@ mod tests {
         // A hostile/malformed artifact name never becomes a path in the command.
         let wf = Workflow {
             id: "x".into(),
+            name: None,
             description: None,
+            icon: None,
             stages: vec![WorkflowStage {
                 name: "plan".into(),
                 purpose: Some("do".into()),

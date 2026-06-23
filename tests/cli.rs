@@ -192,7 +192,7 @@ fn refresh_renders_a_bound_workflow_in_both_channels_and_clean_removes_commands(
 
     // Channel 1: the overlay carries the workflow context section.
     let overlay = fx.read(".loadout/generated/claude.md");
-    assert!(overlay.contains("## Workflow: Explore, plan, code, commit"));
+    assert!(overlay.contains("## Workflow: Lean"));
     assert!(overlay.contains(".loadout/workflow/artifacts/"));
 
     // Channel 2: one generated command file per stage, under the owned namespace.
@@ -226,7 +226,7 @@ fn run_workflow_override_sets_handoff_env_in_dry_run() {
         .assert()
         .success()
         // The run summary names the active workflow…
-        .stdout(predicate::str::contains("Explore, plan, code, commit"))
+        .stdout(predicate::str::contains("Lean"))
         // …and the launch env exposes each handoff artifact's absolute path.
         .stdout(predicate::str::contains("LOADOUT_PLAN_PATH="))
         .stdout(predicate::str::contains(
@@ -251,7 +251,7 @@ fn global_active_workflow_renders_without_any_binding() {
         .assert()
         .success();
     let overlay = fx.read(".loadout/generated/claude.md");
-    assert!(overlay.contains("## Workflow: Plan mode, auto-accept, verify, ship"));
+    assert!(overlay.contains("## Workflow: Boris's workflow"));
     // And the per-stage commands are generated for the active workflow.
     assert!(fx.exists(".claude/commands/loadout/ship.md"));
 }

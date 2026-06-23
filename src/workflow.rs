@@ -43,9 +43,18 @@ pub const ARTIFACT_SUBDIR: &str = "workflow/artifacts";
 pub struct Workflow {
     /// Stable id referenced by `loadouts[].workflow` (e.g. `spec-driven`).
     pub id: String,
-    /// Human-readable summary; doubles as the rendered section heading.
+    /// Display name shown on the gallery card and as the rendered section
+    /// heading (e.g. `Superpowers`, `Boris's workflow`). Falls back to
+    /// `description`, then `id`. Set on the curated built-ins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Human-readable summary — the brief blurb on the gallery card.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Studio glyph name for the gallery card (from the built-in icon set, e.g.
+    /// `bolt`, `refresh`). `None` falls back to a default glyph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// The ordered stages. A workflow needs ≥1 (enforced by [`Workflow::validate`],
     /// surfaced by `doctor`/studio rather than rejected by the parser).
     #[serde(default)]
@@ -100,9 +109,13 @@ pub struct WorkflowStage {
 }
 
 impl Workflow {
-    /// The heading title for this workflow: its description, else its id.
+    /// The display title for this workflow: its `name`, else its `description`,
+    /// else its `id`.
     pub fn title(&self) -> &str {
-        self.description.as_deref().unwrap_or(&self.id)
+        self.name
+            .as_deref()
+            .or(self.description.as_deref())
+            .unwrap_or(&self.id)
     }
 
     /// A stable fingerprint of this workflow's content (id + stages + …). The
@@ -293,9 +306,12 @@ pub fn builtin_workflows() -> Vec<Workflow> {
             exit: Vec::new(),
         }
     }
+    #[allow(clippy::too_many_arguments)]
     fn wf(
         id: &str,
+        name: &str,
         description: &str,
+        icon: &str,
         modeled_on: &str,
         source: &str,
         researched: &str,
@@ -303,7 +319,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
     ) -> Workflow {
         Workflow {
             id: id.to_string(),
+            name: Some(name.to_string()),
             description: Some(description.to_string()),
+            icon: Some(icon.to_string()),
             stages,
             modeled_on: Some(modeled_on.to_string()),
             researched: Some(researched.to_string()),
@@ -317,7 +335,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         // --- superpowers — obra/superpowers (the biggest community framework) ---
         wf(
             "superpowers",
+            "Superpowers",
             "Brainstorm, plan, then subagent-driven build",
+            "bolt",
             "obra/superpowers (Jesse Vincent)",
             "https://github.com/obra/superpowers",
             "The biggest community Claude Code skills framework (~41k★): refine the idea, \
@@ -365,7 +385,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         // --- boris — how Claude Code's creator works -----------------------
         wf(
             "boris",
+            "Boris's workflow",
             "Plan mode, auto-accept, verify, ship",
+            "rocket",
             "Boris Cherny (Claude Code's creator)",
             "https://howborisusesclaudecode.com/",
             "Nail the plan in plan-mode, let it implement in one pass, lean hard on a \
@@ -408,7 +430,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         // --- lean — Anthropic explore-plan-code-commit ---------------------
         wf(
             "lean",
+            "Lean",
             "Explore, plan, code, commit",
+            "git-branch",
             "Anthropic explore-plan-code-commit",
             "https://www.anthropic.com/engineering/claude-code-best-practices",
             "Anthropic's agent best-practices loop: read first, plan on paper, then build.",
@@ -453,7 +477,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         ),
         wf(
             "spec-driven",
+            "Spec-driven",
             "Spec first, then plan and build against it",
+            "book",
             "GitHub Spec Kit / AWS Kiro",
             "https://github.com/github/spec-kit",
             "Spec-driven development: a written spec is the source of truth that the plan, \
@@ -499,7 +525,9 @@ pub fn builtin_workflows() -> Vec<Workflow> {
         ),
         wf(
             "loop",
+            "Ralph loop",
             "Backlog loop — one item at a time until done",
+            "refresh",
             "the Ralph single-prompt loop",
             "https://ghuntley.com/ralph/",
             "The Ralph technique: keep a durable backlog and repeatedly take the next item, \
@@ -544,6 +572,8 @@ mod tests {
         for w in &workflows {
             assert!(ids.insert(w.id.clone()), "duplicate workflow id {}", w.id);
             assert!(w.description.is_some(), "{} lacks a description", w.id);
+            assert!(w.name.is_some(), "{} lacks a display name", w.id);
+            assert!(w.icon.is_some(), "{} lacks a card icon", w.id);
             assert!(w.modeled_on.is_some(), "{} lacks provenance", w.id);
             assert!(w.researched.is_some(), "{} lacks a research note", w.id);
             // Curated built-ins carry an upstream source (for display + the
@@ -584,7 +614,9 @@ mod tests {
     fn validate_flags_empty_id_no_stages_dupes_and_unsafe_artifacts() {
         let ok = Workflow {
             id: "ok".into(),
+            name: None,
             description: None,
+            icon: None,
             stages: vec![WorkflowStage {
                 name: "plan".into(),
                 purpose: None,
@@ -714,7 +746,9 @@ mod tests {
         // A user workflow shadows a built-in of the same id.
         let user = vec![Workflow {
             id: "lean".into(),
+            name: None,
             description: Some("my lean".into()),
+            icon: None,
             stages: vec![WorkflowStage {
                 name: "go".into(),
                 purpose: None,

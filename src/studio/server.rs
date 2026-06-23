@@ -2018,17 +2018,25 @@ mod tests {
         assert_eq!(r.status, 200);
         let body = String::from_utf8(r.body).unwrap();
         assert!(body.contains("Workflows"), "tab heading");
-        for name in ["superpowers", "boris", "lean", "spec-driven", "loop"] {
+        // The gallery cards show the display names.
+        for name in [
+            "Superpowers",
+            "Boris's workflow",
+            "Lean",
+            "Spec-driven",
+            "Ralph loop",
+        ] {
             assert!(body.contains(name), "gallery lists '{name}'");
         }
+        // …with a brief description blurb on each.
         assert!(
             body.contains("Explore, plan, code, commit"),
-            "the active workflow's slots are shown"
+            "card blurb shown"
         );
         assert!(body.contains("active workflow"), "active marker");
         assert!(
             body.contains("/loadout:explore"),
-            "renders a slot's command"
+            "the active (lean) workflow's slot command is shown"
         );
 
         // Focusing another card shows ITS slots + a 'Use this workflow' action.
@@ -2040,9 +2048,15 @@ mod tests {
             .body,
         )
         .unwrap();
-        assert!(sp.contains("Brainstorm, plan, then subagent-driven build"));
         assert!(sp.contains("Use this workflow"));
-        assert!(sp.contains("/loadout:brainstorm"));
+        assert!(
+            sp.contains("/loadout:brainstorm"),
+            "superpowers' first slot"
+        );
+        assert!(
+            sp.contains("Refine the rough idea"),
+            "superpowers' slot purpose is shown when focused"
+        );
 
         // Activating it stages the change (re-render confirms it's now active).
         let act = String::from_utf8(
