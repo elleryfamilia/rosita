@@ -1,7 +1,7 @@
-/* loadout studio — refined dark, tabbed (Profiles / Fragments).
+/* loadout studio — refined dark, tabbed (Loadouts / Fragments).
    One accent (blue); a 4px grid and a real type scale.
-   Fonts are self-hosted (no external calls): Sail for the wordmark, Inter for
-   body/UI. Both © their authors under the SIL Open Font License 1.1
+   Inter is self-hosted (no external calls) for body/UI and the wordmark,
+   © its authors under the SIL Open Font License 1.1
    (https://scripts.sil.org/OFL); redistributed here in binary woff2 form. */
 
 @font-face {
@@ -10,13 +10,6 @@
   font-weight: 100 900;
   font-display: swap;
   src: url(/assets/fonts/inter.woff2) format("woff2");
-}
-@font-face {
-  font-family: "Sail";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(/assets/fonts/sail.woff2) format("woff2");
 }
 
 :root {
@@ -59,7 +52,7 @@
 
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --brand: "Sail", cursive;
+  --brand: var(--sans);
 
   --r-sm: 6px;
   --r: 8px;
@@ -130,8 +123,8 @@ body {
    the nav tabs sit dead-center. */
 .brand { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; }
 .brand-mark { display: inline-flex; }
-.brand-mark .rose { width: 28px; height: 28px; display: block; }
-.brand-name { font-family: var(--brand); font-size: 30px; font-weight: 400; line-height: 1; letter-spacing: .5px; padding-bottom: 2px; }
+.brand-mark .mark { width: 26px; height: 26px; display: block; color: var(--accent); }
+.brand-name { font-family: var(--brand); font-size: 20px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
 .topbar-right { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 
 .tabs { flex: 0 0 auto; display: flex; gap: 6px; }
@@ -202,8 +195,7 @@ body {
 .tab-profiles { display: grid; grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr); gap: 22px; align-items: start; }
 
 .profile-rail { position: sticky; top: 0; align-self: start; max-height: calc(100vh - 97px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-.rail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.rail-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.rail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .rail-head-actions { display: flex; gap: 6px; }
 .rail-empty { margin: 0; padding: 16px; border: 1px dashed var(--border-strong); border-radius: var(--r); }
 .rail-list { display: flex; flex-direction: column; gap: 6px; }

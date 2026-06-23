@@ -286,18 +286,14 @@ fn target_icon_only(id: &str, token: Option<&str>) -> Markup {
     html! { span class="rail-icon" title=(id) { (target_icon_markup(&ti)) } }
 }
 
-/// The loadout brandmark: a small red rose (multi-color, so it ignores the
-/// monochrome icon treatment).
+/// The loadout brandmark: an item being loaded down into a tray — the "load"
+/// gesture. Single-stroke `currentColor`, so the CSS sets its accent color.
 fn brand_mark() -> Markup {
     PreEscaped(
-        r##"<svg class="rose" viewBox="0 0 24 24" aria-hidden="true">
-  <path fill="#36a35b" d="M11.6 13h.8v7h-.8z"/>
-  <path fill="#36a35b" d="M12.2 16.4c1.5-.1 2.8-1 3.3-2.4-1.5.1-2.8 1-3.3 2.4z"/>
-  <path fill="#36a35b" d="M11.8 15c-1.4-.1-2.6-.9-3.1-2.2 1.4.1 2.6.9 3.1 2.2z"/>
-  <circle cx="12" cy="9" r="5.3" fill="#e23b54"/>
-  <path fill="none" stroke="#a82338" stroke-width="1.3" stroke-linecap="round" d="M12 5.1a3.9 3.9 0 1 0 3.7 5.1"/>
-  <path fill="none" stroke="#a82338" stroke-width="1.2" stroke-linecap="round" d="M12 6.8a2.2 2.2 0 1 0 2 3"/>
-  <circle cx="12" cy="9" r="0.95" fill="#a82338"/>
+        r##"<svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M12 3v10"/>
+  <path d="m8 9 4 4 4-4"/>
+  <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
 </svg>"##
             .to_string(),
     )
@@ -489,7 +485,6 @@ pub fn profiles_tab(
         div class="tab-profiles" {
             aside class="profile-rail" {
                 div class="rail-head" {
-                    h1 { "Loadouts" }
                     div class="rail-head-actions" {
                         button class="btn btn-ghost btn-sm" hx-get="/packs" hx-target="#main" { (icon("grid")) "Starter packs" }
                         button class="btn btn-primary btn-sm" hx-get="/profiles/new" hx-target="#main" { (icon("plus")) "New" }
