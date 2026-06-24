@@ -415,13 +415,11 @@ body {
 .wf-card-dot .icon { width: 12px; height: 12px; }
 .wf-card-tag { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
 .wf-card-blurb { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
-.wf-detail-glyph { display: inline-flex; color: var(--accent); flex: none; }
-.wf-detail-glyph .icon { width: 18px; height: 18px; }
-
-/* detail — the focused workflow's slot spine */
+/* detail — the focused workflow filling the fixed spine */
 .wf-detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel-2); padding: 18px 20px; }
-.wf-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.wf-detail-titles h2 { margin: 0 0 5px; font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.wf-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.wf-process-lead { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
+.wf-process-lead strong { color: var(--fg); font-weight: 600; }
 .wf-detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .wf-source { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); text-decoration: none; }
 .wf-source:hover { text-decoration: underline; }
@@ -429,30 +427,35 @@ body {
 .wf-detail-actions { flex: none; }
 .wf-active-pill { font-size: 11px; padding: 4px 9px; color: var(--ok); background: rgba(127, 214, 160, 0.14); }
 
-/* slots — one clearly-bounded box per stage */
-.wf-slots { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.wf-slot { position: relative; border: 1px solid var(--border); border-left: 3px solid var(--accent-line); border-radius: var(--r); background: var(--panel); padding: 12px 15px; display: flex; flex-direction: column; gap: 6px; }
-.wf-slot-head { display: flex; align-items: center; gap: 10px; }
-.wf-slot-num { width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-.wf-slot-cmd-lead { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: -0.2px; }
-.wf-slot-purpose { margin: 0 0 0 32px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
-.wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: 32px; }
+/* spine — the fixed canonical slots on one continuous rail; the active workflow
+   fills each (or leaves it skipped). The command is the key item: a light
+   `/loadout:` prefix + the bold step name. */
+.wf-slots { position: relative; margin: 0; padding: 0; list-style: none; }
+.wf-slots::before { content: ""; position: absolute; left: 13px; top: 16px; bottom: 16px; width: 2px; background: var(--border-strong); }
+.wf-slot { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; }
+.wf-slot-rail { width: 28px; flex: none; display: flex; justify-content: center; padding-top: 4px; }
+.wf-slot-dot { position: relative; z-index: 1; width: 11px; height: 11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--panel-2); }
+.wf-slot.skipped .wf-slot-dot { background: var(--panel-2); box-shadow: inset 0 0 0 2px var(--border-strong), 0 0 0 4px var(--panel-2); }
+.wf-slot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.wf-slot-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wf-slot-cmd-lead { font-family: var(--mono); display: inline-flex; align-items: baseline; }
+.cmd-prefix { font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.cmd-name { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: -0.2px; }
+.wf-slot.skipped .cmd-prefix, .wf-slot.skipped .cmd-name { color: var(--faint); font-weight: 600; }
+.wf-slot-purpose { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.wf-slot-skip { color: var(--faint); font-style: italic; }
+.skip-tag { color: var(--faint); background: var(--elevated); }
+.wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }
-.stage-exit { margin: 0 0 0 32px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.stage-exit { margin: 1px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .stage-exit li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); }
 .stage-exit .icon { width: 11px; height: 11px; flex: none; color: var(--ok); }
-.wf-slot-cmd { align-self: flex-start; }
-/* Dataflow connector between two slots: a down-arrow on the spine (aligned
-   under the slot-number column) plus the handoff file pill(s). The rail's
-   pseudo-element stubs bridge the gap up to the slot above and down to the one
-   below, so the artifact reads as traveling down the spine. */
-.wf-flow { display: flex; align-items: center; gap: 9px; margin: -3px 0; padding-left: 15px; }
-.wf-flow-rail { position: relative; width: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent-line); }
-.wf-flow-rail .icon { width: 15px; height: 15px; }
-.wf-flow-rail::before, .wf-flow-rail::after { content: ""; position: absolute; left: 50%; width: 2px; background: var(--accent-line); transform: translateX(-50%); }
-.wf-flow-rail::before { bottom: 100%; height: 6px; }
-.wf-flow-rail::after { top: 100%; height: 6px; }
+/* dataflow connector: a down-arrow node on the rail + the handoff file pill(s),
+   so the artifact reads as traveling writer -> reader down the spine. */
+.wf-flow { display: flex; align-items: center; gap: 12px; padding: 1px 0; }
+.wf-flow-rail { width: 28px; flex: none; display: flex; justify-content: center; color: var(--accent); }
+.wf-flow-rail .icon { width: 16px; height: 16px; background: var(--panel-2); border-radius: 50%; }
 .wf-flow-files { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .wf-flow-file { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 999px; padding: 2px 10px; }
 .wf-flow-file .icon { width: 11px; height: 11px; flex: none; color: var(--accent); }

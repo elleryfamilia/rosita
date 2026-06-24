@@ -2049,12 +2049,15 @@ mod tests {
             "card blurb shown"
         );
         assert!(body.contains("active workflow"), "active marker");
+        // The command name is the key item: a light `/loadout:` prefix + the
+        // bold step name (so the literal isn't contiguous in the markup).
         assert!(
-            body.contains("/loadout:explore"),
-            "the active (lean) workflow's slot command is shown"
+            body.contains(r#"<span class="cmd-name">explore</span>"#),
+            "the canonical `explore` slot command is shown"
         );
 
-        // Focusing another card shows ITS slots + a 'Use this workflow' action.
+        // Focusing another card shows the SAME fixed spine filled by ITS stages,
+        // plus a 'Use this workflow' action.
         let sp = String::from_utf8(
             route(
                 &st,
@@ -2064,13 +2067,21 @@ mod tests {
         )
         .unwrap();
         assert!(sp.contains("Use this workflow"));
+        // The fixed canonical commands are present regardless of workflow.
+        for cmd in ["explore", "brainstorm", "plan", "implement", "verify"] {
+            assert!(
+                sp.contains(&format!(r#"<span class="cmd-name">{cmd}</span>"#)),
+                "fixed spine shows `{cmd}`"
+            );
+        }
+        // Superpowers has no explore stage → that slot renders skipped.
         assert!(
-            sp.contains("/loadout:brainstorm"),
-            "superpowers' first slot"
+            sp.contains("skipped"),
+            "an unfilled canonical slot is skipped"
         );
         assert!(
             sp.contains("Refine the rough idea"),
-            "superpowers' slot purpose is shown when focused"
+            "superpowers' take on the brainstorm slot is shown when focused"
         );
         // The handoff between slots is visualized as a dataflow connector, not
         // plain "reads/writes" text: brainstorm hands design.md to plan, plan

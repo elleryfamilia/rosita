@@ -205,6 +205,40 @@ impl WorkflowStage {
     }
 }
 
+/// The fixed spine every workflow maps onto: the canonical stages loadout
+/// offers as a stable set of slash commands (`/loadout:<slot>`). Picking a
+/// workflow doesn't change *which* commands exist — it changes what each one
+/// means. Each entry is `(slot, what-this-step-is)`; the description is
+/// workflow-independent (the process), distinct from a workflow's own purpose
+/// text (the style).
+pub const CANONICAL_SLOTS: &[(&str, &str)] = &[
+    (
+        "explore",
+        "Understand the problem and the code before changing anything.",
+    ),
+    ("brainstorm", "Shape the idea — the design or the spec."),
+    ("plan", "Break it into an ordered task list."),
+    ("implement", "Build it."),
+    ("verify", "Check the result — tests, review, commit."),
+];
+
+/// Map a free-string stage name to the canonical slot it fills, or `None` for a
+/// custom stage that matches no known phase (shown after the fixed spine).
+/// Matching is case-insensitive on common synonyms — a workflow can name its
+/// stages naturally (`research`, `specify`, `review`, `iterate`, `commit`) and
+/// still land in the right slot.
+pub fn canonical_slot(stage_name: &str) -> Option<&'static str> {
+    let slot = match stage_name.trim().to_ascii_lowercase().as_str() {
+        "explore" | "research" | "investigate" | "understand" | "scope" => "explore",
+        "brainstorm" | "specify" | "spec" | "design" | "ideate" | "discovery" => "brainstorm",
+        "plan" | "planning" | "decompose" => "plan",
+        "implement" | "iterate" | "code" | "build" | "execute" | "develop" => "implement",
+        "verify" | "review" | "commit" | "test" | "validate" | "ship" | "qa" => "verify",
+        _ => return None,
+    };
+    Some(slot)
+}
+
 /// The directory holding a repo's workflow handoff artifacts:
 /// `<repo>/.loadout/workflow/artifacts`.
 pub fn artifacts_dir(repo_base: &Path) -> PathBuf {

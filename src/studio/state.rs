@@ -195,19 +195,28 @@ pub struct TargetsView {
     pub targets: Vec<TargetView>,
 }
 
-/// One stage row inside a [`WorkflowView`] card.
-pub struct WorkflowStageView {
-    /// Free-string stage name (e.g. `plan`).
-    pub name: String,
-    /// One-line contract for the stage.
+/// One slot in the fixed process spine, as filled (or skipped) by a workflow.
+/// The studio shows the same canonical slots for every workflow; picking a
+/// workflow changes each slot's `purpose`, not the set of slots.
+pub struct WorkflowSlotView {
+    /// The slot key = the generated command name (`/loadout:<command>`). A
+    /// canonical slot uses its canonical key; a custom stage uses its own name.
+    pub command: String,
+    /// The workflow-independent description of this step (the process). Empty
+    /// for a custom stage that isn't one of the canonical phases.
+    pub step_desc: String,
+    /// Whether the active/selected workflow fills this slot. A skipped slot is
+    /// shown greyed — the workflow goes straight past this step.
+    pub filled: bool,
+    /// The workflow's own one-line take on this step (the style), or `None` when
+    /// skipped.
     pub purpose: Option<String>,
-    /// An **external input**: a file this stage reads that no earlier stage
-    /// writes (so it isn't part of a handoff thread). Paired reads are drawn by
-    /// the [`WorkflowHandoffView`] connectors instead.
+    /// An **external input**: a file this slot reads that no earlier slot writes
+    /// (so it isn't part of a handoff thread). Paired reads are drawn by the
+    /// [`WorkflowHandoffView`] connectors instead.
     pub needs: Option<String>,
-    /// A **terminal output**: a file this stage writes that no later stage reads
-    /// (so it isn't part of a handoff thread). Paired writes are drawn by the
-    /// connectors instead.
+    /// A **terminal output**: a file this slot writes that no later slot reads.
+    /// Paired writes are drawn by the connectors instead.
     pub produces: Option<String>,
     /// A review checkpoint stage.
     pub gate: bool,
@@ -243,11 +252,12 @@ pub struct WorkflowView {
     pub builtin: bool,
     /// Authored in a `local.toml` layer (private / gitignored).
     pub private: bool,
-    /// The ordered stages.
-    pub stages: Vec<WorkflowStageView>,
+    /// The process spine: the canonical slots (filled or skipped) plus any
+    /// custom stages, in render order.
+    pub slots: Vec<WorkflowSlotView>,
     /// Dataflow connectors between slots — the handoff spine (which artifact
-    /// crosses each boundary). Parallel to `stages`; an entry's `after` is the
-    /// 0-based slot it sits below.
+    /// crosses each boundary). An entry's `after` is the 0-based slot it sits
+    /// below in `slots`.
     pub handoffs: Vec<WorkflowHandoffView>,
     /// Upstream source URL (the repo/writeup this is drawn from), for display.
     pub source: Option<String>,
@@ -682,33 +692,35 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
     TargetsView { targets }
 }
 
-/// Compute the dataflow spine for a workflow's stages: the connector(s) between
-/// slots and the set of artifact filenames that take part in a handoff thread.
+/// Compute the dataflow spine for an ordered list of slots' `(reads, writes)`:
+/// the connector(s) between slots and the set of artifact filenames that take
+/// part in a handoff thread.
 ///
 /// A file *crosses* the boundary below slot `b` when it's written at-or-above
 /// `b` and read at-or-below `b+1` — i.e. `first_write(F) <= b` and
-/// `last_read(F) >= b+1`. A file written early and read late therefore crosses
-/// every boundary in between, drawing one continuous thread. Files that take
-/// part in any thread are "threaded"; a stage's read/write that is *not*
-/// threaded is an external input / terminal output the slot shows as a chip.
+/// `last_read(F) > b`. A file written early and read late therefore crosses
+/// every boundary in between, drawing one continuous thread (skipped slots in
+/// the middle carry nothing, so the thread simply passes them). Files in any
+/// thread are "threaded"; a read/write that is *not* threaded is an external
+/// input / terminal output the slot shows as a chip.
 fn workflow_handoffs(
-    stages: &[crate::workflow::WorkflowStage],
+    io: &[(Option<String>, Option<String>)],
 ) -> (Vec<WorkflowHandoffView>, HashSet<String>) {
     // Earliest writer and latest reader index per file.
     let mut first_write: HashMap<&str, usize> = HashMap::new();
     let mut last_read: HashMap<&str, usize> = HashMap::new();
-    for (i, s) in stages.iter().enumerate() {
-        if let Some(w) = s.writes.as_deref() {
+    for (i, (reads, writes)) in io.iter().enumerate() {
+        if let Some(w) = writes.as_deref() {
             first_write.entry(w).or_insert(i);
         }
-        if let Some(r) = s.reads.as_deref() {
+        if let Some(r) = reads.as_deref() {
             last_read.insert(r, i);
         }
     }
 
     let mut handoffs = Vec::new();
     let mut threaded: HashSet<String> = HashSet::new();
-    for b in 0..stages.len().saturating_sub(1) {
+    for b in 0..io.len().saturating_sub(1) {
         let mut files: Vec<String> = first_write
             .iter()
             .filter_map(|(file, &fw)| {
@@ -723,6 +735,81 @@ fn workflow_handoffs(
         }
     }
     (handoffs, threaded)
+}
+
+/// An intermediate slot before handoff threading is resolved: keeps the raw
+/// `reads`/`writes` so [`workflow_handoffs`] can run over the rendered order
+/// before they're split into paired (connector) vs unpaired (chip).
+struct RawSlot {
+    command: String,
+    step_desc: String,
+    filled: bool,
+    purpose: Option<String>,
+    reads: Option<String>,
+    writes: Option<String>,
+    gate: bool,
+    exit: Vec<String>,
+}
+
+/// Lay a workflow's stages onto the fixed canonical spine: the five canonical
+/// slots in order (each filled by the matching stage, or shown skipped/greyed),
+/// then any custom stages that match no canonical phase. The first stage to
+/// claim a canonical slot wins (the curated built-ins never collide).
+fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<RawSlot> {
+    use crate::workflow::{canonical_slot, WorkflowStage, CANONICAL_SLOTS};
+
+    let mut by_slot: HashMap<&str, &WorkflowStage> = HashMap::new();
+    let mut extras: Vec<&WorkflowStage> = Vec::new();
+    for s in &w.stages {
+        match canonical_slot(&s.name) {
+            Some(slot) => {
+                by_slot.entry(slot).or_insert(s);
+            }
+            None => extras.push(s),
+        }
+    }
+
+    let mut slots: Vec<RawSlot> = CANONICAL_SLOTS
+        .iter()
+        .map(|&(key, desc)| match by_slot.get(key) {
+            Some(s) => RawSlot {
+                command: key.to_string(),
+                step_desc: desc.to_string(),
+                filled: true,
+                purpose: s.purpose.clone(),
+                reads: s.reads.clone(),
+                writes: s.writes.clone(),
+                gate: s.gate,
+                exit: s.exit.clone(),
+            },
+            None => RawSlot {
+                command: key.to_string(),
+                step_desc: desc.to_string(),
+                filled: false,
+                purpose: None,
+                reads: None,
+                writes: None,
+                gate: false,
+                exit: Vec::new(),
+            },
+        })
+        .collect();
+
+    // Custom stages keep their own command name, appended after the spine so a
+    // hand-authored workflow never loses a stage it declared.
+    for s in extras {
+        slots.push(RawSlot {
+            command: s.name.clone(),
+            step_desc: String::new(),
+            filled: true,
+            purpose: s.purpose.clone(),
+            reads: s.reads.clone(),
+            writes: s.writes.clone(),
+            gate: s.gate,
+            exit: s.exit.clone(),
+        });
+    }
+    slots
 }
 
 /// Build the Workflows tab view: the curated catalog plus your own (the gallery
@@ -757,19 +844,27 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 .filter(|(id, _)| id == &w.id)
                 .map(|(_, name)| name.clone())
                 .collect();
-            let (handoffs, threaded) = workflow_handoffs(&w.stages);
-            let stages = w
-                .stages
+            let slots = workflow_slots(&w);
+            // Run the handoff computation over the rendered slot order so the
+            // connectors line up with what's drawn (canonical slots + extras).
+            let io: Vec<(Option<String>, Option<String>)> = slots
                 .iter()
-                .map(|s| WorkflowStageView {
-                    name: s.name.clone(),
-                    purpose: s.purpose.clone(),
+                .map(|s| (s.reads.clone(), s.writes.clone()))
+                .collect();
+            let (handoffs, threaded) = workflow_handoffs(&io);
+            let slots: Vec<WorkflowSlotView> = slots
+                .into_iter()
+                .map(|s| WorkflowSlotView {
+                    command: s.command,
+                    step_desc: s.step_desc,
+                    filled: s.filled,
+                    purpose: s.purpose,
                     // Only show a read/write inline when it's NOT carried by a
                     // handoff connector (an external input or terminal output).
-                    needs: s.reads.clone().filter(|f| !threaded.contains(f)),
-                    produces: s.writes.clone().filter(|f| !threaded.contains(f)),
+                    needs: s.reads.filter(|f| !threaded.contains(f)),
+                    produces: s.writes.filter(|f| !threaded.contains(f)),
                     gate: s.gate,
-                    exit: s.exit.clone(),
+                    exit: s.exit,
                 })
                 .collect();
             WorkflowView {
@@ -784,7 +879,7 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 modeled_on: w.modeled_on.clone(),
                 source: w.source.clone(),
                 id: w.id,
-                stages,
+                slots,
                 handoffs,
                 artifacts,
                 bound_by,

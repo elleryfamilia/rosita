@@ -20,7 +20,8 @@ use crate::profile::LoadoutConfig;
 use crate::studio::edit::FileDiff;
 use crate::studio::state::{
     AtomDot, AtomState, FragmentView, LibraryView, Onboarding, PackView, PreviewCap,
-    PreviewOutcome, ProfileView, TargetView, TargetsView, WorkflowView, WorkflowsView,
+    PreviewOutcome, ProfileView, TargetView, TargetsView, WorkflowSlotView, WorkflowView,
+    WorkflowsView,
 };
 use crate::target::{TargetDef, TargetRule};
 
@@ -940,10 +941,10 @@ pub fn workflows_tab(view: &WorkflowsView, flash: Option<&str>) -> Markup {
             }
             @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
             p class="muted workflows-lead" {
-                "A " strong { "workflow" } " is a named set of stages your agent moves through. Pick one — it becomes your "
-                strong { "active workflow" } " and applies in every repo: loadout renders its stages into each agent as an always-on map plus one "
-                code { "/loadout:<stage>" } " command per stage, handing off through files under "
-                code { ".loadout/workflow/artifacts/" } ". Browse the popular ones below — click a card to read it, then select to use it."
+                "Loadout gives your agent one fixed set of commands — "
+                code { "/loadout:explore" } " · " code { "plan" } " · " code { "implement" } " · " code { "verify" }
+                " — the steps of a good process. A " strong { "workflow" } " decides how each step works: you can plan like "
+                "Boris or like Superpowers. Pick one below to make it active everywhere; the commands stay the same, what they do changes."
             }
             // The gallery: tiny named cards across the top, always visible.
             div class="wf-gallery" {
@@ -1003,16 +1004,16 @@ fn workflow_gallery_card(w: &WorkflowView, focused: bool) -> Markup {
 fn workflow_detail(w: &WorkflowView) -> Markup {
     html! {
         div class="wf-detail" {
+            // Slim header — the card already shows the name + blurb, so this only
+            // frames the spine ("the process, with X") + provenance + the action.
             div class="wf-detail-head" {
                 div class="wf-detail-titles" {
-                    h2 { span class="wf-detail-glyph" { (icon(w.icon.as_deref().unwrap_or("git-branch"))) } (w.title) }
+                    p class="wf-process-lead" { "Your agent's process, with " strong { (w.title) } }
                     span class="wf-detail-meta muted" {
-                        code class="workflow-bind" { (w.id) }
-                        @if let Some(m) = &w.modeled_on { " · " (m) }
+                        @if let Some(m) = &w.modeled_on { (m) }
                         @if let Some(s) = &w.source {
                             " · " a class="wf-source" href=(s) target="_blank" rel="noopener noreferrer" { (icon("globe")) "source" }
                         }
-                        @if w.builtin { " · " span class="tag" { "built-in" } }
                         @if w.private { " · " span class="tag" { (icon("lock")) "private" } }
                     }
                 }
@@ -1025,27 +1026,18 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
                 }
             }
             @for prob in &w.problems { p class="flash flash-warn" { (icon("alert")) (prob) } }
-            // The spine — one box per stage, in order, with a dataflow connector
-            // drawn in the gap wherever a handoff artifact crosses the boundary.
+            // The fixed spine: the same canonical slots for every workflow, with a
+            // dataflow connector wherever a handoff artifact crosses a boundary.
             ol class="wf-slots" {
-                @for (i, s) in w.stages.iter().enumerate() {
-                    (workflow_slot(i + 1, s))
+                @for (i, s) in w.slots.iter().enumerate() {
+                    (workflow_slot(s))
                     @if let Some(h) = w.handoffs.iter().find(|h| h.after == i) {
                         (workflow_connector(h))
                     }
                 }
             }
-            div class="wf-detail-foot" {
-                @if !w.artifacts.is_empty() {
-                    span class="muted wf-foot-item" {
-                        (icon("file")) "Handoff files: "
-                        @for (i, a) in w.artifacts.iter().enumerate() {
-                            @if i > 0 { ", " }
-                            code { (a) }
-                        }
-                    }
-                }
-                @if !w.bound_by.is_empty() {
+            @if !w.bound_by.is_empty() {
+                div class="wf-detail-foot" {
                     span class="muted wf-foot-item" { (icon("layers")) "Pinned on loadout: " (w.bound_by.join(", ")) }
                 }
             }
@@ -1053,31 +1045,46 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
     }
 }
 
-/// One slot box in the focused workflow's spine: number, the slash command it
-/// generates, gate, purpose, any unpaired external-input / terminal-output
-/// chips, and the exit checklist. Handoffs between slots are drawn separately by
-/// [`workflow_connector`].
-fn workflow_slot(n: usize, s: &crate::studio::state::WorkflowStageView) -> Markup {
+/// One slot in the fixed spine: a rail dot, the slash command it maps to (a light
+/// `/loadout:` prefix + the bold step name), the workflow's take on the step (or
+/// the generic step when skipped), unpaired in/out chips, and the exit checklist.
+/// Handoffs between slots are drawn separately by [`workflow_connector`].
+fn workflow_slot(s: &WorkflowSlotView) -> Markup {
+    let cls = if s.filled {
+        "wf-slot"
+    } else {
+        "wf-slot skipped"
+    };
     html! {
-        li class="wf-slot" {
-            div class="wf-slot-head" {
-                span class="wf-slot-num" { (n) }
-                code class="wf-slot-cmd-lead" { "/loadout:" (s.name) }
-                @if s.gate { span class="tag gate-tag" { "gate" } }
-            }
-            @if let Some(p) = &s.purpose { p class="wf-slot-purpose" { (p) } }
-            // Unpaired artifacts only — a file with no upstream writer (external
-            // input) or no downstream reader (terminal output). The handoff
-            // connectors carry everything that flows between stages.
-            @if s.needs.is_some() || s.produces.is_some() {
-                div class="wf-slot-io" {
-                    @if let Some(r) = &s.needs { span class="stage-io" { (icon("arrow-right")) "needs " code { (r) } } }
-                    @if let Some(wr) = &s.produces { span class="stage-io" { (icon("arrow-right")) "outputs " code { (wr) } } }
+        li class=(cls) {
+            span class="wf-slot-rail" { span class="wf-slot-dot" {} }
+            div class="wf-slot-body" {
+                div class="wf-slot-head" {
+                    code class="wf-slot-cmd-lead" {
+                        span class="cmd-prefix" { "/loadout:" }
+                        span class="cmd-name" { (s.command) }
+                    }
+                    @if s.gate { span class="tag gate-tag" { "gate" } }
+                    @if !s.filled { span class="tag skip-tag" { "skipped" } }
                 }
-            }
-            @if !s.exit.is_empty() {
-                ul class="stage-exit" {
-                    @for item in &s.exit { li { (icon("check")) (item) } }
+                @match &s.purpose {
+                    // Filled: the workflow's own one-line take on this step.
+                    Some(p) => p class="wf-slot-purpose" { (p) },
+                    // Skipped: the generic step, greyed, so you see what's skipped.
+                    None => p class="wf-slot-purpose wf-slot-skip" { (s.step_desc) },
+                }
+                // Unpaired artifacts only — a file with no upstream writer
+                // (external input) or no downstream reader (terminal output).
+                @if s.needs.is_some() || s.produces.is_some() {
+                    div class="wf-slot-io" {
+                        @if let Some(r) = &s.needs { span class="stage-io" { (icon("arrow-right")) "needs " code { (r) } } }
+                        @if let Some(wr) = &s.produces { span class="stage-io" { (icon("arrow-right")) "outputs " code { (wr) } } }
+                    }
+                }
+                @if !s.exit.is_empty() {
+                    ul class="stage-exit" {
+                        @for item in &s.exit { li { (icon("check")) (item) } }
+                    }
                 }
             }
         }
