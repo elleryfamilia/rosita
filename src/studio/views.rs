@@ -1058,37 +1058,39 @@ fn workflow_slot(s: &WorkflowSlotView, wf_glyph: &str) -> Markup {
     };
     html! {
         li class=(cls) {
-            span class="wf-slot-icon" { (icon(&s.icon)) }
-            div class="wf-slot-body" {
-                div class="wf-slot-head" {
+            // The fixed identity — step icon + name + command. Same in every
+            // workflow, so it's the stable scaffolding.
+            div class="wf-slot-head" {
+                span class="wf-slot-icon" { (icon(&s.icon)) }
+                div class="wf-slot-titles" {
                     span class="wf-slot-name" { (s.name) }
                     code class="wf-slot-cmd" {
                         span class="cmd-prefix" { "/loadout:" }
                         span class="cmd-name" { (s.command) }
                     }
                 }
-                @match &s.purpose {
-                    // Filled — the workflow's contribution, marked with its icon.
-                    Some(p) => div class="wf-value" {
-                        span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
-                        div class="wf-value-body" {
-                            p class="wf-value-text" { (p) }
-                            @if s.reads.is_some() || s.writes.is_some() {
-                                div class="wf-slot-io" {
-                                    @if let Some(r) = &s.reads { span class="stage-io" { (icon("file")) "reads " code { (r) } } }
-                                    @if let Some(wr) = &s.writes { span class="stage-io" { (icon("file")) "writes " code { (wr) } } }
-                                }
-                            }
-                            @if !s.exit.is_empty() {
-                                ul class="stage-exit" {
-                                    @for item in &s.exit { li { (icon("check")) (item) } }
-                                }
+            }
+            @match &s.purpose {
+                // Filled — the workflow's contribution, marked with its icon.
+                Some(p) => div class="wf-value" {
+                    span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
+                    div class="wf-value-body" {
+                        p class="wf-value-text" { (p) }
+                        @if s.reads.is_some() || s.writes.is_some() {
+                            div class="wf-slot-io" {
+                                @if let Some(r) = &s.reads { span class="stage-io" { (icon("file")) "reads " code { (r) } } }
+                                @if let Some(wr) = &s.writes { span class="stage-io" { (icon("file")) "writes " code { (wr) } } }
                             }
                         }
-                    },
-                    // Skipped — just the generic step, greyed, so you know what it is.
-                    None => span class="wf-step-desc" { (s.step_desc) },
-                }
+                        @if !s.exit.is_empty() {
+                            ul class="stage-exit" {
+                                @for item in &s.exit { li { (icon("check")) (item) } }
+                            }
+                        }
+                    }
+                },
+                // Skipped — just the generic step, greyed, so you know what it is.
+                None => span class="wf-step-desc" { (s.step_desc) },
             }
         }
     }

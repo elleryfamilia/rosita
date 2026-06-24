@@ -428,30 +428,33 @@ body {
 .wf-detail-actions { flex: none; }
 .wf-active-pill { font-size: 11px; padding: 4px 9px; color: var(--ok); background: rgba(127, 214, 160, 0.14); }
 
-/* slots — the fixed steps as distinct cards. The step icon (neutral) + large
-   name is the slot's own identity; the value below is marked with the active
-   workflow's icon (accent) so it reads as the workflow's contribution. */
-.wf-slots { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.wf-slot { display: flex; gap: 13px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); }
+/* slots — the fixed steps as an equal-height grid across the width, so the
+   cells stay put and only their contents change when you switch workflows. The
+   step icon (neutral) + name is the slot's own identity; the value below is
+   marked with the active workflow's icon (accent). */
+.wf-slots { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+@media (max-width: 1180px) { .wf-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .wf-slots { grid-template-columns: 1fr; } }
+.wf-slot { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); min-height: 168px; }
 .wf-slot.skipped { background: transparent; border-style: dashed; }
-.wf-slot-icon { flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--elevated); color: var(--fg); display: inline-flex; align-items: center; justify-content: center; }
-.wf-slot-icon .icon { width: 18px; height: 18px; }
+.wf-slot-head { display: flex; align-items: center; gap: 10px; }
+.wf-slot-icon { flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--elevated); color: var(--fg); display: inline-flex; align-items: center; justify-content: center; }
+.wf-slot-icon .icon { width: 17px; height: 17px; }
 .wf-slot.skipped .wf-slot-icon { color: var(--faint); }
-.wf-slot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.wf-slot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.wf-slot-name { font-size: 15.5px; font-weight: 700; color: var(--fg); letter-spacing: -0.2px; }
+.wf-slot-titles { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wf-slot-name { font-size: 15px; font-weight: 700; color: var(--fg); letter-spacing: -0.2px; line-height: 1.1; }
 .wf-slot.skipped .wf-slot-name { color: var(--faint); }
-.wf-slot-cmd { font-family: var(--mono); font-size: 12px; }
+.wf-slot-cmd { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
 .cmd-prefix { color: var(--muted); font-weight: 500; }
 .cmd-name { color: var(--accent); font-weight: 600; }
 .wf-slot.skipped .cmd-prefix, .wf-slot.skipped .cmd-name { color: var(--faint); }
 /* the workflow's contribution — its icon marks the value as the variable part */
 .wf-value { display: flex; gap: 9px; align-items: flex-start; }
-.wf-value-mark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.wf-value-mark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 .wf-value-mark .icon { width: 13px; height: 13px; }
-.wf-value-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.wf-value-text { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--fg); }
-.wf-step-desc { font-size: 12.5px; line-height: 1.45; color: var(--faint); font-style: italic; }
+.wf-value-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.wf-value-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg); }
+.wf-step-desc { font-size: 12px; line-height: 1.45; color: var(--faint); font-style: italic; }
 .wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }
