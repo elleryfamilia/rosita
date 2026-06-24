@@ -491,8 +491,10 @@ fn check_repo_global_only(c: &mut Checks, repo_base: &Path) {
 }
 
 /// What global-only tables (if any) a repo TOML file declares. `None` when the
-/// file is absent, unparseable, or declares none.
-fn repo_declares_caps_or_profiles(path: &Path) -> Option<&'static str> {
+/// file is absent, unparseable, or declares none. Workflows are global-only too
+/// (the loader strips them from repo layers, see [`strip_global_only`]), so a
+/// repo `[[workflows]]` is flagged alongside fragments/loadouts/targets.
+fn repo_declares_caps_or_profiles(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     let val: toml::Value = toml::from_str(&text).ok()?;
     let has = |k: &str| {
@@ -501,18 +503,27 @@ fn repo_declares_caps_or_profiles(path: &Path) -> Option<&'static str> {
             .is_some_and(|a| !a.is_empty())
     };
     // The load list accepts both the canonical `[[loadouts]]` key and the
-    // legacy `[[loadouts]]` alias, so a repo declaring either is global-only.
+    // legacy `[[profiles]]` alias, so a repo declaring either is global-only.
     let has_loadouts = has("loadouts") || has("profiles");
-    // `&'static` message per combination of the global-only tables present.
-    match (has("fragments"), has_loadouts, has("targets")) {
-        (true, true, true) => Some("fragments, loadouts, and targets"),
-        (true, true, false) => Some("fragments and loadouts"),
-        (true, false, true) => Some("fragments and targets"),
-        (false, true, true) => Some("loadouts and targets"),
-        (true, false, false) => Some("fragments"),
-        (false, true, false) => Some("loadouts"),
-        (false, false, true) => Some("targets"),
-        (false, false, false) => None,
+    let present: Vec<&str> = [
+        has("fragments").then_some("fragments"),
+        has_loadouts.then_some("loadouts"),
+        has("targets").then_some("targets"),
+        has("workflows").then_some("workflows"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!present.is_empty()).then(|| oxford_join(&present))
+}
+
+/// Join names for a human-readable list: `"a"`, `"a and b"`, or `"a, b, and c"`.
+fn oxford_join(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [a] => a.to_string(),
+        [a, b] => format!("{a} and {b}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
     }
 }
 

@@ -669,6 +669,26 @@ fn doctor_flags_repo_declared_caps_and_profiles() {
         .stdout(predicate::str::contains("global-only"))
         .stdout(predicate::str::contains("fragments and loadouts"));
 
+    // Workflows are global-only too: a repo declaring `[[workflows]]` is flagged
+    // and listed with the others (Oxford-joined), not silently stripped.
+    let wf = Fixture::new();
+    wf.rust_project();
+    wf.write(
+        ".loadout/config.toml",
+        "[[fragments]]\nid = \"x\"\nguidance = \"hi\"\n\
+         \n[[loadouts]]\nname = \"p\"\ntargets = [\"rust\"]\nfragments = [\"x\"]\n\
+         \n[[workflows]]\nid = \"w\"\n[[workflows.stages]]\nname = \"plan\"\n",
+    );
+
+    wf.cmd()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("global-only"))
+        .stdout(predicate::str::contains(
+            "fragments, loadouts, and workflows",
+        ));
+
     // A clean repo (no repo-declared caps/profiles) is not flagged.
     let clean = Fixture::new();
     clean.rust_project();
