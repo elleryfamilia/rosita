@@ -592,6 +592,62 @@ pub fn builtin_workflows() -> Vec<Workflow> {
                 },
             ],
         ),
+        // --- compound engineering — Every's compounding loop ---------------
+        wf(
+            "compound",
+            "Compound engineering",
+            "Every's loop where each cycle makes the next one easier.",
+            "package",
+            "Every (Kieran Klaassen & T.M. Chow)",
+            "https://github.com/EveryInc/compound-engineering-plugin",
+            "Compound engineering: plan-heavy cycles (brainstorm the requirements, plan in \
+             detail, build, review against the plan) that END by capturing what you learned, \
+             so each cycle compounds and the next one starts ahead.",
+            vec![
+                WorkflowStage {
+                    writes: Some("requirements.md".to_string()),
+                    ..stage(
+                        "brainstorm",
+                        "Interactive Q&A to pin down requirements — produce a right-sized \
+                         requirements doc before any code.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("requirements.md".to_string()),
+                    writes: Some("plan.md".to_string()),
+                    ..stage(
+                        "plan",
+                        "Turn the requirements into a detailed implementation plan with \
+                         safeguards. Planning is ~80% of the work.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    ..stage(
+                        "implement",
+                        "Execute the plan in a worktree, tracking each task, then simplify the \
+                         new code for clarity and reuse.",
+                    )
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".to_string()),
+                    gate: true,
+                    exit: vec![
+                        "reviewed against the plan by independent agents".to_string(),
+                        "issues fixed before merging".to_string(),
+                    ],
+                    ..stage(
+                        "review",
+                        "Multi-agent review against the plan before merging.",
+                    )
+                },
+                stage(
+                    "compound",
+                    "Capture what you learned into docs/solutions/ so the next cycle starts \
+                     ahead — the step that compounds.",
+                ),
+            ],
+        ),
     ]
 }
 

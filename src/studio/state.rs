@@ -685,6 +685,7 @@ fn slot_icon(command: &str) -> &'static str {
         "plan" => "layers",
         "implement" => "code",
         "verify" => "shield",
+        "compound" => "database",
         _ => "terminal",
     }
 }
