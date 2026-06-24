@@ -28,6 +28,7 @@ use crate::config::{self, Config};
 use crate::fragment::{palette, Fragment, Layer};
 use crate::profile::LoadoutConfig;
 use crate::target::TargetDef;
+use crate::workflow::Workflow;
 use crate::writer::{atomic_write, AtomicWriter, Writer, WrittenFile};
 
 /// A typed, replayable staged edit. Each carries the [`Layer`] it targets.
@@ -70,6 +71,22 @@ pub enum StagedOp {
     /// Set (or clear, with `None`) the global active workflow
     /// (`[defaults].workflow`). Always the public global layer.
     SetActiveWorkflow { id: Option<String> },
+    /// Add a new workflow to a layer (workflows are global-only, so studio
+    /// always targets the public global layer).
+    CreateWorkflow {
+        layer: Layer,
+        workflow: Box<Workflow>,
+    },
+    /// Replace the workflow with this id in a layer (created if absent). Also the
+    /// "adopt a built-in" path: writing a built-in's content under its own id
+    /// makes an owned copy that shadows the built-in (`resolve_workflow`).
+    EditWorkflow {
+        layer: Layer,
+        id: String,
+        workflow: Box<Workflow>,
+    },
+    /// Remove the workflow with this id from a layer.
+    DeleteWorkflow { layer: Layer, id: String },
 }
 
 impl StagedOp {
@@ -83,7 +100,10 @@ impl StagedOp {
             | StagedOp::EditProfile { layer, .. }
             | StagedOp::DeleteProfile { layer, .. }
             | StagedOp::EditTarget { layer, .. }
-            | StagedOp::DeleteTarget { layer, .. } => *layer,
+            | StagedOp::DeleteTarget { layer, .. }
+            | StagedOp::CreateWorkflow { layer, .. }
+            | StagedOp::EditWorkflow { layer, .. }
+            | StagedOp::DeleteWorkflow { layer, .. } => *layer,
             StagedOp::DuplicatePaletteItem { to_layer, .. } => *to_layer,
             // The active workflow lives in the public global `[defaults]`.
             StagedOp::SetActiveWorkflow { .. } => Layer::Global,
@@ -232,6 +252,15 @@ impl Session {
         self.layers
             .iter()
             .find(|lf| has_entry(&lf.staged, "targets", "id", id))
+            .map(|lf| lf.layer)
+    }
+
+    /// Which open layer currently holds the workflow with this id (staged). Used
+    /// to target an edit/delete of an owned workflow (built-ins aren't on disk).
+    pub fn workflow_layer(&self, id: &str) -> Option<Layer> {
+        self.layers
+            .iter()
+            .find(|lf| has_entry(&lf.staged, "workflows", "id", id))
             .map(|lf| lf.layer)
     }
 
@@ -440,6 +469,20 @@ fn apply_op(doc: &mut DocumentMut, op: &StagedOp) -> Result<()> {
                 doc.as_table_mut().remove("defaults");
             }
         }
+        StagedOp::CreateWorkflow { workflow, .. } => {
+            aot_mut(doc, "workflows").push(workflow_table(workflow)?);
+        }
+        StagedOp::EditWorkflow { id, workflow, .. } => {
+            upsert(
+                aot_mut(doc, "workflows"),
+                "id",
+                id,
+                workflow_table(workflow)?,
+            );
+        }
+        StagedOp::DeleteWorkflow { id, .. } => {
+            remove(aot_mut(doc, "workflows"), "id", id);
+        }
     }
     Ok(())
 }
@@ -580,6 +623,58 @@ fn target_table(t: &TargetDef) -> Result<Table> {
         tbl["disabled"] = value(true);
     }
     Ok(tbl)
+}
+
+/// Build a clean array-of-tables entry for a workflow — only meaningful fields,
+/// stages as readable `[[workflows.stages]]` sub-tables (not inline), so studio
+/// writes TOML a user could have hand-authored.
+fn workflow_table(w: &Workflow) -> Result<Table> {
+    let mut t = Table::new();
+    t["id"] = value(w.id.as_str());
+    if let Some(n) = &w.name {
+        t["name"] = value(n.as_str());
+    }
+    if let Some(d) = &w.description {
+        t["description"] = value(d.as_str());
+    }
+    if let Some(ic) = &w.icon {
+        t["icon"] = value(ic.as_str());
+    }
+    if let Some(m) = &w.modeled_on {
+        t["modeled_on"] = value(m.as_str());
+    }
+    if let Some(r) = &w.researched {
+        t["researched"] = value(r.as_str());
+    }
+    if let Some(s) = &w.source {
+        t["source"] = value(s.as_str());
+    }
+    if w.disabled {
+        t["disabled"] = value(true);
+    }
+    let mut stages = ArrayOfTables::new();
+    for s in &w.stages {
+        let mut st = Table::new();
+        st["name"] = value(s.name.as_str());
+        if let Some(p) = &s.purpose {
+            st["purpose"] = value(p.as_str());
+        }
+        if let Some(rd) = &s.reads {
+            st["reads"] = value(rd.as_str());
+        }
+        if let Some(wr) = &s.writes {
+            st["writes"] = value(wr.as_str());
+        }
+        if s.gate {
+            st["gate"] = value(true);
+        }
+        if !s.exit.is_empty() {
+            st["exit"] = str_array(&s.exit);
+        }
+        stages.push(st);
+    }
+    t["stages"] = Item::ArrayOfTables(stages);
+    Ok(t)
 }
 
 fn str_array(items: &[String]) -> Item {
@@ -878,6 +973,96 @@ mod tests {
         let landed = cfg.fragments.iter().find(|c| c.id == "danger").unwrap();
         assert_eq!(landed.origin, Layer::Global);
         assert!(landed.origin.contributes_fragments());
+    }
+
+    #[test]
+    fn create_edit_delete_workflow_round_trips_through_strict_parser() {
+        use crate::workflow::{Workflow, WorkflowStage};
+        let stage = |name: &str, purpose: &str| WorkflowStage {
+            name: name.into(),
+            purpose: Some(purpose.into()),
+            reads: None,
+            writes: None,
+            gate: false,
+            exit: vec![],
+        };
+        let wf = Workflow {
+            id: "mine".into(),
+            name: Some("Mine".into()),
+            description: Some("my flow".into()),
+            icon: Some("bolt".into()),
+            stages: vec![
+                WorkflowStage {
+                    writes: Some("plan.md".into()),
+                    gate: true,
+                    exit: vec!["build green".into()],
+                    ..stage("plan", "think first")
+                },
+                WorkflowStage {
+                    reads: Some("plan.md".into()),
+                    ..stage("implement", "then build")
+                },
+            ],
+            modeled_on: None,
+            researched: None,
+            source: None,
+            disabled: false,
+            origin: Layer::Global,
+        };
+
+        let (d, gdir) = repo_with_global("");
+        let mut s = session_global(d.path(), &gdir);
+        s.stage(StagedOp::CreateWorkflow {
+            layer: Layer::Global,
+            workflow: Box::new(wf.clone()),
+        })
+        .unwrap();
+
+        // Stages serialize as readable `[[workflows.stages]]` sub-tables, not inline.
+        let after = s.diff()[0].staged_after.clone();
+        assert!(after.contains("[[workflows]]"));
+        assert!(after.contains("[[workflows.stages]]"));
+        assert!(after.contains("name = \"plan\""));
+
+        // …and the whole thing re-parses through the strict config parser, landing
+        // the workflow in the global library with its stages and handoffs intact.
+        let cfg = s.staged_config().unwrap();
+        let landed = cfg.workflows.iter().find(|w| w.id == "mine").unwrap();
+        assert_eq!(landed.stages.len(), 2);
+        assert_eq!(landed.stages[0].writes.as_deref(), Some("plan.md"));
+        assert!(landed.stages[0].gate);
+        assert_eq!(landed.origin, Layer::Global);
+
+        // The session can locate the owned workflow's layer (for edit/delete).
+        assert_eq!(s.workflow_layer("mine"), Some(Layer::Global));
+
+        // Edit replaces it in place; delete removes it.
+        let mut edited = wf.clone();
+        edited.description = Some("changed".into());
+        s.stage(StagedOp::EditWorkflow {
+            layer: Layer::Global,
+            id: "mine".into(),
+            workflow: Box::new(edited),
+        })
+        .unwrap();
+        let cfg = s.staged_config().unwrap();
+        assert_eq!(
+            cfg.workflows
+                .iter()
+                .find(|w| w.id == "mine")
+                .unwrap()
+                .description
+                .as_deref(),
+            Some("changed")
+        );
+
+        s.stage(StagedOp::DeleteWorkflow {
+            layer: Layer::Global,
+            id: "mine".into(),
+        })
+        .unwrap();
+        let cfg = s.staged_config().unwrap();
+        assert!(cfg.workflows.iter().all(|w| w.id != "mine"));
     }
 
     #[test]
