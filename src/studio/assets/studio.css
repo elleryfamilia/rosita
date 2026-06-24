@@ -34,6 +34,7 @@
 
   --accent: #7aa2f7;
   --accent-soft: rgba(122, 162, 247, 0.14);
+  --accent-wash: rgba(122, 162, 247, 0.08);
   --accent-line: #4a5891;
   --on-accent: #0d0f14;
 
@@ -85,6 +86,7 @@
 
   --accent: #3a63d8;
   --accent-soft: rgba(58, 99, 216, 0.12);
+  --accent-wash: rgba(58, 99, 216, 0.07);
   --accent-line: #aebff0;
   --on-accent: #ffffff;
 
@@ -435,8 +437,8 @@ body {
 .wf-slots { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
 @media (max-width: 1180px) { .wf-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .wf-slots { grid-template-columns: 1fr; } }
-.wf-slot { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); min-height: 168px; }
-.wf-slot.skipped { background: transparent; border-style: dashed; }
+.wf-slot { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); min-height: 172px; }
+.wf-slot.skipped { background: transparent; border-style: dashed; opacity: 0.5; }
 .wf-slot-head { display: flex; align-items: center; gap: 10px; }
 .wf-slot-icon { flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--elevated); color: var(--fg); display: inline-flex; align-items: center; justify-content: center; }
 .wf-slot-icon .icon { width: 17px; height: 17px; }
@@ -448,13 +450,15 @@ body {
 .cmd-prefix { color: var(--muted); font-weight: 500; }
 .cmd-name { color: var(--accent); font-weight: 600; }
 .wf-slot.skipped .cmd-prefix, .wf-slot.skipped .cmd-name { color: var(--faint); }
-/* the workflow's contribution — its icon marks the value as the variable part */
-.wf-value { display: flex; gap: 9px; align-items: flex-start; }
-.wf-value-mark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
-.wf-value-mark .icon { width: 13px; height: 13px; }
+/* the workflow's contribution — a faint accent-wash panel that fills the card
+   and centers its content, so the whole region reads as "from this workflow" */
+.wf-value { flex: 1; display: flex; flex-direction: column; justify-content: center; background: var(--accent-wash); border-radius: 9px; padding: 12px 13px; }
+.wf-value-row { display: flex; gap: 9px; align-items: flex-start; }
+.wf-value-mark { flex: none; color: var(--accent); display: inline-flex; margin-top: 1px; }
+.wf-value-mark .icon { width: 15px; height: 15px; }
 .wf-value-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .wf-value-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg); }
-.wf-step-desc { font-size: 12px; line-height: 1.45; color: var(--faint); font-style: italic; }
+.wf-step-desc { flex: 1; display: flex; flex-direction: column; justify-content: center; font-size: 12px; line-height: 1.45; color: var(--faint); font-style: italic; }
 .wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }

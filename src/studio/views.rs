@@ -1010,9 +1010,9 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
             div class="wf-detail-head" {
                 div class="wf-detail-titles" {
                     p class="wf-legend" {
-                        "The five steps are fixed. Each line marked "
+                        "Fixed steps. The marked text is what "
                         span class="wf-legend-chip" { (icon(w.icon.as_deref().unwrap_or("git-branch"))) (w.title) }
-                        " is what this workflow does at that step — pick another workflow above and those lines change. Greyed steps it skips."
+                        " does at each — greyed steps it skips."
                     }
                     span class="wf-detail-meta muted" {
                         @if let Some(m) = &w.modeled_on { (m) }
@@ -1071,25 +1071,29 @@ fn workflow_slot(s: &WorkflowSlotView, wf_glyph: &str) -> Markup {
                 }
             }
             @match &s.purpose {
-                // Filled — the workflow's contribution, marked with its icon.
+                // Filled — a tinted panel (the workflow's contribution) that
+                // grows to fill the card and vertically centers its content.
                 Some(p) => div class="wf-value" {
-                    span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
-                    div class="wf-value-body" {
-                        p class="wf-value-text" { (p) }
-                        @if s.reads.is_some() || s.writes.is_some() {
-                            div class="wf-slot-io" {
-                                @if let Some(r) = &s.reads { span class="stage-io" { (icon("file")) "reads " code { (r) } } }
-                                @if let Some(wr) = &s.writes { span class="stage-io" { (icon("file")) "writes " code { (wr) } } }
+                    div class="wf-value-row" {
+                        span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
+                        div class="wf-value-body" {
+                            p class="wf-value-text" { (p) }
+                            @if s.reads.is_some() || s.writes.is_some() {
+                                div class="wf-slot-io" {
+                                    @if let Some(r) = &s.reads { span class="stage-io" { (icon("file")) "reads " code { (r) } } }
+                                    @if let Some(wr) = &s.writes { span class="stage-io" { (icon("file")) "writes " code { (wr) } } }
+                                }
                             }
-                        }
-                        @if !s.exit.is_empty() {
-                            ul class="stage-exit" {
-                                @for item in &s.exit { li { (icon("check")) (item) } }
+                            @if !s.exit.is_empty() {
+                                ul class="stage-exit" {
+                                    @for item in &s.exit { li { (icon("check")) (item) } }
+                                }
                             }
                         }
                     }
                 },
-                // Skipped — just the generic step, greyed, so you know what it is.
+                // Skipped — just the generic step, greyed + centered, so you know
+                // what it is without it competing with the filled steps.
                 None => span class="wf-step-desc" { (s.step_desc) },
             }
         }
