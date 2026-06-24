@@ -376,8 +376,11 @@ pub fn render_workflow_section(wf: &Workflow) -> String {
          enforced.\n",
         crate::workflow::ARTIFACT_SUBDIR
     );
-    for (i, stage) in wf.stages.iter().enumerate() {
-        let _ = write!(s, "{}. **{}**", i + 1, stage.name);
+    // Walk the canonical spine, not the raw stages, so the prose stage names
+    // (the bold headings) match the `/loadout:<command>` slash commands exactly.
+    let steps = wf.canonical_layout().steps();
+    for (i, &(command, stage)) in steps.iter().enumerate() {
+        let _ = write!(s, "{}. **{}**", i + 1, command);
         if let Some(purpose) = &stage.purpose {
             let _ = write!(s, " — {purpose}");
         }

@@ -185,6 +185,37 @@ impl Workflow {
         }
         out
     }
+
+    /// Lay this workflow's stages onto the fixed canonical spine: the five
+    /// canonical slots in order (each filled by the first stage that claims it,
+    /// or left empty), then any custom stages that match no canonical phase. The
+    /// first stage to claim a slot wins, so a workflow that names two stages onto
+    /// the same phase (e.g. `verify` and `ship` both → `verify`) keeps only the
+    /// first — exactly one `/loadout:<command>` per slot. This is the single
+    /// source of truth shared by the command channel, the context section, and
+    /// the studio slot reader.
+    pub fn canonical_layout(&self) -> CanonicalLayout<'_> {
+        let mut by_slot: std::collections::HashMap<&str, &WorkflowStage> =
+            std::collections::HashMap::new();
+        let mut extras: Vec<&WorkflowStage> = Vec::new();
+        for s in &self.stages {
+            match canonical_slot(&s.name) {
+                Some(slot) => {
+                    by_slot.entry(slot).or_insert(s);
+                }
+                None => extras.push(s),
+            }
+        }
+        let slots = CANONICAL_SLOTS
+            .iter()
+            .map(|&(command, desc)| LaidSlot {
+                command,
+                desc,
+                stage: by_slot.get(command).copied(),
+            })
+            .collect();
+        CanonicalLayout { slots, extras }
+    }
 }
 
 impl WorkflowStage {
@@ -237,6 +268,51 @@ pub fn canonical_slot(stage_name: &str) -> Option<&'static str> {
         _ => return None,
     };
     Some(slot)
+}
+
+/// One canonical slot after a workflow's stages are laid onto the fixed spine:
+/// either filled by the first stage that claimed it, or empty (the workflow
+/// skips that phase). `command` is the stable `/loadout:<command>` name; `desc`
+/// is the workflow-independent description of the phase (the process).
+#[derive(Debug, Clone, Copy)]
+pub struct LaidSlot<'a> {
+    /// Canonical command name (e.g. `verify`) — what the slash command is called.
+    pub command: &'static str,
+    /// The process-level description of this phase (workflow-independent).
+    pub desc: &'static str,
+    /// The stage filling this slot, or `None` when the workflow skips it.
+    pub stage: Option<&'a WorkflowStage>,
+}
+
+/// A workflow laid onto the canonical spine: the five fixed slots in order
+/// (each filled or skipped), plus any custom stages that match no canonical
+/// phase (kept in declaration order, rendered after the spine).
+#[derive(Debug, Clone)]
+pub struct CanonicalLayout<'a> {
+    /// The five canonical slots, in spine order.
+    pub slots: Vec<LaidSlot<'a>>,
+    /// Stages that matched no canonical slot (a hand-authored extra step).
+    pub extras: Vec<&'a WorkflowStage>,
+}
+
+impl<'a> CanonicalLayout<'a> {
+    /// The stages that actually produce a command/section, in spine order: every
+    /// filled canonical slot (named by its canonical command) followed by every
+    /// extra (named by its own stage name). This is the exact, de-duplicated set
+    /// the command channel writes and the context section lists — one entry per
+    /// `/loadout:<command>`. Skipped canonical slots are omitted.
+    pub fn steps(&self) -> Vec<(&'a str, &'a WorkflowStage)> {
+        let mut out: Vec<(&'a str, &'a WorkflowStage)> = Vec::new();
+        for slot in &self.slots {
+            if let Some(stage) = slot.stage {
+                out.push((slot.command, stage));
+            }
+        }
+        for stage in &self.extras {
+            out.push((stage.name.as_str(), stage));
+        }
+        out
+    }
 }
 
 /// The directory holding a repo's workflow handoff artifacts:
@@ -447,18 +523,17 @@ pub fn builtin_workflows() -> Vec<Workflow> {
                     exit: vec![
                         "the agent verified its own work (tests / browser)".to_string(),
                         "the behavior and UX actually check out".to_string(),
+                        "then commit, push, and open the PR (Boris's /commit-push-pr, \
+                         run dozens of times a day)"
+                            .to_string(),
                     ],
                     ..stage(
                         "verify",
                         "Give the agent a way to check its own work — run tests, open the \
-                         browser, iterate until it's right. The biggest quality lever.",
+                         browser, iterate until it's right (the biggest quality lever) — then \
+                         commit, push, and open the PR in one step.",
                     )
                 },
-                stage(
-                    "ship",
-                    "Commit, push, and open the PR in one step (Boris's /commit-push-pr \
-                     runs dozens of times a day).",
-                ),
             ],
         ),
         // --- lean — Anthropic explore-plan-code-commit ---------------------

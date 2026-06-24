@@ -252,8 +252,10 @@ fn global_active_workflow_renders_without_any_binding() {
         .success();
     let overlay = fx.read(".loadout/generated/claude.md");
     assert!(overlay.contains("## Workflow: Boris's workflow"));
-    // And the per-stage commands are generated for the active workflow.
-    assert!(fx.exists(".claude/commands/loadout/ship.md"));
+    // The per-stage commands generate under the *canonical* spine names, so
+    // Boris's stages land on `/loadout:verify`, not a per-stage `ship.md`.
+    assert!(fx.exists(".claude/commands/loadout/verify.md"));
+    assert!(!fx.exists(".claude/commands/loadout/ship.md"));
 }
 
 #[test]

@@ -55,27 +55,36 @@ pub struct StageCommand {
     pub content: String,
 }
 
-/// Render one command file per stage of `wf` in `format`, in stage order.
+/// Render one command file per generated step of `wf` in `format`, in spine
+/// order. Stages are laid onto the fixed canonical spine first (see
+/// [`Workflow::canonical_layout`]), so the filenames are the stable
+/// `/loadout:<command>` names (`plan`, `verify`, …) — identical to what the
+/// studio shows — not each stage's free-string name. Custom stages that match no
+/// canonical phase keep their own (slugged) name, appended after the spine.
 pub fn stage_commands(wf: &Workflow, format: CommandFormat) -> Vec<StageCommand> {
-    wf.stages
+    let steps = wf.canonical_layout().steps();
+    let total = steps.len();
+    steps
         .iter()
         .enumerate()
-        .map(|(i, stage)| render_stage_command(wf, i, stage, format))
+        .map(|(i, &(command, stage))| render_stage_command(wf, command, i, total, stage, format))
         .collect()
 }
 
 fn render_stage_command(
     wf: &Workflow,
+    command: &str,
     idx: usize,
+    total: usize,
     stage: &WorkflowStage,
     format: CommandFormat,
 ) -> StageCommand {
-    let filename = format!("{}.{}", slug(&stage.name), format.ext());
+    let filename = format!("{}.{}", slug(command), format.ext());
     let description = stage
         .purpose
         .clone()
-        .unwrap_or_else(|| format!("{} — {} stage", wf.title(), stage.name));
-    let body = stage_body(wf, idx, stage, format.arg_placeholder());
+        .unwrap_or_else(|| format!("{} — {} stage", wf.title(), command));
+    let body = stage_body(wf, command, idx, total, stage, format.arg_placeholder());
     let content = match format {
         CommandFormat::Markdown => {
             format!(
@@ -102,16 +111,25 @@ struct GeminiCommandFile<'a> {
 
 /// The stage's prompt body — the contract the agent follows when the command
 /// runs: where it sits in the spine, what to do, the handoff to read/write, the
-/// gate, the exit checklist, and the user's per-run focus via `arg`.
-fn stage_body(wf: &Workflow, idx: usize, stage: &WorkflowStage, arg: &str) -> String {
+/// gate, the exit checklist, and the user's per-run focus via `arg`. `command`
+/// is the canonical `/loadout:<command>` name this step generates as; `idx`/`total`
+/// position it within the workflow's generated steps.
+fn stage_body(
+    wf: &Workflow,
+    command: &str,
+    idx: usize,
+    total: usize,
+    stage: &WorkflowStage,
+    arg: &str,
+) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(
         s,
         "You're at the **{}** stage ({}/{}) of the _{}_ workflow.\n",
-        stage.name,
+        command,
         idx + 1,
-        wf.stages.len(),
+        total,
         wf.title()
     );
     if let Some(purpose) = &stage.purpose {
@@ -206,13 +224,14 @@ mod tests {
     }
 
     #[test]
-    fn markdown_command_has_frontmatter_args_and_handoff() {
+    fn markdown_command_uses_canonical_names_args_and_handoff() {
         let cmds = stage_commands(&builtin("lean"), CommandFormat::Markdown);
-        // One file per stage, named by the stage slug, in order.
+        // One file per generated step, named by the *canonical* command — lean's
+        // `commit` stage lands on `verify`, matching the studio and the spine.
         let names: Vec<&str> = cmds.iter().map(|c| c.filename.as_str()).collect();
         assert_eq!(
             names,
-            vec!["explore.md", "plan.md", "implement.md", "commit.md"]
+            vec!["explore.md", "plan.md", "implement.md", "verify.md"]
         );
 
         let plan = cmds.iter().find(|c| c.filename == "plan.md").unwrap();
@@ -227,10 +246,50 @@ mod tests {
         assert!(implement.content.contains("read the handoff"));
         assert!(implement.content.contains("plan.md"));
 
-        // The commit stage is a gate with an exit checklist.
-        let commit = cmds.iter().find(|c| c.filename == "commit.md").unwrap();
-        assert!(commit.content.contains("checkpoint"));
-        assert!(commit.content.contains("Done when:"));
+        // Lean's `commit` stage generates as `verify`: a gate with an exit
+        // checklist, and the heading shows the canonical name, not `commit`.
+        let verify = cmds.iter().find(|c| c.filename == "verify.md").unwrap();
+        assert!(verify.content.contains("checkpoint"));
+        assert!(verify.content.contains("Done when:"));
+        assert!(verify.content.contains("**verify** stage"));
+        assert!(!verify.content.contains("**commit** stage"));
+    }
+
+    #[test]
+    fn colliding_stages_generate_one_command_per_slot() {
+        // Two stages mapping to the same canonical slot (`verify`) collapse to a
+        // single `/loadout:verify` — first claimant wins. A stage matching no
+        // canonical phase (`retro`) is kept as a custom extra, after the spine.
+        let stg = |name: &str, purpose: &str| WorkflowStage {
+            name: name.into(),
+            purpose: Some(purpose.into()),
+            reads: None,
+            writes: None,
+            gate: false,
+            exit: vec![],
+        };
+        let wf = Workflow {
+            id: "x".into(),
+            name: Some("X".into()),
+            description: None,
+            icon: None,
+            stages: vec![
+                stg("verify", "check the work"),
+                stg("ship", "commit and push"),
+                stg("retro", "capture lessons"),
+            ],
+            modeled_on: None,
+            researched: None,
+            source: None,
+            disabled: false,
+            origin: crate::fragment::Layer::Global,
+        };
+        let cmds = stage_commands(&wf, CommandFormat::Markdown);
+        let names: Vec<&str> = cmds.iter().map(|c| c.filename.as_str()).collect();
+        assert_eq!(names, vec!["verify.md", "retro.md"]);
+        let verify = cmds.iter().find(|c| c.filename == "verify.md").unwrap();
+        assert!(verify.content.contains("check the work")); // first claimant's purpose
+        assert!(!verify.content.contains("commit and push")); // ship folded away
     }
 
     #[test]

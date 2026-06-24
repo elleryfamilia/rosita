@@ -6,7 +6,6 @@
 //! session mutex, release it, then assemble/render **outside** the lock — never
 //! hold the mutex across rendering, disk I/O, or probe execution.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::adapters;
@@ -704,34 +703,24 @@ fn slot_display_name(command: &str) -> String {
 /// then any custom stages that match no canonical phase. The first stage to
 /// claim a canonical slot wins (the curated built-ins never collide).
 fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
-    use crate::workflow::{canonical_slot, WorkflowStage, CANONICAL_SLOTS};
+    let layout = w.canonical_layout();
 
-    let mut by_slot: HashMap<&str, &WorkflowStage> = HashMap::new();
-    let mut extras: Vec<&WorkflowStage> = Vec::new();
-    for s in &w.stages {
-        match canonical_slot(&s.name) {
-            Some(slot) => {
-                by_slot.entry(slot).or_insert(s);
-            }
-            None => extras.push(s),
-        }
-    }
-
-    let mut slots: Vec<WorkflowSlotView> = CANONICAL_SLOTS
+    let mut slots: Vec<WorkflowSlotView> = layout
+        .slots
         .iter()
-        .map(|&(key, desc)| {
+        .map(|slot| {
             let base = WorkflowSlotView {
-                command: key.to_string(),
-                name: slot_display_name(key),
-                icon: slot_icon(key).to_string(),
-                step_desc: desc.to_string(),
+                command: slot.command.to_string(),
+                name: slot_display_name(slot.command),
+                icon: slot_icon(slot.command).to_string(),
+                step_desc: slot.desc.to_string(),
                 filled: false,
                 purpose: None,
                 reads: None,
                 writes: None,
                 exit: Vec::new(),
             };
-            match by_slot.get(key) {
+            match slot.stage {
                 Some(s) => WorkflowSlotView {
                     filled: true,
                     purpose: s.purpose.clone(),
@@ -747,7 +736,7 @@ fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
 
     // Custom stages keep their own command name, appended after the spine so a
     // hand-authored workflow never loses a stage it declared.
-    for s in extras {
+    for s in &layout.extras {
         slots.push(WorkflowSlotView {
             command: s.name.clone(),
             name: slot_display_name(&s.name),
