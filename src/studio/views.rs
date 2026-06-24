@@ -1010,9 +1010,9 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
             div class="wf-detail-head" {
                 div class="wf-detail-titles" {
                     p class="wf-legend" {
-                        "The five steps are fixed. "
+                        "The five steps are fixed. Each line marked "
                         span class="wf-legend-chip" { (icon(w.icon.as_deref().unwrap_or("git-branch"))) (w.title) }
-                        " fills the ones it uses — the marked text is what it does at each step. Greyed steps it skips. Pick another workflow above to change them."
+                        " is what this workflow does at that step — pick another workflow above and those lines change. Greyed steps it skips."
                     }
                     span class="wf-detail-meta muted" {
                         @if let Some(m) = &w.modeled_on { (m) }
@@ -1031,15 +1031,10 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
                 }
             }
             @for prob in &w.problems { p class="flash flash-warn" { (icon("alert")) (prob) } }
-            // The fixed spine: the same canonical slots for every workflow, with a
-            // dataflow connector wherever a handoff artifact crosses a boundary.
-            ol class="wf-slots" {
-                @for (i, s) in w.slots.iter().enumerate() {
-                    (workflow_slot(s))
-                    @if let Some(h) = w.handoffs.iter().find(|h| h.after == i) {
-                        (workflow_connector(h))
-                    }
-                }
+            // The fixed slots — same five for every workflow. Each carries its
+            // own step icon + name; the active workflow's icon marks the value.
+            ul class="wf-slots" {
+                @for s in &w.slots { (workflow_slot(s, w.icon.as_deref().unwrap_or("git-branch"))) }
             }
             @if !w.bound_by.is_empty() {
                 div class="wf-detail-foot" {
@@ -1050,13 +1045,12 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
     }
 }
 
-/// One slot in the fixed spine: a rail dot + the slash command it maps to (a
-/// light `/loadout:` prefix + the bold step name). A *filled* slot then shows
-/// the workflow's contribution in an accent-marked `wf-fill` block (its take +
-/// handoff chips + exit checklist); a *skipped* slot greys out and shows only
-/// the generic step, so it's clear the workflow doesn't use it. Handoffs between
-/// slots are drawn separately by [`workflow_connector`].
-fn workflow_slot(s: &WorkflowSlotView) -> Markup {
+/// One slot: its own step icon + large name + the slash command (the fixed part,
+/// identical across workflows), then the active workflow's contribution — its
+/// text marked with the workflow's own icon (`wf_glyph`) so the value is plainly
+/// tied to the selection. A skipped slot greys out and shows only the generic
+/// step description.
+fn workflow_slot(s: &WorkflowSlotView, wf_glyph: &str) -> Markup {
     let cls = if s.filled {
         "wf-slot"
     } else {
@@ -1064,48 +1058,36 @@ fn workflow_slot(s: &WorkflowSlotView) -> Markup {
     };
     html! {
         li class=(cls) {
-            span class="wf-slot-rail" { span class="wf-slot-dot" {} }
+            span class="wf-slot-icon" { (icon(&s.icon)) }
             div class="wf-slot-body" {
-                code class="wf-slot-cmd-lead" {
-                    span class="cmd-prefix" { "/loadout:" }
-                    span class="cmd-name" { (s.command) }
+                div class="wf-slot-head" {
+                    span class="wf-slot-name" { (s.name) }
+                    code class="wf-slot-cmd" {
+                        span class="cmd-prefix" { "/loadout:" }
+                        span class="cmd-name" { (s.command) }
+                    }
                 }
                 @match &s.purpose {
-                    // Filled — the accent-marked block is the workflow's doing.
-                    Some(p) => div class="wf-fill" {
-                        p class="wf-fill-text" { (p) }
-                        // Unpaired artifacts only — a file with no upstream writer
-                        // (external input) or no downstream reader (terminal output).
-                        @if s.needs.is_some() || s.produces.is_some() {
-                            div class="wf-slot-io" {
-                                @if let Some(r) = &s.needs { span class="stage-io" { (icon("arrow-right")) "needs " code { (r) } } }
-                                @if let Some(wr) = &s.produces { span class="stage-io" { (icon("arrow-right")) "outputs " code { (wr) } } }
+                    // Filled — the workflow's contribution, marked with its icon.
+                    Some(p) => div class="wf-value" {
+                        span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
+                        div class="wf-value-body" {
+                            p class="wf-value-text" { (p) }
+                            @if s.reads.is_some() || s.writes.is_some() {
+                                div class="wf-slot-io" {
+                                    @if let Some(r) = &s.reads { span class="stage-io" { (icon("file")) "reads " code { (r) } } }
+                                    @if let Some(wr) = &s.writes { span class="stage-io" { (icon("file")) "writes " code { (wr) } } }
+                                }
                             }
-                        }
-                        @if !s.exit.is_empty() {
-                            ul class="stage-exit" {
-                                @for item in &s.exit { li { (icon("check")) (item) } }
+                            @if !s.exit.is_empty() {
+                                ul class="stage-exit" {
+                                    @for item in &s.exit { li { (icon("check")) (item) } }
+                                }
                             }
                         }
                     },
                     // Skipped — just the generic step, greyed, so you know what it is.
                     None => span class="wf-step-desc" { (s.step_desc) },
-                }
-            }
-        }
-    }
-}
-
-/// The dataflow connector drawn in the gap between two slots: a down-arrow on the
-/// spine with the handoff artifact(s) crossing this boundary, so the file
-/// visibly travels from the writer above to the reader below.
-fn workflow_connector(h: &crate::studio::state::WorkflowHandoffView) -> Markup {
-    html! {
-        li class="wf-flow" {
-            span class="wf-flow-rail" { (icon("arrow-down")) }
-            span class="wf-flow-files" {
-                @for f in &h.files {
-                    span class="wf-flow-file" title="handed off to a later stage" { (icon("file")) code { (f) } }
                 }
             }
         }

@@ -6,7 +6,7 @@
 //! session mutex, release it, then assemble/render **outside** the lock — never
 //! hold the mutex across rendering, disk I/O, or probe execution.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::adapters;
@@ -202,6 +202,10 @@ pub struct WorkflowSlotView {
     /// The slot key = the generated command name (`/loadout:<command>`). A
     /// canonical slot uses its canonical key; a custom stage uses its own name.
     pub command: String,
+    /// The slot's display name — the command title-cased (`Explore`).
+    pub name: String,
+    /// The glyph that identifies this step (fixed per slot, not per workflow).
+    pub icon: String,
     /// The workflow-independent description of this step (the process). Empty
     /// for a custom stage that isn't one of the canonical phases.
     pub step_desc: String,
@@ -211,28 +215,12 @@ pub struct WorkflowSlotView {
     /// The workflow's own one-line take on this step (the style), or `None` when
     /// skipped.
     pub purpose: Option<String>,
-    /// An **external input**: a file this slot reads that no earlier slot writes
-    /// (so it isn't part of a handoff thread). Paired reads are drawn by the
-    /// [`WorkflowHandoffView`] connectors instead.
-    pub needs: Option<String>,
-    /// A **terminal output**: a file this slot writes that no later slot reads.
-    /// Paired writes are drawn by the connectors instead.
-    pub produces: Option<String>,
-    /// A review checkpoint stage.
-    pub gate: bool,
+    /// Handoff artifact this slot reads (a bare filename), shown as a chip.
+    pub reads: Option<String>,
+    /// Handoff artifact this slot writes (a bare filename), shown as a chip.
+    pub writes: Option<String>,
     /// "Done when" checklist items.
     pub exit: Vec<String>,
-}
-
-/// A dataflow connector drawn *between* two slots in the spine: the handoff
-/// artifact(s) traveling from a writer at-or-above down to a reader at-or-below
-/// this boundary. One per boundary the file(s) cross, so a file read several
-/// stages after it's written draws a continuous thread down the spine.
-pub struct WorkflowHandoffView {
-    /// 0-based index of the slot this connector sits directly *below*.
-    pub after: usize,
-    /// The artifact filename(s) in flight across this boundary.
-    pub files: Vec<String>,
 }
 
 /// One workflow card for the Workflows tab.
@@ -255,10 +243,6 @@ pub struct WorkflowView {
     /// The process spine: the canonical slots (filled or skipped) plus any
     /// custom stages, in render order.
     pub slots: Vec<WorkflowSlotView>,
-    /// Dataflow connectors between slots — the handoff spine (which artifact
-    /// crosses each boundary). An entry's `after` is the 0-based slot it sits
-    /// below in `slots`.
-    pub handoffs: Vec<WorkflowHandoffView>,
     /// Upstream source URL (the repo/writeup this is drawn from), for display.
     pub source: Option<String>,
     /// Distinct handoff artifacts the workflow passes between stages.
@@ -692,70 +676,33 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
     TargetsView { targets }
 }
 
-/// Compute the dataflow spine for an ordered list of slots' `(reads, writes)`:
-/// the connector(s) between slots and the set of artifact filenames that take
-/// part in a handoff thread.
-///
-/// A file *crosses* the boundary below slot `b` when it's written at-or-above
-/// `b` and read at-or-below `b+1` — i.e. `first_write(F) <= b` and
-/// `last_read(F) > b`. A file written early and read late therefore crosses
-/// every boundary in between, drawing one continuous thread (skipped slots in
-/// the middle carry nothing, so the thread simply passes them). Files in any
-/// thread are "threaded"; a read/write that is *not* threaded is an external
-/// input / terminal output the slot shows as a chip.
-fn workflow_handoffs(
-    io: &[(Option<String>, Option<String>)],
-) -> (Vec<WorkflowHandoffView>, HashSet<String>) {
-    // Earliest writer and latest reader index per file.
-    let mut first_write: HashMap<&str, usize> = HashMap::new();
-    let mut last_read: HashMap<&str, usize> = HashMap::new();
-    for (i, (reads, writes)) in io.iter().enumerate() {
-        if let Some(w) = writes.as_deref() {
-            first_write.entry(w).or_insert(i);
-        }
-        if let Some(r) = reads.as_deref() {
-            last_read.insert(r, i);
-        }
+/// The fixed glyph that identifies a canonical step (distinct from the workflow
+/// icon that marks the *value*). A custom stage falls back to a neutral glyph.
+fn slot_icon(command: &str) -> &'static str {
+    match command {
+        "explore" => "eye",
+        "brainstorm" => "pencil",
+        "plan" => "layers",
+        "implement" => "code",
+        "verify" => "shield",
+        _ => "terminal",
     }
-
-    let mut handoffs = Vec::new();
-    let mut threaded: HashSet<String> = HashSet::new();
-    for b in 0..io.len().saturating_sub(1) {
-        let mut files: Vec<String> = first_write
-            .iter()
-            .filter_map(|(file, &fw)| {
-                let lr = *last_read.get(file)?;
-                (fw <= b && lr > b).then(|| (*file).to_string())
-            })
-            .collect();
-        files.sort();
-        if !files.is_empty() {
-            threaded.extend(files.iter().cloned());
-            handoffs.push(WorkflowHandoffView { after: b, files });
-        }
-    }
-    (handoffs, threaded)
 }
 
-/// An intermediate slot before handoff threading is resolved: keeps the raw
-/// `reads`/`writes` so [`workflow_handoffs`] can run over the rendered order
-/// before they're split into paired (connector) vs unpaired (chip).
-struct RawSlot {
-    command: String,
-    step_desc: String,
-    filled: bool,
-    purpose: Option<String>,
-    reads: Option<String>,
-    writes: Option<String>,
-    gate: bool,
-    exit: Vec<String>,
+/// Title-case a command for the slot's display name (`explore` -> `Explore`).
+fn slot_display_name(command: &str) -> String {
+    let mut chars = command.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 /// Lay a workflow's stages onto the fixed canonical spine: the five canonical
 /// slots in order (each filled by the matching stage, or shown skipped/greyed),
 /// then any custom stages that match no canonical phase. The first stage to
 /// claim a canonical slot wins (the curated built-ins never collide).
-fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<RawSlot> {
+fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
     use crate::workflow::{canonical_slot, WorkflowStage, CANONICAL_SLOTS};
 
     let mut by_slot: HashMap<&str, &WorkflowStage> = HashMap::new();
@@ -769,43 +716,46 @@ fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<RawSlot> {
         }
     }
 
-    let mut slots: Vec<RawSlot> = CANONICAL_SLOTS
+    let mut slots: Vec<WorkflowSlotView> = CANONICAL_SLOTS
         .iter()
-        .map(|&(key, desc)| match by_slot.get(key) {
-            Some(s) => RawSlot {
+        .map(|&(key, desc)| {
+            let base = WorkflowSlotView {
                 command: key.to_string(),
-                step_desc: desc.to_string(),
-                filled: true,
-                purpose: s.purpose.clone(),
-                reads: s.reads.clone(),
-                writes: s.writes.clone(),
-                gate: s.gate,
-                exit: s.exit.clone(),
-            },
-            None => RawSlot {
-                command: key.to_string(),
+                name: slot_display_name(key),
+                icon: slot_icon(key).to_string(),
                 step_desc: desc.to_string(),
                 filled: false,
                 purpose: None,
                 reads: None,
                 writes: None,
-                gate: false,
                 exit: Vec::new(),
-            },
+            };
+            match by_slot.get(key) {
+                Some(s) => WorkflowSlotView {
+                    filled: true,
+                    purpose: s.purpose.clone(),
+                    reads: s.reads.clone(),
+                    writes: s.writes.clone(),
+                    exit: s.exit.clone(),
+                    ..base
+                },
+                None => base,
+            }
         })
         .collect();
 
     // Custom stages keep their own command name, appended after the spine so a
     // hand-authored workflow never loses a stage it declared.
     for s in extras {
-        slots.push(RawSlot {
+        slots.push(WorkflowSlotView {
             command: s.name.clone(),
+            name: slot_display_name(&s.name),
+            icon: slot_icon(&s.name).to_string(),
             step_desc: String::new(),
             filled: true,
             purpose: s.purpose.clone(),
             reads: s.reads.clone(),
             writes: s.writes.clone(),
-            gate: s.gate,
             exit: s.exit.clone(),
         });
     }
@@ -845,28 +795,6 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 .map(|(_, name)| name.clone())
                 .collect();
             let slots = workflow_slots(&w);
-            // Run the handoff computation over the rendered slot order so the
-            // connectors line up with what's drawn (canonical slots + extras).
-            let io: Vec<(Option<String>, Option<String>)> = slots
-                .iter()
-                .map(|s| (s.reads.clone(), s.writes.clone()))
-                .collect();
-            let (handoffs, threaded) = workflow_handoffs(&io);
-            let slots: Vec<WorkflowSlotView> = slots
-                .into_iter()
-                .map(|s| WorkflowSlotView {
-                    command: s.command,
-                    step_desc: s.step_desc,
-                    filled: s.filled,
-                    purpose: s.purpose,
-                    // Only show a read/write inline when it's NOT carried by a
-                    // handoff connector (an external input or terminal output).
-                    needs: s.reads.filter(|f| !threaded.contains(f)),
-                    produces: s.writes.filter(|f| !threaded.contains(f)),
-                    gate: s.gate,
-                    exit: s.exit,
-                })
-                .collect();
             WorkflowView {
                 title: w.title().to_string(),
                 // Show the description as a card blurb only when a distinct
@@ -880,7 +808,6 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 source: w.source.clone(),
                 id: w.id,
                 slots,
-                handoffs,
                 artifacts,
                 bound_by,
                 problems,

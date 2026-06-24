@@ -2067,11 +2067,22 @@ mod tests {
         )
         .unwrap();
         assert!(sp.contains("Use this workflow"));
-        // The fixed canonical commands are present regardless of workflow.
-        for cmd in ["explore", "brainstorm", "plan", "implement", "verify"] {
+        // The fixed canonical commands + named slots are present regardless of
+        // workflow; each slot carries its own step name.
+        for (cmd, name) in [
+            ("explore", "Explore"),
+            ("brainstorm", "Brainstorm"),
+            ("plan", "Plan"),
+            ("implement", "Implement"),
+            ("verify", "Verify"),
+        ] {
             assert!(
                 sp.contains(&format!(r#"<span class="cmd-name">{cmd}</span>"#)),
                 "fixed spine shows `{cmd}`"
+            );
+            assert!(
+                sp.contains(&format!(r#"<span class="wf-slot-name">{name}</span>"#)),
+                "slot shows its step name `{name}`"
             );
         }
         // Superpowers has no explore stage → that slot renders skipped.
@@ -2079,20 +2090,18 @@ mod tests {
             sp.contains("skipped"),
             "an unfilled canonical slot is skipped"
         );
+        // The active workflow's icon marks each filled value as its contribution.
+        assert!(
+            sp.contains("wf-value-mark"),
+            "workflow icon marks the value"
+        );
         assert!(
             sp.contains("Refine the rough idea"),
             "superpowers' take on the brainstorm slot is shown when focused"
         );
-        // The handoff between slots is visualized as a dataflow connector, not
-        // plain "reads/writes" text: brainstorm hands design.md to plan, plan
-        // hands plan.md to implement.
-        assert!(sp.contains("wf-flow-file"), "handoff connector rendered");
-        assert!(sp.contains("design.md"), "design.md handoff shown");
-        assert!(sp.contains("plan.md"), "plan.md handoff shown");
-        assert!(
-            !sp.contains("reads ") && !sp.contains("writes "),
-            "paired handoffs are connectors, not inline reads/writes text"
-        );
+        // Handoff artifacts show as plain chips on the slot (no connector lines).
+        assert!(sp.contains("design.md"), "design.md handoff chip shown");
+        assert!(sp.contains("plan.md"), "plan.md handoff chip shown");
 
         // Activating it stages the change (re-render confirms it's now active).
         let act = String::from_utf8(
