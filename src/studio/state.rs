@@ -1301,68 +1301,61 @@ pub fn target_from_form(
     })
 }
 
-/// The id the workflow editor form targets: the fixed `id` (edit/adopt) else the
-/// slug of `name` (new). Used to locate the provenance base before building.
-pub fn workflow_form_id(pairs: &[(String, String)]) -> Option<String> {
-    opt(value_of(pairs, "id"))
-        .or_else(|| opt(value_of(pairs, "name")))
-        .map(|n| slug(&n))
-        .filter(|s| !s.is_empty())
-}
-
 /// How many custom (extra) stages the workflow editor form carries. Each is a
 /// fixed-index row (`x0_…`, `x1_…`); the editor renders the existing extras plus
 /// one blank, and the parser keeps the rows whose name is non-empty.
 pub const MAX_WORKFLOW_EXTRAS: usize = 4;
 
 /// Build a [`Workflow`](crate::workflow::Workflow) from the workflow editor form.
-/// The form fills the fixed canonical spine (one `s_<slot>_*` group per slot,
-/// blank purpose = the workflow skips that step) plus up to
-/// [`MAX_WORKFLOW_EXTRAS`] custom `x<i>_*` rows. `base` (the workflow being
-/// edited/adopted) supplies the provenance fields the form doesn't expose, so
-/// "Customize Boris" keeps its `modeled_on`/`source`. Origin is left default and
-/// re-tagged by layer when the staged config is assembled.
+///
+/// Each step is just markdown: the form carries one `s_<slot>_purpose` per
+/// canonical slot (blank = the workflow skips that step) plus up to
+/// [`MAX_WORKFLOW_EXTRAS`] custom `x<i>` rows (name + purpose). The structured
+/// bits a built-in carries — handoff `reads`/`writes`, the `gate`, the `exit`
+/// checklist — aren't edited here; they **carry over** from `base` (the workflow
+/// being customized/edited) per step, so customizing keeps the handoffs without
+/// the user juggling fields. A brand-new step (no match in `base`) has none.
+/// `base` also supplies the provenance fields (`modeled_on`/`source`).
 pub fn workflow_from_form(
     base: Option<&crate::workflow::Workflow>,
     pairs: &[(String, String)],
 ) -> crate::Result<crate::workflow::Workflow> {
     use crate::workflow::{Workflow, WorkflowStage, CANONICAL_SLOTS};
 
-    // Edit carries a fixed `id`; a new workflow derives it from the `name`.
+    // Edit carries a fixed `id`; a new/customized workflow derives it from `name`.
     let id = opt(value_of(pairs, "id"))
         .or_else(|| opt(value_of(pairs, "name")))
         .map(|n| slug(&n))
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("a workflow needs a name"))?;
 
-    let mut stages: Vec<WorkflowStage> = Vec::new();
-    // The five canonical slots, in spine order; a blank purpose skips the step.
-    for (key, _desc) in CANONICAL_SLOTS {
-        let Some(purpose) = opt(value_of(pairs, &format!("s_{key}_purpose"))) else {
-            continue;
-        };
-        stages.push(WorkflowStage {
-            name: (*key).to_string(),
+    // A step keeps the source stage's handoff/gate/exit, replacing only the prose.
+    let build_stage = |name: &str, purpose: String| -> WorkflowStage {
+        let src = base.and_then(|b| b.stage_for_command(name));
+        WorkflowStage {
+            name: name.to_string(),
             purpose: Some(purpose),
-            reads: opt(value_of(pairs, &format!("s_{key}_reads"))),
-            writes: opt(value_of(pairs, &format!("s_{key}_writes"))),
-            gate: value_of(pairs, &format!("s_{key}_gate")).is_some(),
-            exit: text_lines(value_of(pairs, &format!("s_{key}_exit"))),
-        });
+            reads: src.and_then(|s| s.reads.clone()),
+            writes: src.and_then(|s| s.writes.clone()),
+            gate: src.map(|s| s.gate).unwrap_or(false),
+            exit: src.map(|s| s.exit.clone()).unwrap_or_default(),
+        }
+    };
+
+    let mut stages: Vec<WorkflowStage> = Vec::new();
+    // The five canonical slots, in spine order; a blank box skips the step.
+    for (key, _desc) in CANONICAL_SLOTS {
+        if let Some(purpose) = opt(value_of(pairs, &format!("s_{key}_purpose"))) {
+            stages.push(build_stage(key, purpose));
+        }
     }
     // Custom extra steps (name-gated, fixed indices).
     for i in 0..MAX_WORKFLOW_EXTRAS {
         let Some(name) = opt(value_of(pairs, &format!("x{i}_name"))) else {
             continue;
         };
-        stages.push(WorkflowStage {
-            name,
-            purpose: opt(value_of(pairs, &format!("x{i}_purpose"))),
-            reads: opt(value_of(pairs, &format!("x{i}_reads"))),
-            writes: opt(value_of(pairs, &format!("x{i}_writes"))),
-            gate: false,
-            exit: Vec::new(),
-        });
+        let purpose = opt(value_of(pairs, &format!("x{i}_purpose"))).unwrap_or_default();
+        stages.push(build_stage(&name, purpose));
     }
 
     let wf = Workflow {
@@ -1382,18 +1375,6 @@ pub fn workflow_from_form(
         anyhow::bail!("{}", problems.join("; "));
     }
     Ok(wf)
-}
-
-/// Split a textarea value into trimmed, non-empty lines (the "done when" list).
-fn text_lines(s: Option<&str>) -> Vec<String> {
-    s.map(|t| {
-        t.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect()
-    })
-    .unwrap_or_default()
 }
 
 /// Slugify a display name into a stable fragment id (lowercase, alphanumeric

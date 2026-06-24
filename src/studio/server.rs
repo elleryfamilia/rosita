@@ -145,7 +145,7 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("GET", "/targets/new") => Resp::html(views::target_dialog(None, Layer::Global)),
         ("POST", "/targets") => handle_target_save(state, req),
         ("POST", "/targets/try") => handle_target_try(state, req),
-        ("GET", "/workflows/new") => Resp::html(views::workflow_editor(None, true)),
+        ("GET", "/workflows/new") => Resp::html(views::workflow_editor(None, false)),
         ("POST", "/workflows") => handle_workflow_save(state, req),
         ("GET", "/packs") => handle_packs(state),
         ("GET", "/skills/card") => handle_skill_card(),
@@ -649,24 +649,26 @@ fn handle_workflow_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         }
         // Make it the global active workflow (staged like any other edit).
         ("POST", "activate") => handle_workflow_activate(state, &id),
-        // Open the editor prefilled — "Customize" (built-in) or "Edit" (owned).
-        ("GET", "edit") => handle_workflow_edit(state, &id),
+        // Edit an owned workflow in place.
+        ("GET", "edit") => handle_workflow_open(state, &id, false),
+        // Duplicate a workflow into a new, editable copy (original untouched).
+        ("GET", "customize") => handle_workflow_open(state, &id, true),
         // Stage removal of an owned workflow.
         ("DELETE", "") => handle_workflow_delete(state, &id),
         _ => Resp::not_found(),
     }
 }
 
-/// Open the editor for an existing workflow: a built-in opens as "Customize"
-/// (saving makes an owned copy), an owned one as "Edit".
-fn handle_workflow_edit(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+/// Open the editor for an existing workflow — to edit an owned one in place, or
+/// (`customize`) to duplicate it into a new, editable copy.
+fn handle_workflow_open(state: &Arc<Mutex<StudioState>>, id: &str, customize: bool) -> Resp {
     let snap = state.lock().unwrap().snapshot();
     let cfg = match state::staged_config(&snap) {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
     match cfg.effective_workflows().iter().find(|w| w.id == id) {
-        Some(w) => Resp::html(views::workflow_editor(Some(w), false)),
+        Some(w) => Resp::html(views::workflow_editor(Some(w), customize)),
         None => Resp::html(views::error_fragment(&format!("unknown workflow '{id}'"))),
     }
 }
@@ -681,12 +683,14 @@ fn handle_workflow_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         Ok(c) => c,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
     };
-    // Provenance base: the effective workflow with this id (for edit/adopt).
+    // The workflow this one starts from: `from` names it (the built-in being
+    // customized, or the owned one being edited). It supplies the carried-over
+    // handoffs + provenance, and for a customize it differs from the new id.
     let effective = cfg.effective_workflows();
-    let probe_id = state::workflow_form_id(&pairs);
-    let base = probe_id
-        .as_deref()
-        .and_then(|id| effective.iter().find(|w| w.id == id));
+    let from = field(&req.body, "from");
+    let base = (!from.is_empty())
+        .then(|| effective.iter().find(|w| w.id == from))
+        .flatten();
     let workflow = match state::workflow_from_form(base, &pairs) {
         Ok(w) => w,
         Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
@@ -2297,11 +2301,11 @@ mod tests {
     }
 
     #[test]
-    fn create_then_customize_and_delete_workflow() {
+    fn create_customize_and_delete_workflow() {
         let d = rust_repo();
         let st = state_for(d.path(), None);
 
-        // Build your own: fill two canonical slots via the editor form (mode=new).
+        // Build your own: each step is just markdown (one purpose box per slot).
         let r = body_of(route(
             &st,
             &req(
@@ -2309,9 +2313,8 @@ mod tests {
                 "/workflows",
                 "",
                 &[HOST, COOKIE, ORIGIN],
-                "mode=new&name=My+Flow&description=mine&icon=bolt\
-                 &s_plan_purpose=Think+first&s_plan_writes=plan.md\
-                 &s_implement_purpose=Build+it&s_implement_reads=plan.md",
+                "mode=new&from=&name=My+Flow&description=mine&icon=bolt\
+                 &s_plan_purpose=Think+first&s_implement_purpose=Build+it",
             ),
         ));
         assert!(r.contains("staged workflow"), "save flash: {r}");
@@ -2331,13 +2334,12 @@ mod tests {
             on_disk.contains("[[workflows.stages]]"),
             "stages as sub-tables"
         );
-        assert!(on_disk.contains("writes = \"plan.md\""), "handoff written");
 
-        // Adopt a built-in: GET its editor opens as "Customize"; saving under the
-        // same id makes an owned copy that shadows the built-in.
+        // Customize a built-in: its editor opens as "Customize" and creates a
+        // SEPARATE copy under a new id (the built-in `lean` is left intact).
         let ed = body_of(route(
             &st,
-            &req("GET", "/workflows/lean/edit", "", &[HOST, COOKIE], ""),
+            &req("GET", "/workflows/lean/customize", "", &[HOST, COOKIE], ""),
         ));
         assert!(ed.contains("Customize Lean"), "built-in opens as Customize");
         let saved = body_of(route(
@@ -2347,20 +2349,31 @@ mod tests {
                 "/workflows",
                 "",
                 &[HOST, COOKIE, ORIGIN],
-                // Resubmit lean's spine with a CHANGED plan purpose; the other
-                // slots keep their content so they aren't dropped.
-                "mode=edit&id=lean&name=Lean\
+                // New id ("Lean copy" → lean-copy); `from=lean` carries the
+                // handoffs over. Only the plan prose changes.
+                "mode=new&from=lean&name=Lean+copy\
                  &s_explore_purpose=Read+first\
-                 &s_plan_purpose=My+own+take+on+planning&s_plan_writes=plan.md\
-                 &s_implement_purpose=Build+it&s_implement_reads=plan.md\
-                 &s_verify_purpose=Check+it&s_verify_gate=on",
+                 &s_plan_purpose=My+own+take+on+planning\
+                 &s_implement_purpose=Build+it&s_verify_purpose=Check+it",
             ),
         ));
-        assert!(saved.contains("staged workflow"), "adopt staged: {saved}");
-        // The changed plan step is marked as customized (not the workflow icon).
         assert!(
-            saved.contains("wf-value-edited"),
-            "a customized step carries the edited mark"
+            saved.contains("staged workflow"),
+            "customize staged: {saved}"
+        );
+
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(global_config_path(d.path())).unwrap();
+        assert!(
+            on_disk.contains("id = \"lean-copy\""),
+            "copy created under a new id: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("writes = \"plan.md\""),
+            "plan's handoff carried over from lean without re-entry"
         );
 
         // Delete the owned workflow (built-ins refuse).

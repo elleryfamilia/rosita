@@ -1036,7 +1036,7 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
                     // makes an owned copy). Owned → "Edit". Secondary styling, so
                     // the primary action stays "Use this workflow".
                     @if w.builtin {
-                        button class="btn btn-ghost" hx-get=(format!("/workflows/{}/edit", enc(&w.id))) hx-target="#modal" title="Make an editable copy you can tweak" { (icon("copy")) "Customize" }
+                        button class="btn btn-ghost" hx-get=(format!("/workflows/{}/customize", enc(&w.id))) hx-target="#modal" title="Duplicate into a workflow you can edit" { (icon("copy")) "Customize" }
                     } @else {
                         button class="btn btn-ghost" hx-get=(format!("/workflows/{}/edit", enc(&w.id))) hx-target="#modal" { (icon("pencil")) "Edit" }
                     }
@@ -1154,12 +1154,15 @@ fn workflow_icon_picker(current: Option<&str>) -> Markup {
     }
 }
 
-/// The workflow editor modal — build-your-own or customize a built-in. `base` is
-/// the workflow being edited/adopted (`None` for a brand-new one). Editing fills
-/// the same fixed canonical spine the reader shows (one card per step, blank
-/// purpose = the workflow skips it), plus a few custom-step rows. Saving stages a
-/// create (new id) or edit (existing/adopted id) of an owned `[[workflows]]`.
-pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, is_new: bool) -> String {
+/// The workflow editor modal. `base` is the workflow it starts from (`None` for
+/// a blank one); `customize` means "duplicate `base` into a new workflow" (the
+/// original is left intact) rather than editing an owned one in place.
+///
+/// A step is just markdown — one instructions box per fixed canonical slot, plus
+/// a few custom-step rows. The handoff files / checkpoint / checklist a built-in
+/// carries aren't edited here; they ride along from `base` when you save (see
+/// [`crate::studio::state::workflow_from_form`]).
+pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, customize: bool) -> String {
     use crate::studio::state::{slot_display_name, slot_icon, MAX_WORKFLOW_EXTRAS};
     use crate::workflow::{WorkflowStage, CANONICAL_SLOTS};
 
@@ -1178,19 +1181,25 @@ pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, is_new: bool) -
         .unwrap_or_default();
     let extra_rows = (extras.len() + 1).min(MAX_WORKFLOW_EXTRAS);
 
-    let id = base.map(|b| b.id.as_str()).unwrap_or("");
-    let name = base.and_then(|b| b.name.as_deref()).unwrap_or("");
+    // Edit (owned, in place) vs new/customize (creates a fresh workflow).
+    let is_edit = base.is_some() && !customize;
+    let from = base.map(|b| b.id.as_str()).unwrap_or("");
     let desc = base.and_then(|b| b.description.as_deref()).unwrap_or("");
-    let owned = base.map(|b| b.origin != Layer::BuiltIn).unwrap_or(false);
-    let heading = if is_new {
-        "New workflow".to_string()
-    } else if owned {
-        format!("Edit {}", base.map(|b| b.title()).unwrap_or("workflow"))
+    // Customize prefills a distinct "<name> copy" so the original id is untouched.
+    let name_value = if customize {
+        format!("{} copy", base.map(|b| b.title()).unwrap_or("Workflow"))
     } else {
+        base.and_then(|b| b.name.clone()).unwrap_or_default()
+    };
+    let heading = if customize {
         format!(
             "Customize {}",
             base.map(|b| b.title()).unwrap_or("workflow")
         )
+    } else if is_edit {
+        format!("Edit {}", base.map(|b| b.title()).unwrap_or("workflow"))
+    } else {
+        "New workflow".to_string()
     };
 
     html! {
@@ -1202,29 +1211,28 @@ pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, is_new: bool) -
                     (close_btn())
                 }
                 div class="modal-body" {
-                    input type="hidden" name="mode" value=(if is_new { "new" } else { "edit" });
-                    @if !owned && !is_new {
-                        p class="hint" { "Saving makes an editable copy that shadows the built-in — the original stays untouched." }
+                    // `mode` = edit (in place) or new (create). `from` names the
+                    // workflow this one copies its handoffs/provenance from.
+                    input type="hidden" name="mode" value=(if is_edit { "edit" } else { "new" });
+                    input type="hidden" name="from" value=(from);
+                    @if customize {
+                        p class="hint" { "This makes a separate copy you can edit — “" (base.map(|b| b.title()).unwrap_or("the original")) "” stays as it is." }
                     }
                     div class="wf-edit-meta" {
-                        @if is_new {
-                            label class="field grow" { span class="field-label" { "name" span class="field-hint" { "becomes the workflow id" } }
-                                input type="text" name="name" value=(name) placeholder="My workflow" required;
-                            }
-                        } @else {
-                            input type="hidden" name="id" value=(id);
-                            label class="field grow" { span class="field-label" { "name" }
-                                input type="text" name="name" value=(name) placeholder="My workflow";
-                            }
+                        @if is_edit { input type="hidden" name="id" value=(from); }
+                        label class="field grow" { span class="field-label" { "name" @if !is_edit { span class="field-hint" { "becomes the workflow id" } } }
+                            input type="text" name="name" value=(name_value) placeholder="My workflow" required;
                         }
                         label class="field grow" { span class="field-label" { "description" span class="field-hint" { "optional one-liner" } }
                             input type="text" name="description" value=(desc) placeholder="what this workflow is for";
                         }
                     }
                     (workflow_icon_picker(base.and_then(|b| b.icon.as_deref())))
-                    @if !is_new { p class="hint small" { "id: " code { (id) } } }
 
-                    p class="wf-edit-lead muted" { "Fill the steps your workflow uses. The five are fixed — leave a step's box blank to skip it." }
+                    p class="wf-edit-lead muted" {
+                        "Each step is just instructions — write what the agent should do, in plain text. "
+                        "Leave a step blank to skip it. Handoff files between steps carry over from the original."
+                    }
                     div class="wf-edit-slots" {
                         @for &(key, desc) in CANONICAL_SLOTS {
                             @let st = stage_for(key);
@@ -1236,55 +1244,35 @@ pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, is_new: bool) -
                                         code class="wf-slot-cmd" { span class="cmd-prefix" { "/loadout:" } span class="cmd-name" { (key) } }
                                     }
                                 }
-                                label class="field" { span class="field-label" { "what it does here" span class="field-hint" { "blank = skip" } }
-                                    textarea name=(format!("s_{key}_purpose")) rows="2" placeholder=(desc) {
+                                label class="field" {
+                                    textarea name=(format!("s_{key}_purpose")) rows="3" placeholder=(desc) {
                                         (st.and_then(|s| s.purpose.as_deref()).unwrap_or(""))
-                                    }
-                                }
-                                div class="wf-edit-io" {
-                                    label class="field" { span class="field-label" { "reads" }
-                                        input type="text" name=(format!("s_{key}_reads")) value=(st.and_then(|s| s.reads.as_deref()).unwrap_or("")) placeholder="plan.md";
-                                    }
-                                    label class="field" { span class="field-label" { "writes" }
-                                        input type="text" name=(format!("s_{key}_writes")) value=(st.and_then(|s| s.writes.as_deref()).unwrap_or("")) placeholder="plan.md";
-                                    }
-                                }
-                                label class="check" { input type="checkbox" name=(format!("s_{key}_gate")) checked[st.map(|s| s.gate).unwrap_or(false)]; span { "checkpoint — pause for review" } }
-                                label class="field" { span class="field-label" { "done when" span class="field-hint" { "one per line" } }
-                                    textarea name=(format!("s_{key}_exit")) rows="2" placeholder="build & tests pass" {
-                                        (st.map(|s| s.exit.join("\n")).unwrap_or_default())
                                     }
                                 }
                             }
                         }
                     }
 
-                    div class="wf-edit-extras" {
-                        h3 class="wf-edit-extras-h" { "Custom steps " span class="field-hint" { "optional — beyond the five" } }
+                    details class="wf-edit-extras" {
+                        summary { "Custom steps " span class="field-hint" { "optional — beyond the five" } }
                         @for i in 0..extra_rows {
                             @let ex = extras.get(i).copied();
                             div class="wf-edit-extra" {
                                 label class="field" { span class="field-label" { "name" }
                                     input type="text" name=(format!("x{i}_name")) value=(ex.map(|s| s.name.as_str()).unwrap_or("")) placeholder="e.g. compound";
                                 }
-                                label class="field grow" { span class="field-label" { "what it does" }
-                                    input type="text" name=(format!("x{i}_purpose")) value=(ex.and_then(|s| s.purpose.as_deref()).unwrap_or("")) placeholder="capture lessons for next time";
-                                }
-                                label class="field" { span class="field-label" { "reads" }
-                                    input type="text" name=(format!("x{i}_reads")) value=(ex.and_then(|s| s.reads.as_deref()).unwrap_or("")) placeholder="";
-                                }
-                                label class="field" { span class="field-label" { "writes" }
-                                    input type="text" name=(format!("x{i}_writes")) value=(ex.and_then(|s| s.writes.as_deref()).unwrap_or("")) placeholder="";
+                                label class="field grow" { span class="field-label" { "instructions" }
+                                    input type="text" name=(format!("x{i}_purpose")) value=(ex.and_then(|s| s.purpose.as_deref()).unwrap_or("")) placeholder="what this step does";
                                 }
                             }
                         }
                     }
                 }
                 div class="modal-foot" {
-                    @if owned {
+                    @if is_edit {
                         button type="button" class="btn btn-danger delete-left"
-                            hx-delete=(format!("/workflows/{}", enc(id))) hx-target="#main"
-                            hx-confirm=(format!("Delete workflow “{id}”? This stages its removal.")) {
+                            hx-delete=(format!("/workflows/{}", enc(from))) hx-target="#main"
+                            hx-confirm=(format!("Delete workflow “{from}”? This stages its removal.")) {
                             (icon("trash")) "Delete"
                         }
                     }

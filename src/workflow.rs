@@ -216,6 +216,17 @@ impl Workflow {
             .collect();
         CanonicalLayout { slots, extras }
     }
+
+    /// The stage this workflow assigns to a generated command: the first stage
+    /// that fills the canonical slot (`plan`, `verify`, …), or an exact-named
+    /// custom stage (`compound`). Lets the editor inherit a step's handoff/gate/
+    /// exit from the workflow it was customized from while editing only the prose.
+    pub fn stage_for_command(&self, command: &str) -> Option<&WorkflowStage> {
+        self.stages
+            .iter()
+            .find(|s| canonical_slot(&s.name) == Some(command))
+            .or_else(|| self.stages.iter().find(|s| s.name == command))
+    }
 }
 
 impl WorkflowStage {

@@ -479,15 +479,13 @@ body {
 
 /* --- workflow editor (build-your-own / customize) -------------------------- */
 .wf-edit-meta { display: flex; flex-wrap: wrap; gap: 12px; }
-.wf-edit-lead { font-size: 12px; margin: 2px 0 0; }
+.wf-edit-lead { font-size: 12px; margin: 2px 0 0; line-height: 1.45; }
 .wf-edit-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 10px; }
 .wf-edit-slot { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); }
-.wf-edit-slot .field-label { font-size: 11px; }
 .wf-edit-slot textarea { resize: vertical; }
-.wf-edit-io { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .wf-edit-extras { display: flex; flex-direction: column; gap: 8px; }
-.wf-edit-extras-h { margin: 4px 0 0; font-size: 13px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
-.wf-edit-extra { display: grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap: 8px; align-items: end; }
+.wf-edit-extras > summary { cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; user-select: none; }
+.wf-edit-extra { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: end; margin-top: 8px; }
 
 /* --- modal dialog ---------------------------------------------------------- */
 .modal-root { position: fixed; inset: 0; z-index: 50; display: none; }
