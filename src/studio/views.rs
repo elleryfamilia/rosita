@@ -951,6 +951,15 @@ pub fn workflows_tab(view: &WorkflowsView, flash: Option<&str>) -> Markup {
                 @for w in &view.workflows {
                     (workflow_gallery_card(w, view.focused_id.as_deref() == Some(w.id.as_str())))
                 }
+                // Build-your-own: opens the blank editor (customize is secondary,
+                // so it sits at the end of the gallery, not competing with the catalog).
+                button class="wf-card wf-card-new" hx-get="/workflows/new" hx-target="#modal" title="Build your own workflow" {
+                    span class="wf-card-top" {
+                        span class="wf-card-glyph" { (icon("plus")) }
+                        span class="wf-card-name" { "New workflow" }
+                    }
+                    span class="wf-card-blurb" { "Build your own" }
+                }
             }
             // The focused workflow, shown as its ordered slots.
             @if let Some(w) = focused {
@@ -1023,6 +1032,14 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
                     }
                 }
                 div class="wf-detail-actions" {
+                    // Built-in → "Customize" (opens the editor prefilled; saving
+                    // makes an owned copy). Owned → "Edit". Secondary styling, so
+                    // the primary action stays "Use this workflow".
+                    @if w.builtin {
+                        button class="btn btn-ghost" hx-get=(format!("/workflows/{}/edit", enc(&w.id))) hx-target="#modal" title="Make an editable copy you can tweak" { (icon("copy")) "Customize" }
+                    } @else {
+                        button class="btn btn-ghost" hx-get=(format!("/workflows/{}/edit", enc(&w.id))) hx-target="#modal" { (icon("pencil")) "Edit" }
+                    }
                     @if w.active {
                         span class="tag rec-tag wf-active-pill" { (icon("check")) "active workflow" }
                     } @else {
@@ -1075,7 +1092,11 @@ fn workflow_slot(s: &WorkflowSlotView, wf_glyph: &str) -> Markup {
                 // grows to fill the card and vertically centers its content.
                 Some(p) => div class="wf-value" {
                     div class="wf-value-row" {
-                        span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
+                        @if s.edited {
+                            span class="wf-value-mark wf-value-edited" title="you customized this step" { (icon("pencil")) }
+                        } @else {
+                            span class="wf-value-mark" title="from this workflow" { (icon(wf_glyph)) }
+                        }
                         div class="wf-value-body" {
                             p class="wf-value-text" { (p) }
                             @if s.reads.is_some() || s.writes.is_some() {
@@ -1098,6 +1119,182 @@ fn workflow_slot(s: &WorkflowSlotView, wf_glyph: &str) -> Markup {
             }
         }
     }
+}
+
+/// Glyphs offered in the workflow icon picker — a small, workflow-flavored set.
+const WORKFLOW_GLYPHS: &[&str] = &[
+    "git-branch",
+    "bolt",
+    "rocket",
+    "book",
+    "refresh",
+    "package",
+    "flask",
+    "layers",
+    "wrench",
+    "grid",
+    "terminal",
+    "gear",
+];
+
+/// A compact glyph picker for a workflow's card icon (defaults to `git-branch`).
+fn workflow_icon_picker(current: Option<&str>) -> Markup {
+    let cur = current.map(str::trim).filter(|s| !s.is_empty());
+    html! {
+        div class="field icon-pick-field" {
+            span class="field-label" { "icon" span class="field-hint" { "shown on the card" } }
+            div class="icon-picker" {
+                @for &g in WORKFLOW_GLYPHS {
+                    @let gid = format!("wfic-{g}");
+                    input type="radio" name="icon" id=(gid) value=(g) checked[cur.map(|c| c == g).unwrap_or(g == "git-branch")];
+                    label class="icon-opt" for=(gid) title=(g) { (icon(g)) }
+                }
+            }
+        }
+    }
+}
+
+/// The workflow editor modal — build-your-own or customize a built-in. `base` is
+/// the workflow being edited/adopted (`None` for a brand-new one). Editing fills
+/// the same fixed canonical spine the reader shows (one card per step, blank
+/// purpose = the workflow skips it), plus a few custom-step rows. Saving stages a
+/// create (new id) or edit (existing/adopted id) of an owned `[[workflows]]`.
+pub fn workflow_editor(base: Option<&crate::workflow::Workflow>, is_new: bool) -> String {
+    use crate::studio::state::{slot_display_name, slot_icon, MAX_WORKFLOW_EXTRAS};
+    use crate::workflow::{WorkflowStage, CANONICAL_SLOTS};
+
+    let layout = base.map(|b| b.canonical_layout());
+    let stage_for = |key: &str| -> Option<&WorkflowStage> {
+        layout.as_ref().and_then(|l| {
+            l.slots
+                .iter()
+                .find(|s| s.command == key)
+                .and_then(|s| s.stage)
+        })
+    };
+    let extras: Vec<&WorkflowStage> = layout
+        .as_ref()
+        .map(|l| l.extras.clone())
+        .unwrap_or_default();
+    let extra_rows = (extras.len() + 1).min(MAX_WORKFLOW_EXTRAS);
+
+    let id = base.map(|b| b.id.as_str()).unwrap_or("");
+    let name = base.and_then(|b| b.name.as_deref()).unwrap_or("");
+    let desc = base.and_then(|b| b.description.as_deref()).unwrap_or("");
+    let owned = base.map(|b| b.origin != Layer::BuiltIn).unwrap_or(false);
+    let heading = if is_new {
+        "New workflow".to_string()
+    } else if owned {
+        format!("Edit {}", base.map(|b| b.title()).unwrap_or("workflow"))
+    } else {
+        format!(
+            "Customize {}",
+            base.map(|b| b.title()).unwrap_or("workflow")
+        )
+    };
+
+    html! {
+        div class="modal-backdrop" hx-get="/close" hx-target="#modal" {}
+        div class="modal modal-lg" {
+            form class="fragment-form workflow-form" hx-post="/workflows" hx-target="#main" {
+                div class="modal-head" {
+                    h2 { (heading) }
+                    (close_btn())
+                }
+                div class="modal-body" {
+                    input type="hidden" name="mode" value=(if is_new { "new" } else { "edit" });
+                    @if !owned && !is_new {
+                        p class="hint" { "Saving makes an editable copy that shadows the built-in — the original stays untouched." }
+                    }
+                    div class="wf-edit-meta" {
+                        @if is_new {
+                            label class="field grow" { span class="field-label" { "name" span class="field-hint" { "becomes the workflow id" } }
+                                input type="text" name="name" value=(name) placeholder="My workflow" required;
+                            }
+                        } @else {
+                            input type="hidden" name="id" value=(id);
+                            label class="field grow" { span class="field-label" { "name" }
+                                input type="text" name="name" value=(name) placeholder="My workflow";
+                            }
+                        }
+                        label class="field grow" { span class="field-label" { "description" span class="field-hint" { "optional one-liner" } }
+                            input type="text" name="description" value=(desc) placeholder="what this workflow is for";
+                        }
+                    }
+                    (workflow_icon_picker(base.and_then(|b| b.icon.as_deref())))
+                    @if !is_new { p class="hint small" { "id: " code { (id) } } }
+
+                    p class="wf-edit-lead muted" { "Fill the steps your workflow uses. The five are fixed — leave a step's box blank to skip it." }
+                    div class="wf-edit-slots" {
+                        @for &(key, desc) in CANONICAL_SLOTS {
+                            @let st = stage_for(key);
+                            div class="wf-edit-slot" {
+                                div class="wf-slot-head" {
+                                    span class="wf-slot-icon" { (icon(slot_icon(key))) }
+                                    div class="wf-slot-titles" {
+                                        span class="wf-slot-name" { (slot_display_name(key)) }
+                                        code class="wf-slot-cmd" { span class="cmd-prefix" { "/loadout:" } span class="cmd-name" { (key) } }
+                                    }
+                                }
+                                label class="field" { span class="field-label" { "what it does here" span class="field-hint" { "blank = skip" } }
+                                    textarea name=(format!("s_{key}_purpose")) rows="2" placeholder=(desc) {
+                                        (st.and_then(|s| s.purpose.as_deref()).unwrap_or(""))
+                                    }
+                                }
+                                div class="wf-edit-io" {
+                                    label class="field" { span class="field-label" { "reads" }
+                                        input type="text" name=(format!("s_{key}_reads")) value=(st.and_then(|s| s.reads.as_deref()).unwrap_or("")) placeholder="plan.md";
+                                    }
+                                    label class="field" { span class="field-label" { "writes" }
+                                        input type="text" name=(format!("s_{key}_writes")) value=(st.and_then(|s| s.writes.as_deref()).unwrap_or("")) placeholder="plan.md";
+                                    }
+                                }
+                                label class="check" { input type="checkbox" name=(format!("s_{key}_gate")) checked[st.map(|s| s.gate).unwrap_or(false)]; span { "checkpoint — pause for review" } }
+                                label class="field" { span class="field-label" { "done when" span class="field-hint" { "one per line" } }
+                                    textarea name=(format!("s_{key}_exit")) rows="2" placeholder="build & tests pass" {
+                                        (st.map(|s| s.exit.join("\n")).unwrap_or_default())
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    div class="wf-edit-extras" {
+                        h3 class="wf-edit-extras-h" { "Custom steps " span class="field-hint" { "optional — beyond the five" } }
+                        @for i in 0..extra_rows {
+                            @let ex = extras.get(i).copied();
+                            div class="wf-edit-extra" {
+                                label class="field" { span class="field-label" { "name" }
+                                    input type="text" name=(format!("x{i}_name")) value=(ex.map(|s| s.name.as_str()).unwrap_or("")) placeholder="e.g. compound";
+                                }
+                                label class="field grow" { span class="field-label" { "what it does" }
+                                    input type="text" name=(format!("x{i}_purpose")) value=(ex.and_then(|s| s.purpose.as_deref()).unwrap_or("")) placeholder="capture lessons for next time";
+                                }
+                                label class="field" { span class="field-label" { "reads" }
+                                    input type="text" name=(format!("x{i}_reads")) value=(ex.and_then(|s| s.reads.as_deref()).unwrap_or("")) placeholder="";
+                                }
+                                label class="field" { span class="field-label" { "writes" }
+                                    input type="text" name=(format!("x{i}_writes")) value=(ex.and_then(|s| s.writes.as_deref()).unwrap_or("")) placeholder="";
+                                }
+                            }
+                        }
+                    }
+                }
+                div class="modal-foot" {
+                    @if owned {
+                        button type="button" class="btn btn-danger delete-left"
+                            hx-delete=(format!("/workflows/{}", enc(id))) hx-target="#main"
+                            hx-confirm=(format!("Delete workflow “{id}”? This stages its removal.")) {
+                            (icon("trash")) "Delete"
+                        }
+                    }
+                    button type="button" class="btn btn-ghost" hx-get="/close" hx-target="#modal" { "Cancel" }
+                    button type="submit" class="btn btn-primary" { (icon("check")) "Save" }
+                }
+            }
+        }
+    }
+    .into_string()
 }
 
 /// Re-render the Targets tab after a staged edit: the tab (with a flash), close

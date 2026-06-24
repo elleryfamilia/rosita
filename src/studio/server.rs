@@ -145,6 +145,8 @@ pub fn route(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         ("GET", "/targets/new") => Resp::html(views::target_dialog(None, Layer::Global)),
         ("POST", "/targets") => handle_target_save(state, req),
         ("POST", "/targets/try") => handle_target_try(state, req),
+        ("GET", "/workflows/new") => Resp::html(views::workflow_editor(None, true)),
+        ("POST", "/workflows") => handle_workflow_save(state, req),
         ("GET", "/packs") => handle_packs(state),
         ("GET", "/skills/card") => handle_skill_card(),
         ("POST", "/skills/install") => handle_skill_install(),
@@ -647,8 +649,102 @@ fn handle_workflow_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
         }
         // Make it the global active workflow (staged like any other edit).
         ("POST", "activate") => handle_workflow_activate(state, &id),
+        // Open the editor prefilled — "Customize" (built-in) or "Edit" (owned).
+        ("GET", "edit") => handle_workflow_edit(state, &id),
+        // Stage removal of an owned workflow.
+        ("DELETE", "") => handle_workflow_delete(state, &id),
         _ => Resp::not_found(),
     }
+}
+
+/// Open the editor for an existing workflow: a built-in opens as "Customize"
+/// (saving makes an owned copy), an owned one as "Edit".
+fn handle_workflow_edit(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let snap = state.lock().unwrap().snapshot();
+    let cfg = match state::staged_config(&snap) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    match cfg.effective_workflows().iter().find(|w| w.id == id) {
+        Some(w) => Resp::html(views::workflow_editor(Some(w), false)),
+        None => Resp::html(views::error_fragment(&format!("unknown workflow '{id}'"))),
+    }
+}
+
+/// Stage a create (new id) or edit/adopt (existing/built-in id) of an owned
+/// workflow from the editor form, then re-render the tab focused on it.
+fn handle_workflow_save(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
+    let pairs = state::parse_pairs(&req.body);
+    let is_new = field(&req.body, "mode") == "new";
+    let snap = state.lock().unwrap().snapshot();
+    let cfg = match state::staged_config(&snap) {
+        Ok(c) => c,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    // Provenance base: the effective workflow with this id (for edit/adopt).
+    let effective = cfg.effective_workflows();
+    let probe_id = state::workflow_form_id(&pairs);
+    let base = probe_id
+        .as_deref()
+        .and_then(|id| effective.iter().find(|w| w.id == id));
+    let workflow = match state::workflow_from_form(base, &pairs) {
+        Ok(w) => w,
+        Err(e) => return Resp::html(views::error_fragment(&e.to_string())),
+    };
+    let id = workflow.id.clone();
+
+    let op = if is_new {
+        // A new workflow can't claim an id already in the catalog (owned or
+        // built-in) — point the user at Customize for those instead.
+        if effective.iter().any(|w| w.id == id) {
+            return Resp::html(views::error_fragment(&format!(
+                "a workflow “{id}” already exists — open it and Customize instead"
+            )));
+        }
+        StagedOp::CreateWorkflow {
+            layer: Layer::Global,
+            workflow: Box::new(workflow),
+        }
+    } else {
+        StagedOp::EditWorkflow {
+            layer: Layer::Global,
+            id: id.clone(),
+            workflow: Box::new(workflow),
+        }
+    };
+
+    if let Err(e) = state.lock().unwrap().session.stage(op) {
+        return Resp::html(views::error_fragment(&e.to_string()));
+    }
+    let snap = state.lock().unwrap().snapshot();
+    Resp::html(views::workflows_result(
+        &state::workflows_view(&snap, Some(&id)),
+        &format!("staged workflow “{id}” — Apply to save"),
+    ))
+}
+
+/// Stage removal of an owned workflow (built-ins can't be deleted).
+fn handle_workflow_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
+    let res = (|| -> crate::Result<()> {
+        let mut s = state.lock().unwrap();
+        let Some(layer) = s.session.workflow_layer(id) else {
+            return Err(anyhow!(
+                "“{id}” isn't one of your own workflows — built-ins can't be deleted"
+            ));
+        };
+        s.session.stage(StagedOp::DeleteWorkflow {
+            layer,
+            id: id.to_string(),
+        })
+    })();
+    if let Err(e) = res {
+        return Resp::html(views::error_fragment(&e.to_string()));
+    }
+    let snap = state.lock().unwrap().snapshot();
+    Resp::html(views::workflows_result(
+        &state::workflows_view(&snap, None),
+        &format!("staged removal of workflow “{id}”"),
+    ))
 }
 
 /// Stage setting `[defaults].workflow` to `id`, then re-render the tab focused on
@@ -2198,6 +2294,101 @@ mod tests {
         );
         assert!(on_disk.contains("kind = \"script\""), "script rule written");
         assert!(on_disk.contains("WORKSPACE"), "command written");
+    }
+
+    #[test]
+    fn create_then_customize_and_delete_workflow() {
+        let d = rust_repo();
+        let st = state_for(d.path(), None);
+
+        // Build your own: fill two canonical slots via the editor form (mode=new).
+        let r = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/workflows",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "mode=new&name=My+Flow&description=mine&icon=bolt\
+                 &s_plan_purpose=Think+first&s_plan_writes=plan.md\
+                 &s_implement_purpose=Build+it&s_implement_reads=plan.md",
+            ),
+        ));
+        assert!(r.contains("staged workflow"), "save flash: {r}");
+        assert!(r.contains("My Flow"), "new workflow shows in the gallery");
+
+        // Apply: a clean [[workflows]] with [[workflows.stages]] sub-tables lands.
+        body_of(route(
+            &st,
+            &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], ""),
+        ));
+        let on_disk = std::fs::read_to_string(global_config_path(d.path())).unwrap();
+        assert!(
+            on_disk.contains("id = \"my-flow\""),
+            "workflow written: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("[[workflows.stages]]"),
+            "stages as sub-tables"
+        );
+        assert!(on_disk.contains("writes = \"plan.md\""), "handoff written");
+
+        // Adopt a built-in: GET its editor opens as "Customize"; saving under the
+        // same id makes an owned copy that shadows the built-in.
+        let ed = body_of(route(
+            &st,
+            &req("GET", "/workflows/lean/edit", "", &[HOST, COOKIE], ""),
+        ));
+        assert!(ed.contains("Customize Lean"), "built-in opens as Customize");
+        let saved = body_of(route(
+            &st,
+            &req(
+                "POST",
+                "/workflows",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                // Resubmit lean's spine with a CHANGED plan purpose; the other
+                // slots keep their content so they aren't dropped.
+                "mode=edit&id=lean&name=Lean\
+                 &s_explore_purpose=Read+first\
+                 &s_plan_purpose=My+own+take+on+planning&s_plan_writes=plan.md\
+                 &s_implement_purpose=Build+it&s_implement_reads=plan.md\
+                 &s_verify_purpose=Check+it&s_verify_gate=on",
+            ),
+        ));
+        assert!(saved.contains("staged workflow"), "adopt staged: {saved}");
+        // The changed plan step is marked as customized (not the workflow icon).
+        assert!(
+            saved.contains("wf-value-edited"),
+            "a customized step carries the edited mark"
+        );
+
+        // Delete the owned workflow (built-ins refuse).
+        let del = body_of(route(
+            &st,
+            &req(
+                "DELETE",
+                "/workflows/my-flow",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(del.contains("staged removal"), "delete flash: {del}");
+        let nope = body_of(route(
+            &st,
+            &req(
+                "DELETE",
+                "/workflows/spec-driven",
+                "",
+                &[HOST, COOKIE, ORIGIN],
+                "",
+            ),
+        ));
+        assert!(
+            nope.contains("built-ins can't be deleted"),
+            "built-in delete refused"
+        );
     }
 
     #[test]

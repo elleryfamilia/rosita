@@ -468,11 +468,33 @@ body {
 .wf-foot-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint); }
 .wf-foot-item .icon { width: 13px; height: 13px; }
 
+/* a step the user customized away from the built-in it was adopted from — a
+   distinct caution-toned mark instead of the workflow's own icon */
+.wf-value-edited { color: var(--caution); }
+
+/* "build your own" gallery card — dashed so it reads as an action, not a catalog entry */
+.wf-card-new { border-style: dashed; color: var(--muted); }
+.wf-card-new:hover { border-color: var(--accent); color: var(--accent); }
+.wf-card-new .wf-card-glyph { color: inherit; }
+
+/* --- workflow editor (build-your-own / customize) -------------------------- */
+.wf-edit-meta { display: flex; flex-wrap: wrap; gap: 12px; }
+.wf-edit-lead { font-size: 12px; margin: 2px 0 0; }
+.wf-edit-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 10px; }
+.wf-edit-slot { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); }
+.wf-edit-slot .field-label { font-size: 11px; }
+.wf-edit-slot textarea { resize: vertical; }
+.wf-edit-io { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wf-edit-extras { display: flex; flex-direction: column; gap: 8px; }
+.wf-edit-extras-h { margin: 4px 0 0; font-size: 13px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
+.wf-edit-extra { display: grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap: 8px; align-items: end; }
+
 /* --- modal dialog ---------------------------------------------------------- */
 .modal-root { position: fixed; inset: 0; z-index: 50; display: none; }
 .modal-root:has(.modal) { display: grid; place-items: center; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); }
 .modal { position: relative; z-index: 1; width: min(640px, 94vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--r-lg); overflow: hidden; box-shadow: 0 24px 64px rgba(0, 0, 0, .55); }
+.modal-lg { width: min(900px, 95vw); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .modal-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .modal-body { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }

@@ -220,6 +220,10 @@ pub struct WorkflowSlotView {
     pub writes: Option<String>,
     /// "Done when" checklist items.
     pub exit: Vec<String>,
+    /// You customized this step away from the built-in it was adopted from — the
+    /// value carries a distinct "edited" mark instead of the workflow's icon.
+    /// Always false for a built-in or a from-scratch workflow (no baseline).
+    pub edited: bool,
 }
 
 /// One workflow card for the Workflows tab.
@@ -677,7 +681,7 @@ pub fn targets_view(snap: &Snapshot) -> TargetsView {
 
 /// The fixed glyph that identifies a canonical step (distinct from the workflow
 /// icon that marks the *value*). A custom stage falls back to a neutral glyph.
-fn slot_icon(command: &str) -> &'static str {
+pub(crate) fn slot_icon(command: &str) -> &'static str {
     match command {
         "explore" => "eye",
         "brainstorm" => "pencil",
@@ -690,7 +694,7 @@ fn slot_icon(command: &str) -> &'static str {
 }
 
 /// Title-case a command for the slot's display name (`explore` -> `Explore`).
-fn slot_display_name(command: &str) -> String {
+pub(crate) fn slot_display_name(command: &str) -> String {
     let mut chars = command.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
@@ -702,14 +706,40 @@ fn slot_display_name(command: &str) -> String {
 /// slots in order (each filled by the matching stage, or shown skipped/greyed),
 /// then any custom stages that match no canonical phase. The first stage to
 /// claim a canonical slot wins (the curated built-ins never collide).
-fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
+fn workflow_slots(
+    w: &crate::workflow::Workflow,
+    baseline: Option<&crate::workflow::Workflow>,
+) -> Vec<WorkflowSlotView> {
+    use crate::workflow::WorkflowStage;
     let layout = w.canonical_layout();
+    let base = baseline.map(|b| b.canonical_layout());
+
+    // A step is "edited" when this workflow was adopted from a built-in and its
+    // content for that step differs from (or is absent in) the original.
+    let edited_for = |command: &str, stage: &WorkflowStage| -> bool {
+        let Some(base) = &base else { return false };
+        let base_stage = base
+            .slots
+            .iter()
+            .find(|s| s.command == command)
+            .and_then(|s| s.stage)
+            .or_else(|| {
+                base.extras
+                    .iter()
+                    .copied()
+                    .find(|s| s.name.as_str() == command)
+            });
+        match base_stage {
+            Some(bs) => stage_content_differs(stage, bs),
+            None => true, // present here, absent in the original → newly added
+        }
+    };
 
     let mut slots: Vec<WorkflowSlotView> = layout
         .slots
         .iter()
         .map(|slot| {
-            let base = WorkflowSlotView {
+            let empty = WorkflowSlotView {
                 command: slot.command.to_string(),
                 name: slot_display_name(slot.command),
                 icon: slot_icon(slot.command).to_string(),
@@ -719,6 +749,7 @@ fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
                 reads: None,
                 writes: None,
                 exit: Vec::new(),
+                edited: false,
             };
             match slot.stage {
                 Some(s) => WorkflowSlotView {
@@ -727,9 +758,10 @@ fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
                     reads: s.reads.clone(),
                     writes: s.writes.clone(),
                     exit: s.exit.clone(),
-                    ..base
+                    edited: edited_for(slot.command, s),
+                    ..empty
                 },
-                None => base,
+                None => empty,
             }
         })
         .collect();
@@ -747,9 +779,22 @@ fn workflow_slots(w: &crate::workflow::Workflow) -> Vec<WorkflowSlotView> {
             reads: s.reads.clone(),
             writes: s.writes.clone(),
             exit: s.exit.clone(),
+            edited: edited_for(&s.name, s),
         });
     }
     slots
+}
+
+/// Whether two stages differ in any user-editable field (name aside).
+fn stage_content_differs(
+    a: &crate::workflow::WorkflowStage,
+    b: &crate::workflow::WorkflowStage,
+) -> bool {
+    a.purpose != b.purpose
+        || a.reads != b.reads
+        || a.writes != b.writes
+        || a.gate != b.gate
+        || a.exit != b.exit
 }
 
 /// Build the Workflows tab view: the curated catalog plus your own (the gallery
@@ -763,6 +808,9 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
         .as_ref()
         .map(|c| c.effective_workflows())
         .unwrap_or_else(crate::workflow::builtin_workflows);
+    // The shipped catalog, used as the baseline for "edited" marks: an owned
+    // workflow that shadows a built-in is compared against the built-in's stages.
+    let builtins = crate::workflow::builtin_workflows();
     // Which loadouts bind each workflow id (a profile's `workflow = "<id>"`).
     let bindings: Vec<(String, String)> = cfg
         .as_ref()
@@ -784,7 +832,11 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 .filter(|(id, _)| id == &w.id)
                 .map(|(_, name)| name.clone())
                 .collect();
-            let slots = workflow_slots(&w);
+            // Compare an owned workflow against the built-in it shadows (if any).
+            let baseline = (w.origin != Layer::BuiltIn)
+                .then(|| builtins.iter().find(|b| b.id == w.id))
+                .flatten();
+            let slots = workflow_slots(&w, baseline);
             WorkflowView {
                 title: w.title().to_string(),
                 // Show the description as a card blurb only when a distinct
@@ -1247,6 +1299,101 @@ pub fn target_from_form(
         disabled: base.map(|b| b.disabled).unwrap_or(false),
         origin: Layer::default(),
     })
+}
+
+/// The id the workflow editor form targets: the fixed `id` (edit/adopt) else the
+/// slug of `name` (new). Used to locate the provenance base before building.
+pub fn workflow_form_id(pairs: &[(String, String)]) -> Option<String> {
+    opt(value_of(pairs, "id"))
+        .or_else(|| opt(value_of(pairs, "name")))
+        .map(|n| slug(&n))
+        .filter(|s| !s.is_empty())
+}
+
+/// How many custom (extra) stages the workflow editor form carries. Each is a
+/// fixed-index row (`x0_…`, `x1_…`); the editor renders the existing extras plus
+/// one blank, and the parser keeps the rows whose name is non-empty.
+pub const MAX_WORKFLOW_EXTRAS: usize = 4;
+
+/// Build a [`Workflow`](crate::workflow::Workflow) from the workflow editor form.
+/// The form fills the fixed canonical spine (one `s_<slot>_*` group per slot,
+/// blank purpose = the workflow skips that step) plus up to
+/// [`MAX_WORKFLOW_EXTRAS`] custom `x<i>_*` rows. `base` (the workflow being
+/// edited/adopted) supplies the provenance fields the form doesn't expose, so
+/// "Customize Boris" keeps its `modeled_on`/`source`. Origin is left default and
+/// re-tagged by layer when the staged config is assembled.
+pub fn workflow_from_form(
+    base: Option<&crate::workflow::Workflow>,
+    pairs: &[(String, String)],
+) -> crate::Result<crate::workflow::Workflow> {
+    use crate::workflow::{Workflow, WorkflowStage, CANONICAL_SLOTS};
+
+    // Edit carries a fixed `id`; a new workflow derives it from the `name`.
+    let id = opt(value_of(pairs, "id"))
+        .or_else(|| opt(value_of(pairs, "name")))
+        .map(|n| slug(&n))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("a workflow needs a name"))?;
+
+    let mut stages: Vec<WorkflowStage> = Vec::new();
+    // The five canonical slots, in spine order; a blank purpose skips the step.
+    for (key, _desc) in CANONICAL_SLOTS {
+        let Some(purpose) = opt(value_of(pairs, &format!("s_{key}_purpose"))) else {
+            continue;
+        };
+        stages.push(WorkflowStage {
+            name: (*key).to_string(),
+            purpose: Some(purpose),
+            reads: opt(value_of(pairs, &format!("s_{key}_reads"))),
+            writes: opt(value_of(pairs, &format!("s_{key}_writes"))),
+            gate: value_of(pairs, &format!("s_{key}_gate")).is_some(),
+            exit: text_lines(value_of(pairs, &format!("s_{key}_exit"))),
+        });
+    }
+    // Custom extra steps (name-gated, fixed indices).
+    for i in 0..MAX_WORKFLOW_EXTRAS {
+        let Some(name) = opt(value_of(pairs, &format!("x{i}_name"))) else {
+            continue;
+        };
+        stages.push(WorkflowStage {
+            name,
+            purpose: opt(value_of(pairs, &format!("x{i}_purpose"))),
+            reads: opt(value_of(pairs, &format!("x{i}_reads"))),
+            writes: opt(value_of(pairs, &format!("x{i}_writes"))),
+            gate: false,
+            exit: Vec::new(),
+        });
+    }
+
+    let wf = Workflow {
+        id,
+        name: opt(value_of(pairs, "name")),
+        description: opt(value_of(pairs, "description")),
+        icon: opt(value_of(pairs, "icon")),
+        stages,
+        modeled_on: base.and_then(|b| b.modeled_on.clone()),
+        researched: base.and_then(|b| b.researched.clone()),
+        source: base.and_then(|b| b.source.clone()),
+        disabled: false,
+        origin: Layer::default(),
+    };
+    let problems = wf.validate();
+    if !problems.is_empty() {
+        anyhow::bail!("{}", problems.join("; "));
+    }
+    Ok(wf)
+}
+
+/// Split a textarea value into trimmed, non-empty lines (the "done when" list).
+fn text_lines(s: Option<&str>) -> Vec<String> {
+    s.map(|t| {
+        t.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Slugify a display name into a stable fragment id (lowercase, alphanumeric
