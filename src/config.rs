@@ -193,6 +193,7 @@ impl Config {
         for (layer, path, text) in layers {
             let mut parsed: RawConfig = toml::from_str(&text)
                 .with_context(|| format!("parsing staged config for {}", path.display()))?;
+            warn_unknown_config_keys(&text, &path);
             strip_global_only(layer, &mut parsed);
             for cap in &mut parsed.fragments {
                 cap.origin = layer;
@@ -341,8 +342,15 @@ fn strip_global_only(layer: crate::fragment::Layer, parsed: &mut RawConfig) {
 
 // --- raw (per-layer) parsing -------------------------------------------------
 
+// Deliberately NOT `deny_unknown_fields`: the tool-managed config must be
+// forward-compatible. A config written by a newer loadout — a new `[defaults]`
+// key, a whole new top-level table — must not brick an older binary, and the
+// git-backed config sync makes one machine reading another's newer config
+// routine. Unknown keys here are tolerated and surfaced via
+// `warn_unknown_config_keys`, never fatal. The user-authored item structs
+// (Fragment / LoadoutConfig / TargetDef / Workflow) stay strict — there a typo
+// should still fail loudly.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawConfig {
     defaults: Option<RawDefaults>,
     env: Option<RawEnv>,
@@ -366,42 +374,100 @@ struct RawConfig {
     agents: Vec<AgentDescriptor>,
     #[serde(default)]
     host_classes: BTreeMap<String, Vec<String>>,
-    /// The per-project `[binding]` (repo `local.toml`). Parsed here only so the
-    /// strict `deny_unknown_fields` layer accepts it; the binding is owned and
-    /// read by [`crate::binding`], not carried on the merged [`Config`].
+    /// The per-project `[binding]` (repo `local.toml`). Modeled here only so it
+    /// counts as a known key (no spurious unknown-key warning); the binding is
+    /// owned and read by [`crate::binding`], not carried on the merged [`Config`].
     #[serde(default)]
     #[allow(dead_code)]
     binding: Option<crate::binding::RawBinding>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawDefaults {
     agent: Option<String>,
     workflow: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawEnv {
     allowlist: Option<Vec<String>>,
     deny_name_patterns: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawCodex {
     write_override: Option<bool>,
     max_output_kib: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawSync {
     auto_pull: Option<bool>,
     auto_push: Option<bool>,
     pull_max_age: Option<String>, // duration string, e.g. "5m"
     timeout: Option<String>,      // duration string, e.g. "5s"
+}
+
+/// Every top-level key [`RawConfig`] models. A key outside this set is from a
+/// newer loadout (forward-compat) or a typo — tolerated, but warned about.
+const KNOWN_TOP_LEVEL: &[&str] = &[
+    "defaults",
+    "env",
+    "codex",
+    "sync",
+    "loadouts",
+    "profiles",
+    "fragments",
+    "targets",
+    "workflows",
+    "fragment_params",
+    "agents",
+    "host_classes",
+    "binding",
+];
+
+/// Warn (never fail) about unrecognized keys in the tool-managed config. The raw
+/// settings structs deliberately don't `deny_unknown_fields` — a config written
+/// by a newer loadout (a new `[defaults]` key like `workflow`, or a whole new
+/// top-level table) must not brick an older binary, and the git-backed sync
+/// makes one machine reading another's newer config routine. We still surface
+/// the keys so a genuine typo isn't swallowed silently. Checks the top level and
+/// the known settings sub-tables; the user-authored item arrays police their own
+/// keys via `deny_unknown_fields`.
+fn warn_unknown_config_keys(text: &str, path: &Path) {
+    let Ok(table) = toml::from_str::<toml::Table>(text) else {
+        return; // already parsed as a RawConfig; a re-parse can't fail
+    };
+    let mut unknown: Vec<String> = table
+        .keys()
+        .filter(|k| !KNOWN_TOP_LEVEL.contains(&k.as_str()))
+        .cloned()
+        .collect();
+    for (section, known) in [
+        ("defaults", &["agent", "workflow"][..]),
+        ("env", &["allowlist", "deny_name_patterns"][..]),
+        ("codex", &["write_override", "max_output_kib"][..]),
+        (
+            "sync",
+            &["auto_pull", "auto_push", "pull_max_age", "timeout"][..],
+        ),
+    ] {
+        if let Some(sub) = table.get(section).and_then(|v| v.as_table()) {
+            for key in sub.keys() {
+                if !known.contains(&key.as_str()) {
+                    unknown.push(format!("{section}.{key}"));
+                }
+            }
+        }
+    }
+    if !unknown.is_empty() {
+        unknown.sort();
+        crate::warn_user!(
+            "{}: ignoring unrecognized config key(s): {} — written by a newer loadout (upgrade to use), or remove if a typo",
+            path.display(),
+            unknown.join(", ")
+        );
+    }
 }
 
 impl RawConfig {
@@ -413,6 +479,7 @@ impl RawConfig {
             .with_context(|| format!("reading config {}", path.display()))?;
         let parsed: RawConfig = toml::from_str(&text)
             .with_context(|| format!("parsing TOML config {}", path.display()))?;
+        warn_unknown_config_keys(&text, path);
         Ok(Some(parsed))
     }
 
@@ -1059,6 +1126,42 @@ mod tests {
         )])
         .unwrap();
         assert_operational_tables_stripped(&c);
+    }
+
+    #[test]
+    fn unknown_settings_keys_are_tolerated_for_forward_compat() {
+        // A config written by a newer loadout — an unknown `[defaults]` key plus
+        // a whole unknown top-level table — must LOAD, not brick, on this binary,
+        // and the known fields still take effect. This is the regression guard
+        // for the `[defaults].workflow`-on-an-older-binary incident.
+        use crate::fragment::Layer;
+        let c = Config::from_layer_strs(vec![(
+            Layer::Global,
+            PathBuf::from("/g/config.toml"),
+            "[defaults]\nagent = \"codex\"\nworkflow = \"loop\"\nfuture_knob = \"x\"\n\
+             \n[experimental]\nthing = true\n"
+                .to_string(),
+        )])
+        .expect("unknown tool-managed keys must not fail the load");
+        assert_eq!(c.default_agent, "codex");
+        assert_eq!(c.default_workflow.as_deref(), Some("loop"));
+    }
+
+    #[test]
+    fn unknown_item_field_still_fails_loudly() {
+        // The other side of the boundary: forward-compat is for tool-managed
+        // settings only. A typo in a user-authored fragment must still error, so
+        // a misspelled key doesn't silently drop the user's guidance.
+        use crate::fragment::Layer;
+        let err = Config::from_layer_strs(vec![(
+            Layer::Global,
+            PathBuf::from("/g/config.toml"),
+            "[[fragments]]\nid = \"x\"\nguidancee = \"oops\"\n".to_string(),
+        )]);
+        assert!(
+            err.is_err(),
+            "a misspelled fragment key must still be rejected"
+        );
     }
 
     #[test]

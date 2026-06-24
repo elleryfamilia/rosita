@@ -720,6 +720,25 @@ fn run_dry_run_reports_would_exec_without_launching() {
 }
 
 #[test]
+fn unknown_config_key_warns_but_does_not_block() {
+    // A `[defaults]` key written by a newer loadout (here a stand-in `future_key`)
+    // must not brick an older binary: the load warns to stderr and continues,
+    // rather than failing to parse the whole config.
+    let fx = Fixture::new();
+    fx.rust_project();
+    fx.author("[defaults]\nagent = \"claude\"\nfuture_key = 1\n");
+
+    fx.cmd()
+        .args(["--dry-run", "run", "claude"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ignoring unrecognized config"))
+        .stderr(predicate::str::contains("future_key"))
+        // …and the launch still happens.
+        .stdout(predicate::str::contains("would exec: claude"));
+}
+
+#[test]
 fn run_missing_fragment_non_tty_warns_and_continues() {
     // The active profile references a fragment id that isn't in the library.
     // `run` would normally prompt (ignore / open studio / quit), but with no
