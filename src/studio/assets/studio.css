@@ -410,6 +410,9 @@ body {
 .rule-code { font-family: var(--mono); color: var(--muted); }
 
 /* --- workflows tab --------------------------------------------------------- */
+/* full-height column so the focused-workflow panel grows to fill the tab
+   instead of leaving a dead band below the steps (#main has a definite height) */
+.tab-workflows { display: flex; flex-direction: column; min-height: 100%; }
 .workflows-lead { max-width: 64rem; margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
 .workflows-lead code, .wf-detail-meta code, .wf-foot-item code, .stage-io code, .wf-slot-cmd { font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
 .flash-warn { background: var(--caution-soft); color: var(--caution); }
@@ -420,7 +423,7 @@ body {
 .wf-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel-2); color: var(--fg); font-family: inherit; cursor: pointer; transition: border-color .12s, background .12s; }
 .wf-card:hover { border-color: var(--border-strong); background: var(--hover); }
 .wf-card.focused { border-color: var(--accent-line); background: var(--accent-soft); }
-.wf-card.active { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+.wf-card.active { border-color: var(--ok); }
 .wf-card-top { display: flex; align-items: center; gap: 8px; }
 .wf-card-glyph { display: inline-flex; color: var(--accent); flex: none; }
 .wf-card-glyph .icon { width: 17px; height: 17px; }
@@ -430,11 +433,9 @@ body {
 .wf-card-tag { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--elevated); border-radius: var(--r-sm); padding: 1px 5px; }
 .wf-card-blurb { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 /* detail — the focused workflow filling the fixed spine */
-.wf-detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel-2); padding: 18px 20px; }
+.wf-detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel-2); padding: 18px 20px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .wf-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .wf-legend { margin: 0 0 5px; font-size: 12.5px; line-height: 1.6; color: var(--muted); max-width: 62ch; }
-.wf-legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent); font-weight: 600; white-space: nowrap; }
-.wf-legend-chip .icon { width: 13px; height: 13px; }
 .wf-detail-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .wf-source { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); text-decoration: none; }
 .wf-source:hover { text-decoration: underline; }
@@ -446,7 +447,10 @@ body {
    cells stay put and only their contents change when you switch workflows. The
    step icon (neutral) + name is the slot's own identity; the value below is
    marked with the active workflow's icon (accent). */
-.wf-slots { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; align-items: stretch; }
+/* fill the panel height, but cap each card at its content (grid-auto-rows:
+   max-content) so tall viewports get neutral panel space below the row instead
+   of cavernous tinted cards; align-content:start keeps the row tight under the head */
+.wf-slots { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); grid-auto-rows: max-content; gap: 10px; align-items: stretch; flex: 1 1 auto; align-content: start; }
 .wf-slot { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); min-height: 172px; }
 .wf-slot.skipped { background: transparent; border-style: dashed; opacity: 0.5; }
 .wf-slot-head { display: flex; align-items: center; gap: 10px; }
@@ -461,14 +465,14 @@ body {
 .cmd-name { color: var(--accent); font-weight: 600; }
 .wf-slot.skipped .cmd-prefix, .wf-slot.skipped .cmd-name { color: var(--faint); }
 /* the workflow's contribution — a faint accent-wash panel that fills the card
-   and centers its content, so the whole region reads as "from this workflow" */
-.wf-value { flex: 1; display: flex; flex-direction: column; justify-content: center; background: var(--accent-wash); border-radius: 9px; padding: 12px 13px; }
+   and top-aligns its content, so the whole region reads as "from this workflow" */
+.wf-value { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; background: var(--accent-wash); border-radius: 9px; padding: 12px 13px; }
 .wf-value-row { display: flex; gap: 9px; align-items: flex-start; }
 .wf-value-mark { flex: none; color: var(--accent); display: inline-flex; margin-top: 1px; }
 .wf-value-mark .icon { width: 15px; height: 15px; }
 .wf-value-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .wf-value-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg); }
-.wf-step-desc { flex: 1; display: flex; flex-direction: column; justify-content: center; font-size: 12px; line-height: 1.45; color: var(--faint); font-style: italic; }
+.wf-step-desc { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; font-size: 12px; line-height: 1.45; color: var(--faint); font-style: italic; }
 .wf-slot-io { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stage-io { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--faint); }
 .stage-io .icon { width: 12px; height: 12px; }
