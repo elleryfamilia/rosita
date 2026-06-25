@@ -399,10 +399,15 @@ fn tab_bar(active: &str) -> Markup {
     let cls = |name: &str| if name == active { "tab active" } else { "tab" };
     html! {
         nav class="tabs" {
-            button class=(cls("profiles")) data-tab="profiles" hx-get="/tab/profiles" hx-target="#main" { (icon("layers")) "Loadouts" }
-            button class=(cls("fragments")) data-tab="fragments" hx-get="/tab/fragments" hx-target="#main" { (icon("box")) "Fragments" }
-            button class=(cls("targets")) data-tab="targets" hx-get="/tab/targets" hx-target="#main" { (icon("target")) "Targets" }
-            button class=(cls("workflows")) data-tab="workflows" hx-get="/tab/workflows" hx-target="#main" { (icon("git-branch")) "Workflows" }
+            span class="tab-group tab-group-primary" {
+                button class=(cls("profiles")) data-tab="profiles" hx-get="/tab/profiles" hx-target="#main" { (icon("layers")) "Loadouts" }
+                button class=(cls("workflows")) data-tab="workflows" hx-get="/tab/workflows" hx-target="#main" { (icon("git-branch")) "Workflows" }
+            }
+            span class="tab-divider" {}
+            span class="tab-group tab-group-secondary" {
+                button class=(cls("fragments")) data-tab="fragments" hx-get="/tab/fragments" hx-target="#main" { (icon("box")) "Fragments" }
+                button class=(cls("targets")) data-tab="targets" hx-get="/tab/targets" hx-target="#main" { (icon("target")) "Targets" }
+            }
         }
     }
 }

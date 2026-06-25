@@ -136,7 +136,11 @@ body {
 .brand-name { font-family: var(--brand); font-size: 22px; font-weight: 400; line-height: 1; letter-spacing: .5px; text-transform: uppercase; }
 .topbar-right { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 
-.tabs { flex: 0 0 auto; display: flex; gap: 6px; }
+.tabs { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.tab-group { display: flex; align-items: center; gap: 6px; }
+/* Primary pair (Loadouts, Workflows) = the two things you equip; secondary pair
+   (Fragments, Targets) = the parts they're built from. A thin rule separates them. */
+.tab-divider { width: 1px; height: 22px; background: var(--border); margin: 0 8px; flex: none; }
 .tab {
   display: inline-flex; align-items: center; gap: 8px;
   font: 600 15px var(--sans); color: var(--muted);
@@ -146,6 +150,11 @@ body {
 .tab .icon { width: 17px; height: 17px; }
 .tab:hover { background: var(--panel-2); color: var(--fg); }
 .tab.active { background: var(--accent-soft); color: var(--accent); }
+/* The supporting pair reads lighter so the headliners stand out. */
+.tab-group-secondary .tab { font-size: 13.5px; padding: 9px 16px; opacity: .82; }
+.tab-group-secondary .tab .icon { width: 15px; height: 15px; }
+.tab-group-secondary .tab:hover,
+.tab-group-secondary .tab.active { opacity: 1; }
 
 .staged-wrap { display: flex; align-items: center; gap: 8px; }
 
