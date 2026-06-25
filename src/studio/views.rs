@@ -946,10 +946,9 @@ pub fn workflows_tab(view: &WorkflowsView, flash: Option<&str>) -> Markup {
             }
             @if let Some(msg) = flash { p class="flash" { (icon("check")) (msg) } }
             p class="muted workflows-lead" {
-                "Loadout gives your agent one fixed set of commands — "
+                "One fixed set of commands — "
                 code { "/loadout:explore" } " · " code { "plan" } " · " code { "implement" } " · " code { "verify" }
-                " — the steps of a good process. A " strong { "workflow" } " decides how each step works: you can plan like "
-                "Boris or like Superpowers. Pick one below to make it active everywhere; the commands stay the same, what they do changes."
+                ". The " strong { "workflow" } " you pick decides what each one does."
             }
             // The gallery: tiny named cards across the top, always visible.
             div class="wf-gallery" {
@@ -1024,9 +1023,7 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
             div class="wf-detail-head" {
                 div class="wf-detail-titles" {
                     p class="wf-legend" {
-                        "Fixed steps. The marked text is what "
-                        span class="wf-legend-chip" { (icon(w.icon.as_deref().unwrap_or("git-branch"))) (w.title) }
-                        " does at each — greyed steps it skips."
+                        "Marked text is what this workflow does at each step; greyed steps it skips."
                     }
                     span class="wf-detail-meta muted" {
                         @if let Some(m) = &w.modeled_on { (m) }
