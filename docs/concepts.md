@@ -76,6 +76,64 @@ when 2+ match the chooser always offers the matching ones). A binding also
 fingerprints the loadout's `targets`, so if you later retarget that loadout the
 stale binding is dropped and selection re-runs.
 
+## Workflows **(implemented)**
+
+A **workflow** is loadout's house *process* — the named way you like to work
+(explore-plan-code-commit, spec-first, a long autonomous loop), carried across
+every agent the same way a loadout carries your context. Where a loadout answers
+*"what context applies here?"*, a workflow answers *"what's the process for doing
+the work?"*
+
+**One fixed command spine.** loadout always exposes the same five slash commands
+to your agent — `/loadout:explore`, `/loadout:brainstorm`, `/loadout:plan`,
+`/loadout:implement`, `/loadout:verify`. Picking a workflow does **not** add or
+rename commands; it changes what each step *means*. "Plan like Boris" and "plan
+spec-first" are the same `/loadout:plan` command carrying different instructions.
+
+- A workflow is an ordered list of **stages**, each a free-form `name` plus a
+  short `purpose`. Each stage maps onto one of the five canonical slots by its
+  name (`research`→explore, `specify`→brainstorm, `review`/`commit`→verify, …);
+  the **first** stage to claim a slot wins. A workflow may fill all five or skip
+  some.
+- A stage whose name matches no slot becomes an **extra** — rendered after the
+  five (e.g. compound engineering's "capture what you learned" step).
+
+**Handoff artifacts** are the load-bearing part. A stage can `write` a file (e.g.
+`plan.md`) and a later stage can `read` it; the file lives under
+`.loadout/workflow/artifacts/` and `load run` exposes its path as
+`LOADOUT_<NAME>_PATH`. That handoff — plan writes the plan, implement reads it —
+is what makes a workflow more than headings.
+
+**Selection** mirrors loadout selection but is simpler — there's one active
+workflow, resolved in this order:
+
+1. `--workflow <id>` on a single run (an override; a bad id applies nothing).
+2. A per-loadout binding — `workflow = "<id>"` on a `[[loadouts]]` block (advanced).
+3. The **global active workflow** — `[defaults].workflow` — the same house
+   process in every repo. This is the primary path; `load studio` sets it.
+
+**The catalog.** Six built-ins ship, each modeled on a real practice and stamped
+with provenance: `lean` (Anthropic's explore-plan-code-commit), `boris` (how
+Claude Code's creator works), `superpowers` (the obra/superpowers framework),
+`spec-driven` (Spec Kit / Kiro), `loop` (the Ralph single-prompt loop), and
+`compound` (Every's compounding loop). Bind one directly, or copy it into your
+own `[[workflows]]` and hand-edit — a user workflow of the same id shadows the
+built-in.
+
+**Global-only**, exactly like fragments and loadouts: a repo's `.loadout/` may
+*declare* `[[workflows]]` but the loader strips them (and `load doctor` flags
+it), so a cloned repo can never inject a workflow. loadout renders the spine and
+owns the artifact-path convention, but it never enforces a step, judges
+completion, or tracks a live "current stage" — this is guidance, not policy, with
+no runtime and no LLM.
+
+**Building your own.** The `load studio` **Workflows** tab is a gallery of the
+built-ins plus your own; you can build a workflow from scratch or customize a
+built-in (which duplicates it to a new id), editing each step as plain markdown.
+The [`loadout-import-workflow`](../skills/loadout-import-workflow/SKILL.md) skill
+imports another repo's command/skill suite into a workflow. Schema in
+[configuration](configuration.md#workflows-implemented).
+
 ## Providers (native environment discovery) **(implemented)**
 
 loadout owns environment discovery natively (the "agent-env idea", built in — not

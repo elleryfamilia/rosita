@@ -126,6 +126,26 @@ multiple loadouts match     →  ask once, then remember the choice for this pro
 
 ---
 
+## Workflows
+
+A loadout carries your *context*. A **workflow** carries your *process* — the way you like to work, across every agent. Loadout exposes one fixed set of five slash commands — `/loadout:explore`, `brainstorm`, `plan`, `implement`, `verify` — and the active workflow decides what each step *means*. "Plan like Boris" and "plan spec-first" are the same `/loadout:plan`, carrying different instructions.
+
+<p align="center">
+  <img src="docs/screenshots/workflows.png" alt="load studio — the Workflows tab: a gallery of built-in processes mapped onto the fixed explore/brainstorm/plan/implement/verify spine" width="900">
+</p>
+<p align="center"><sub><i><code>load studio</code> — pick a house process, or build your own; each fills the same five-command spine.</i></sub></p>
+
+Six ship — Anthropic's lean loop, how Boris works, Superpowers, spec-driven, the Ralph loop, and Every's compound engineering — or build your own in `load studio`. A stage can hand a file to the next step (plan writes `plan.md`, implement reads it), which is what makes a workflow more than headings. Set your house process in one line:
+
+```toml
+[defaults]
+workflow = "lean"
+```
+
+Workflows are global-only and never enforced — guidance rendered into each agent, not a runtime. Full detail in [docs/concepts.md](docs/concepts.md#workflows-implemented).
+
+---
+
 ## Supported agents
 
 Loadout produces one overlay and delivers it the way each agent expects.
@@ -151,7 +171,7 @@ It never edits committed shared files like `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
 load studio
 ```
 
-Use it to create and edit fragments, compose loadouts, assign them to targets, preview generated overlays, run dynamic fragment previews, and review diffs before applying. On first launch it detects your current context and can scaffold a starter kit from the detected target.
+Use it to create and edit fragments, compose loadouts, assign them to targets, browse and build [workflows](#workflows), preview generated overlays, run dynamic fragment previews, and review diffs before applying. On first launch it detects your current context and can scaffold a starter kit from the detected target.
 
 ---
 
@@ -179,7 +199,7 @@ load skill install
 
 Then, in an agent session, run `/loadout-migrate` or just ask *"Import my CLAUDE.md into Loadout."*
 
-A second skill, [`loadout-remember`](skills/loadout-remember/SKILL.md), saves a durable cross-project preference as a fragment when you mention one mid-session — instead of leaving it stranded in one agent's memory. The skills follow the cross-agent `SKILL.md` format, so the same install works in Claude Code, Codex, Gemini, and opencode.
+Two more ship: [`loadout-remember`](skills/loadout-remember/SKILL.md) saves a durable cross-project preference as a fragment when you mention one mid-session — instead of leaving it stranded in one agent's memory — and [`loadout-import-workflow`](skills/loadout-import-workflow/SKILL.md) turns another repo's command/skill suite into a loadout [workflow](#workflows). The skills follow the cross-agent `SKILL.md` format, so the same install works in Claude Code, Codex, Gemini, and opencode.
 
 ---
 

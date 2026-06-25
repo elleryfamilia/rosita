@@ -6,7 +6,7 @@ fragments into a single agent-neutral overlay, and deliver it to each agent —
 keeping it fresh and never leaking secrets.
 
 ## For consumers
-- [Concepts](concepts.md) — the mental model (context, fragments, loadouts, the binding, agents, freshness, public/private).
+- [Concepts](concepts.md) — the mental model (context, fragments, loadouts, the binding, workflows, agents, freshness, public/private).
 - [Configuration](configuration.md) — the layered config and full schema reference.
 - [Security](security.md) — secrets, redaction, the public/private split, and command execution (`allow_exec`).
 

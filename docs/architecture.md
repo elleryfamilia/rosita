@@ -27,7 +27,9 @@ cwd → repo_base → Config::load → detect_context → select (one loadout by
    each fragment's own `when` self-gate applied, `params` merged. No
    cross-loadout union.
 5. **Render** produces one agent-neutral overlay (header + a `###` section per
-   fragment), filtering fragments restricted to other agents.
+   fragment), filtering fragments restricted to other agents. If a workflow is
+   active (`resolve_active_workflow`), it also contributes a `## Workflow` section
+   and per-agent `/loadout:<slot>` slash-command files for the fixed spine.
 6. **Delivery** is per-agent, driven by an `AgentDescriptor`.
 7. **Audit** appends a JSONL event (skipped on `--dry-run`).
 
@@ -37,11 +39,12 @@ cwd → repo_base → Config::load → detect_context → select (one loadout by
 | --- | --- |
 | `cli` | clap definitions; agents selected by id string, validated at runtime. |
 | `commands/` | one file per subcommand (`detect`/`run`/`explain`/`refresh`/`clean`/`doctor`/`introspect` (`fragments`/`loadouts`/`agents`)) + shared `prepare()`/`resolve_agents()` and the render/sync plumbing in `apply`. (`studio` lives in `studio/`.) |
-| `config` | layered TOML model; per-layer `RawConfig` (all-optional) merged then finalized. Built-in **agents** are defaults (merged by id); **fragments and loadouts are global-only** and never injected from built-ins. `Config::from_layer_strs` assembles staged docs in-memory (origin-tagged) for studio. |
+| `config` | layered TOML model; per-layer `RawConfig` (all-optional) merged then finalized. Built-in **agents** are defaults (merged by id); **fragments, loadouts, and workflows are global-only** and never injected from built-ins. `Config::from_layer_strs` assembles staged docs in-memory (origin-tagged) for studio. |
 | `context/` | `Context` (+ `Scope` repo/machine, `selection_targets()`) + the `ContextDetector` trait and detectors: `git`, `languages`, `commands`, `system`, `env`. |
 | `fragment` | `Fragment` (reusable guidance atom) + `Risk` + the read-only shipped `palette()` (starters to duplicate from, never auto-composed). |
 | `loadout` | `LoadoutConfig` (with `targets`), `Rule`/`Field`/`Op` (fragment `when`), `FragmentRef`, pick-one `select()`, and `compose_loadout()` → `Composition` of `ResolvedFragment`s. |
 | `binding` | the per-project remembered loadout choice: repo `local.toml` `[binding]` (via `toml_edit`) + a global path-keyed store; records only *which* loadout (no opt-out — a legacy `none = true` is parsed but ignored). |
+| `workflow` | the house-process model: `Workflow`/`WorkflowStage`, the fixed five-slot `canonical_layout()` (the single source of truth shared by the command channel, the context section, and studio), handoff-artifact paths, the built-in catalog, and `resolve_workflow`/`resolve_active_workflow`. Global-only like fragments/loadouts. |
 | `providers/` | `EnvProvider` trait + built-ins (`host`/`toolchain`/`ai-tools`/`tailnet`/`docker`), `gather()`/`probe_one()`/`run_command()`, TTL cache; output redacted and excluded from the context hash. |
 | `dynamic` | resolves a dynamic fragment's `provider`/`command` output at render time (`DynamicMode` Live/ReadOnly); a `command` runs unless `allow_exec = false`. |
 | `render/` | `TemplateRenderer` trait (minijinja impl) + `header` (the self-healing banner) + the high-level `render()`. |

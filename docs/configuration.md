@@ -38,7 +38,8 @@ gitignored), `logs/events.jsonl` (audit, gitignored), `templates/` (overrides),
 
 ```toml
 [defaults]
-agent = "claude"   # agent used when --agent is omitted
+agent = "claude"     # agent used when --agent is omitted
+workflow = "lean"    # the global active workflow (see [[workflows]] below); omit for none
 ```
 
 ## `[env]` (implemented)
@@ -92,6 +93,64 @@ fragments = [
 
 Loadouts select on `targets`, not rules — a *fragment* may still self-gate with
 `when` rules (see [`[[fragments]]`](#fragments-implemented)).
+
+A loadout may also pin a workflow for the contexts it covers:
+
+```toml
+[[loadouts]]
+name = "rust"
+targets = ["rust"]
+fragments = ["rust-conventions"]
+workflow = "boris"     # advanced: overrides [defaults].workflow where this loadout binds
+```
+
+## `[[workflows]]` (implemented)
+
+A workflow is your house *process*, mapped onto loadout's fixed five-command
+spine (`explore`, `brainstorm`, `plan`, `implement`, `verify`). **Global-only**
+like fragments and loadouts — a repo declaring `[[workflows]]` is stripped at
+load (`load doctor` flags it). Six built-ins ship; your own of the same `id`
+shadows a built-in. See [concepts](concepts.md#workflows-implemented).
+
+```toml
+[[workflows]]
+id = "lean"                    # kebab-case, unique; how [defaults]/[[loadouts]] bind it
+name = "Lean"                  # gallery title + rendered heading (optional)
+description = "Read first, plan on paper, then build."   # one-line blurb (optional)
+icon = "git-branch"            # studio card glyph (optional)
+# modeled_on / researched / source — display-only provenance (optional)
+# disabled = true              # keep the definition but never select it
+
+[[workflows.stages]]
+name = "explore"               # maps onto a canonical slot by name; unmatched ⇒ an "extra"
+purpose = "Read the code paths and tests before changing anything."
+
+[[workflows.stages]]
+name = "plan"
+purpose = "Write a short plan: objective, approach, risks, validation."
+writes = "plan.md"             # handoff artifact this stage produces
+
+[[workflows.stages]]
+name = "implement"
+purpose = "Build the change following the plan."
+reads = "plan.md"              # …consumed by a later stage
+
+[[workflows.stages]]
+name = "commit"                # `commit` maps onto the `verify` slot
+purpose = "Run build, tests, and linter, then commit at a logical checkpoint."
+gate = true                    # a checkpoint to review before moving on (guidance only)
+exit = ["build, tests, and linter pass", "commit follows Conventional Commits"]
+```
+
+- **`name` → slot:** matched case-insensitively against synonyms —
+  `research`/`investigate`→explore, `specify`/`spec`/`design`→brainstorm,
+  `iterate`/`code`/`build`→implement, `review`/`commit`/`ship`/`test`→verify. The
+  first stage to claim a slot wins; the rest of that slot's claimants are skipped.
+- **`reads`/`writes`:** a bare filename (no path separators) under
+  `.loadout/workflow/artifacts/`; pair a producer's `writes` with a consumer's
+  `reads` to form a handoff.
+- **`gate` / `exit`:** rendered as a review checkpoint and a "done when" checklist
+  — guidance only; loadout never blocks.
 
 ## `[binding]` (implemented)
 
