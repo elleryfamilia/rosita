@@ -128,17 +128,18 @@ multiple loadouts match     →  ask once, then remember the choice for this pro
 
 ## Workflows
 
-A loadout carries your *context*. A **workflow** carries your *process* — the way you like to work, across every agent. Loadout exposes one fixed set of five slash commands — `/loadout:explore`, `brainstorm`, `plan`, `implement`, `verify` — and the active workflow decides what each step *means*. "Plan like Boris" and "plan spec-first" are the same `/loadout:plan`, carrying different instructions.
+A loadout carries your *context*. A **workflow** carries your *process* — the way you like to work, across every agent. Loadout exposes one fixed set of five slash commands — `/loadout:explore`, `brainstorm`, `plan`, `implement`, `verify` — and the workflow your loadout equips decides what each step *means*. "Plan like Boris" and "plan spec-first" are the same `/loadout:plan`, carrying different instructions.
 
 <p align="center">
   <img src="docs/screenshots/workflows.png" alt="load studio — the Workflows tab: a gallery of built-in processes mapped onto the fixed explore/brainstorm/plan/implement/verify spine" width="900">
 </p>
 <p align="center"><sub><i><code>load studio</code> — pick a house process, or build your own; each fills the same five-command spine.</i></sub></p>
 
-Six ship — Anthropic's lean loop, how Boris works, Superpowers, spec-driven, the Ralph loop, and Every's compound engineering — or build your own in `load studio`. A stage can hand a file to the next step (plan writes `plan.md`, implement reads it), which is what makes a workflow more than headings. Set your house process in one line:
+Six ship — Anthropic's lean loop, how Boris works, Superpowers, spec-driven, the Ralph loop, and Every's compound engineering — or build your own in `load studio`. A stage can hand a file to the next step (plan writes `plan.md`, implement reads it), which is what makes a workflow more than headings. Equip one on a loadout — in studio's **Workflow slot**, or by hand:
 
 ```toml
-[defaults]
+[[loadouts]]
+name = "machine"      # the default (no-targets) loadout → applies everywhere
 workflow = "lean"
 ```
 

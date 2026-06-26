@@ -464,20 +464,8 @@ fn check_dangling_fragment_refs(c: &mut Checks, cfg: &config::Config) {
 /// binding degrades silently at render time, so surface it here. Resolves
 /// against the same built-in + user catalog the renderer uses.
 fn check_workflows(c: &mut Checks, cfg: &config::Config) {
-    // The global active workflow ([defaults].workflow) — the one that applies in
-    // every repo. The primary way a workflow is selected.
-    if let Some(id) = &cfg.default_workflow {
-        if cfg.resolve_workflow(id).is_some() {
-            c.line(Status::Ok, format!("active workflow: '{id}'"));
-        } else {
-            c.line(
-                Status::Warn,
-                format!(
-                    "active workflow '{id}' is unknown (set [defaults].workflow to a built-in or your own, or pick one in `load studio`)"
-                ),
-            );
-        }
-    }
+    // A workflow is bound per-loadout (the Workflow slot) — there's no global
+    // default workflow anymore. Flag any loadout whose binding doesn't resolve.
     for p in &cfg.profiles {
         let Some(id) = &p.workflow else { continue };
         if cfg.resolve_workflow(id).is_some() {

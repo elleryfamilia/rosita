@@ -39,8 +39,10 @@ gitignored), `logs/events.jsonl` (audit, gitignored), `templates/` (overrides),
 ```toml
 [defaults]
 agent = "claude"     # agent used when --agent is omitted
-workflow = "lean"    # the global active workflow (see [[workflows]] below); omit for none
 ```
+
+(There is no global workflow setting — a workflow is bound per-loadout in its
+Workflow slot; see `[[loadouts]]` and `[[workflows]]` below.)
 
 ## `[env]` (implemented)
 
@@ -101,7 +103,7 @@ A loadout may also pin a workflow for the contexts it covers:
 name = "rust"
 targets = ["rust"]
 fragments = ["rust-conventions"]
-workflow = "boris"     # advanced: overrides [defaults].workflow where this loadout binds
+workflow = "boris"     # the workflow this loadout equips (its Workflow slot); omit for none
 ```
 
 ## `[[workflows]]` (implemented)
@@ -114,7 +116,7 @@ shadows a built-in. See [concepts](concepts.md#workflows-implemented).
 
 ```toml
 [[workflows]]
-id = "lean"                    # kebab-case, unique; how [defaults]/[[loadouts]] bind it
+id = "lean"                    # kebab-case, unique; how a [[loadouts]] block binds it
 name = "Lean"                  # gallery title + rendered heading (optional)
 description = "Read first, plan on paper, then build."   # one-line blurb (optional)
 icon = "git-branch"            # studio card glyph (optional)

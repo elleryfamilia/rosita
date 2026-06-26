@@ -235,16 +235,15 @@ fn run_workflow_override_sets_handoff_env_in_dry_run() {
 }
 
 #[test]
-fn global_active_workflow_renders_without_any_binding() {
+fn bound_workflow_renders_for_its_loadout() {
     let fx = Fixture::new();
     fx.rust_project();
     fx.git_init();
-    // A rust loadout with NO workflow binding, plus a global active workflow.
-    // The single house workflow should still render for this repo.
+    // The rust loadout binds the compound workflow in its Workflow slot — the
+    // only way a workflow renders now (no global default workflow).
     fx.author(
-        "[defaults]\nworkflow = \"compound\"\n\n\
-         [[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
-         [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\n",
+        "[[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
+         [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\nworkflow = \"compound\"\n",
     );
     fx.cmd()
         .args(["refresh", "--agent", "claude"])

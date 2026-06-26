@@ -256,8 +256,6 @@ pub struct WorkflowView {
     pub artifacts: Vec<String>,
     /// Names of the loadouts that bind this workflow (empty = bound by none).
     pub bound_by: Vec<String>,
-    /// Whether this is the global **active** workflow (`[defaults].workflow`).
-    pub active: bool,
     /// Validation problems (malformed workflow); empty when well-formed.
     pub problems: Vec<String>,
 }
@@ -983,7 +981,6 @@ fn stage_content_differs(
 /// to the active workflow, then the first card.
 pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
     let cfg = staged_config(snap).ok();
-    let active_id = cfg.as_ref().and_then(|c| c.default_workflow.clone());
     let effective = cfg
         .as_ref()
         .map(|c| c.effective_workflows())
@@ -1025,7 +1022,6 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
                 icon: w.icon.clone(),
                 builtin: w.origin == Layer::BuiltIn,
                 private: matches!(w.origin, Layer::GlobalLocal),
-                active: active_id.as_deref() == Some(w.id.as_str()),
                 modeled_on: w.modeled_on.clone(),
                 source: w.source.clone(),
                 id: w.id,
@@ -1037,12 +1033,11 @@ pub fn workflows_view(snap: &Snapshot, focus: Option<&str>) -> WorkflowsView {
         })
         .collect();
 
-    // Focus the requested card if it exists, else the active one, else the first.
+    // Focus the requested card if it exists, else the first.
     let exists = |id: &str| workflows.iter().any(|w| w.id == id);
     let focused_id = focus
         .filter(|id| exists(id))
         .map(str::to_string)
-        .or_else(|| active_id.filter(|id| exists(id)))
         .or_else(|| workflows.first().map(|w| w.id.clone()));
 
     WorkflowsView {
