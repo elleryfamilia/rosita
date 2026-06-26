@@ -406,10 +406,6 @@ fn check_public_leaks(c: &mut Checks, prep: &super::Prepared) {
     }
 }
 
-/// A profile that references a fragment id not in the library renders nothing
-/// for that entry (compose silently skips it). Surface the dangling reference —
-/// it usually means a fragment was hand-deleted without cleaning up the
-/// profile (studio's delete does this cleanup automatically).
 /// The single-default invariant: exactly one enabled loadout with no targets is
 /// the catch-all that applies when nothing else matches (in any project or none).
 /// Zero ⇒ unmatched contexts get no loadout; more than one ⇒ ambiguous.
@@ -440,6 +436,10 @@ fn check_default_loadout(c: &mut Checks, cfg: &config::Config) {
     }
 }
 
+/// A profile that references a fragment id not in the library renders nothing
+/// for that entry (compose silently skips it). Surface the dangling reference —
+/// it usually means a fragment was hand-deleted without cleaning up the
+/// profile (studio's delete does this cleanup automatically).
 fn check_dangling_fragment_refs(c: &mut Checks, cfg: &config::Config) {
     let known: std::collections::HashSet<&str> =
         cfg.fragments.iter().map(|x| x.id.as_str()).collect();
