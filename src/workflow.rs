@@ -427,12 +427,19 @@ pub fn resolve_workflow<'a>(
 /// rendered command, so it's dropped when the body becomes a step's
 /// `instructions`. No frontmatter → the input, trimmed.
 fn strip_frontmatter(s: &str) -> &str {
-    match s
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---"))
-    {
-        Some((_frontmatter, body)) => body.trim_start(),
-        None => s.trim_start(),
+    let Some(rest) = s.strip_prefix("---\n") else {
+        return s.trim_start();
+    };
+    // The closing fence is a line that is exactly `---`: match the full delimiter
+    // line (`\n---\n`, or `\n---` at end of input), NOT a bare `\n---`, so a
+    // markdown horizontal rule or a `\n----` in the body can't be mistaken for the
+    // terminator and over-strip real content.
+    if let Some((_frontmatter, body)) = rest.split_once("\n---\n") {
+        body.trim_start()
+    } else if rest.strip_suffix("\n---").is_some() {
+        "" // a frontmatter-only file (closes with `\n---` at EOF, no body)
+    } else {
+        s.trim_start() // no proper closing fence → not frontmatter we recognize
     }
 }
 
@@ -771,6 +778,39 @@ mod tests {
         for gone in ["boris", "lean", "loop"] {
             assert!(!ids.contains(gone), "dropped built-in {gone} still present");
         }
+    }
+
+    #[test]
+    fn strip_frontmatter_drops_only_the_leading_yaml_block() {
+        // Frontmatter is removed; the body — including a markdown horizontal rule
+        // (`---`) — is preserved (it must not be read as the frontmatter close).
+        let doc = "---\nname: x\ndescription: y\n---\n\n# Title\n\nbefore\n\n---\n\nafter\n";
+        let body = strip_frontmatter(doc);
+        assert!(
+            body.starts_with("# Title"),
+            "frontmatter stripped: {body:?}"
+        );
+        assert!(!body.contains("name: x"), "no frontmatter leaks");
+        assert!(
+            body.contains("before"),
+            "content above a body `---` is kept"
+        );
+        assert!(
+            body.contains("\n---\n"),
+            "the body horizontal rule survives"
+        );
+        assert!(body.contains("after"));
+        // No frontmatter → returned as-is (trimmed).
+        assert_eq!(
+            strip_frontmatter("# Just a doc\nbody"),
+            "# Just a doc\nbody"
+        );
+        // A file whose first line only looks like a fence but never closes is
+        // left intact rather than half-eaten.
+        assert_eq!(
+            strip_frontmatter("---\nnot really\nclosing"),
+            "---\nnot really\nclosing"
+        );
     }
 
     #[test]
