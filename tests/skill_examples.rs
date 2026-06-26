@@ -94,12 +94,16 @@ fn import_workflow_skill_reference_toml_examples_are_valid_config() {
         .expect("the plan stage demonstrates an instructions body");
     assert!(instr.contains("Planning is where most of the work happens"));
 
-    // An activation snippet must set the global active workflow.
+    // An equipping snippet must bind the workflow on a loadout (the only way to
+    // use a workflow now that the global default is gone).
     assert!(
         blocks.iter().any(|b| parse_global(b)
-            .map(|c| c.default_workflow.as_deref() == Some("compound"))
+            .map(|c| c
+                .profiles
+                .iter()
+                .any(|p| p.workflow.as_deref() == Some("compound")))
             .unwrap_or(false)),
-        "an activation example should set [defaults].workflow"
+        "an example should equip the workflow on a loadout"
     );
 }
 

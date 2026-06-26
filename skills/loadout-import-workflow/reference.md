@@ -141,18 +141,14 @@ after the six. This workflow already ships as the built-in `compound` — so it
 doubles as an answer key. When you import a framework that *isn't* shipped, give
 it a fresh `id` and the same treatment.
 
-## Activating the imported workflow
+## Equipping the imported workflow
 
-A `[[workflows]]` block does nothing until it's selected. Add one of:
-
-```toml
-# Global active — applies in every repo (the common choice):
-[defaults]
-workflow = "compound"
-```
+A `[[workflows]]` block does nothing until a loadout equips it in its Workflow
+slot (`workflow = "<id>"`). There is no global active workflow — bind it on the
+loadout(s) where it should apply.
 
 ```toml
-# Per-profile — applies only where this profile binds (advanced):
+# On a stack loadout — applies in matching repos:
 [[loadouts]]
 name = "rust"
 targets = ["rust"]
@@ -160,6 +156,16 @@ fragments = ["..."]
 workflow = "compound"
 ```
 
-Then `load doctor` should report `active workflow: 'compound'` and
+```toml
+# On the default loadout (no targets) — the baseline that applies everywhere
+# nothing else matches, in any project or none. The way to get a workflow
+# "everywhere", like the old global default did:
+[[loadouts]]
+name = "machine"
+fragments = ["..."]
+workflow = "compound"
+```
+
+Then `load doctor` should report `loadout '<name>' → workflow 'compound'` and
 `load refresh` regenerates the six `/loadout:*` commands with the imported
 steps.

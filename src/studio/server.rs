@@ -844,8 +844,6 @@ fn handle_workflow_param(state: &Arc<Mutex<StudioState>>, req: &Req) -> Resp {
                 Some(&id),
             )))
         }
-        // Make it the global active workflow (staged like any other edit).
-        ("POST", "activate") => handle_workflow_activate(state, &id),
         // Edit an owned workflow in place.
         ("GET", "edit") => handle_workflow_open(state, &id, false),
         // Duplicate a workflow into a new, editable copy (original untouched).
@@ -954,28 +952,6 @@ fn handle_workflow_delete(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
         &state::workflows_view(&snap, None),
         &format!("staged removal of workflow “{id}”"),
     ))
-}
-
-/// Stage setting `[defaults].workflow` to `id`, then re-render the tab focused on
-/// it with a flash + a staged-changes refresh.
-fn handle_workflow_activate(state: &Arc<Mutex<StudioState>>, id: &str) -> Resp {
-    let res = state
-        .lock()
-        .unwrap()
-        .session
-        .stage(StagedOp::SetActiveWorkflow {
-            id: Some(id.to_string()),
-        });
-    match res {
-        Ok(()) => {
-            let snap = state.lock().unwrap().snapshot();
-            Resp::html(views::workflows_result(
-                &state::workflows_view(&snap, Some(id)),
-                &format!("“{id}” is now your active workflow — Apply to save"),
-            ))
-        }
-        Err(e) => Resp::html(views::error_fragment(&e.to_string())),
-    }
 }
 
 /// Re-render the Targets tab (with a flash) after a staged change.
@@ -2341,43 +2317,40 @@ mod tests {
     }
 
     #[test]
-    fn workflows_tab_gallery_focus_and_activate() {
+    fn workflows_gallery_focus_and_binding() {
         let d = rust_repo();
-        // `lean` is the global active workflow; a loadout also pins spec-driven.
+        // A loadout pins spec-driven — the per-loadout Workflow slot is the only
+        // way to "use" a workflow now (no global active workflow).
         let st = state_for(
             d.path(),
             Some(
-                "[defaults]\nworkflow = \"compound\"\n\n\
-                 [[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
+                "[[fragments]]\nid = \"rc\"\nguidance = \"Rust.\"\n\n\
                  [[loadouts]]\nname = \"rust\"\ntargets = [\"rust\"]\nfragments = [\"rc\"]\nworkflow = \"spec-driven\"\n",
             ),
         );
 
-        // The tab: a gallery of named cards; the active one (compound) is focused.
+        // The Library's Workflows category: a gallery of named cards.
         let r = route(&st, &req("GET", "/tab/workflows", "", &[HOST, COOKIE], ""));
         assert_eq!(r.status, 200);
         let body = String::from_utf8(r.body).unwrap();
         assert!(body.contains("Workflows"), "tab heading");
-        // The gallery cards show the display names (only frameworks with a real
-        // vendorable repo ship).
         for name in ["Superpowers", "Spec-driven", "Compound engineering"] {
             assert!(body.contains(name), "gallery lists '{name}'");
         }
-        // …with a marketing blurb on each.
         assert!(
             body.contains("Every's loop where each cycle makes the next one easier."),
             "card blurb shown"
         );
-        assert!(body.contains("active workflow"), "active marker");
-        // The command name is the key item: a light `/loadout:` prefix + the
-        // bold step name (so the literal isn't contiguous in the markup).
+        // The bound workflow shows an "equipped on a loadout" marker — there's no
+        // global "active workflow" concept anymore.
+        assert!(body.contains("equipped on"), "binding marker for spec-driven");
         assert!(
             body.contains(r#"<span class="cmd-name">explore</span>"#),
             "the canonical `explore` slot command is shown"
         );
 
-        // Focusing another card shows the SAME fixed spine filled by ITS stages,
-        // plus a 'Use this workflow' action.
+        // Focusing a card shows the SAME fixed spine filled by ITS stages, with no
+        // "Use this workflow" action (the Library is browse/edit only).
         let sp = String::from_utf8(
             route(
                 &st,
@@ -2386,9 +2359,7 @@ mod tests {
             .body,
         )
         .unwrap();
-        assert!(sp.contains("Use this workflow"));
-        // The fixed canonical commands + named slots are present regardless of
-        // workflow; each slot carries its own step name.
+        assert!(!sp.contains("Use this workflow"), "no global activate action");
         for (cmd, name) in [
             ("explore", "Explore"),
             ("brainstorm", "Brainstorm"),
@@ -2406,56 +2377,36 @@ mod tests {
                 "slot shows its step name `{name}`"
             );
         }
-        // Superpowers has no explore stage → that slot renders skipped.
-        assert!(
-            sp.contains("skipped"),
-            "an unfilled canonical slot is skipped"
-        );
-        // The active workflow's icon marks each filled value as its contribution.
-        assert!(
-            sp.contains("wf-value-mark"),
-            "workflow icon marks the value"
-        );
+        assert!(sp.contains("skipped"), "an unfilled canonical slot is skipped");
+        assert!(sp.contains("wf-value-mark"), "workflow icon marks the value");
         assert!(
             sp.contains("Refine the rough idea"),
             "superpowers' take on the brainstorm slot is shown when focused"
         );
-        // Handoff artifacts show as plain chips on the slot (no connector lines).
         assert!(sp.contains("design.md"), "design.md handoff chip shown");
         assert!(sp.contains("plan.md"), "plan.md handoff chip shown");
 
-        // Activating it stages the change (re-render confirms it's now active).
-        let act = String::from_utf8(
+        // Focusing the bound workflow shows which loadout pins it.
+        let spec = String::from_utf8(
             route(
                 &st,
-                &req(
-                    "POST",
-                    "/workflows/superpowers/activate",
-                    "",
-                    &[HOST, COOKIE, ORIGIN],
-                    "",
-                ),
+                &req("GET", "/workflows/spec-driven", "", &[HOST, COOKIE], ""),
             )
             .body,
         )
         .unwrap();
-        assert!(act.contains("now your active workflow"));
-
-        // Applying stays on the Workflows tab (doesn't bounce to Profiles) and
-        // persists `[defaults].workflow = "superpowers"`.
-        let applied = String::from_utf8(
-            route(&st, &req("POST", "/apply", "", &[HOST, COOKIE, ORIGIN], "")).body,
-        )
-        .unwrap();
         assert!(
-            applied.contains("tab-workflows"),
-            "stays on the Workflows tab"
+            spec.contains("Pinned on loadout") && spec.contains("rust"),
+            "the bound workflow names its loadout"
         );
-        assert!(applied.contains("applied"), "shows the applied flash");
-        let saved = std::fs::read_to_string(global_config_path(d.path())).unwrap();
-        assert!(
-            saved.contains("workflow = \"superpowers\""),
-            "persisted to config"
+        // The deprecated global activate route is gone.
+        assert_eq!(
+            route(
+                &st,
+                &req("POST", "/workflows/superpowers/activate", "", &[HOST, COOKIE, ORIGIN], "")
+            )
+            .status,
+            404
         );
     }
 

@@ -1305,13 +1305,15 @@ pub fn workflows_result(view: &WorkflowsView, flash: &str) -> String {
     .into_string()
 }
 
-/// One tiny gallery card: the workflow name + an active marker; click to focus.
+/// One tiny gallery card: the workflow name + an "in use" marker (equipped on at
+/// least one loadout); click to focus.
 fn workflow_gallery_card(w: &WorkflowView, focused: bool) -> Markup {
+    let in_use = !w.bound_by.is_empty();
     let mut cls = String::from("wf-card");
     if focused {
         cls.push_str(" focused");
     }
-    if w.active {
+    if in_use {
         cls.push_str(" active");
     }
     let glyph = w.icon.as_deref().unwrap_or("git-branch");
@@ -1320,7 +1322,7 @@ fn workflow_gallery_card(w: &WorkflowView, focused: bool) -> Markup {
             span class="wf-card-top" {
                 span class="wf-card-glyph" { (icon(glyph)) }
                 span class="wf-card-name" { (w.title) }
-                @if w.active { span class="wf-card-dot" title="active workflow" { (icon("check")) } }
+                @if in_use { span class="wf-card-dot" title=(format!("equipped on {} loadout(s)", w.bound_by.len())) { (icon("check")) } }
                 @else if !w.builtin { span class="wf-card-tag" { "yours" } }
             }
             @if let Some(b) = &w.blurb { span class="wf-card-blurb" { (b) } }
@@ -1350,21 +1352,16 @@ fn workflow_detail(w: &WorkflowView) -> Markup {
                     }
                 }
                 div class="wf-detail-actions" {
-                    // Built-in → "Customize" (opens the editor prefilled; saving
-                    // makes an owned copy). Owned → "Edit" + "Delete". Built-ins
-                    // are never removable. Secondary styling, so the primary
-                    // action stays "Use this workflow".
+                    // The Library is browse/edit only — a workflow is *used* by
+                    // equipping it in a loadout's Workflow slot, not activated
+                    // globally. Built-in → "Customize" (opens the editor prefilled;
+                    // saving makes an owned copy). Owned → "Edit" + "Delete".
                     @if w.builtin {
                         button class="btn btn-ghost" hx-get=(format!("/workflows/{}/customize", enc(&w.id))) hx-target="#modal" title="Duplicate into a workflow you can edit" { (icon("copy")) "Customize" }
                     } @else {
                         button class="btn btn-ghost" hx-get=(format!("/workflows/{}/edit", enc(&w.id))) hx-target="#modal" { (icon("pencil")) "Edit" }
                         button class="btn btn-danger-ghost" hx-delete=(format!("/workflows/{}", enc(&w.id))) hx-target="#main"
                             hx-confirm=(format!("Delete your workflow “{}”? This stages its removal.", w.title)) title="Remove this custom workflow" { (icon("trash")) "Delete" }
-                    }
-                    @if w.active {
-                        span class="tag rec-tag wf-active-pill" { (icon("check")) "active workflow" }
-                    } @else {
-                        button class="btn btn-primary" hx-post=(format!("/workflows/{}/activate", enc(&w.id))) hx-target="#main" { (icon("check")) "Use this workflow" }
                     }
                 }
             }

@@ -68,9 +68,6 @@ pub enum StagedOp {
     },
     /// Remove the target with this id from a layer.
     DeleteTarget { layer: Layer, id: String },
-    /// Set (or clear, with `None`) the global active workflow
-    /// (`[defaults].workflow`). Always the public global layer.
-    SetActiveWorkflow { id: Option<String> },
     /// Add a new workflow to a layer (workflows are global-only, so studio
     /// always targets the public global layer).
     CreateWorkflow {
@@ -105,8 +102,6 @@ impl StagedOp {
             | StagedOp::EditWorkflow { layer, .. }
             | StagedOp::DeleteWorkflow { layer, .. } => *layer,
             StagedOp::DuplicatePaletteItem { to_layer, .. } => *to_layer,
-            // The active workflow lives in the public global `[defaults]`.
-            StagedOp::SetActiveWorkflow { .. } => Layer::Global,
         }
     }
 }
@@ -456,19 +451,6 @@ fn apply_op(doc: &mut DocumentMut, op: &StagedOp) -> Result<()> {
         StagedOp::DeleteTarget { id, .. } => {
             remove(aot_mut(doc, "targets"), "id", id);
         }
-        StagedOp::SetActiveWorkflow { id } => {
-            let defaults = table_mut(doc, "defaults");
-            match id {
-                Some(id) => defaults["workflow"] = value(id.as_str()),
-                None => {
-                    defaults.remove("workflow");
-                }
-            }
-            // Don't leave a now-empty `[defaults]` table behind.
-            if defaults.is_empty() {
-                doc.as_table_mut().remove("defaults");
-            }
-        }
         StagedOp::CreateWorkflow { workflow, .. } => {
             aot_mut(doc, "workflows").push(workflow_table(workflow)?);
         }
@@ -488,13 +470,6 @@ fn apply_op(doc: &mut DocumentMut, op: &StagedOp) -> Result<()> {
 }
 
 /// Get (or create) a plain table at `key`.
-fn table_mut<'a>(doc: &'a mut DocumentMut, key: &str) -> &'a mut Table {
-    if doc.get(key).and_then(Item::as_table).is_none() {
-        doc.insert(key, Item::Table(Table::new()));
-    }
-    doc[key].as_table_mut().expect("just inserted a table")
-}
-
 /// Get (or create) an array-of-tables at `key`.
 fn aot_mut<'a>(doc: &'a mut DocumentMut, key: &str) -> &'a mut ArrayOfTables {
     if doc.get(key).and_then(Item::as_array_of_tables).is_none() {
@@ -780,36 +755,6 @@ mod tests {
 
     fn session_global(repo: &Path, gdir: &Path) -> Session {
         Session::open(repo, Some(gdir)).unwrap()
-    }
-
-    #[test]
-    fn set_active_workflow_writes_then_clears_defaults() {
-        let (d, gdir) = repo_with_global("");
-        let mut s = session_global(d.path(), &gdir);
-        // Selecting a workflow writes `[defaults].workflow` into the global layer.
-        s.stage(StagedOp::SetActiveWorkflow {
-            id: Some("superpowers".into()),
-        })
-        .unwrap();
-        let after = s
-            .diff()
-            .into_iter()
-            .find_map(|f| {
-                f.staged_after
-                    .contains("[defaults]")
-                    .then_some(f.staged_after)
-            })
-            .expect("global layer should have changed");
-        assert!(after.contains("workflow = \"superpowers\""));
-        s.validate().unwrap();
-        // Clearing removes the key and the now-empty table (back to no change).
-        s.stage(StagedOp::SetActiveWorkflow { id: None }).unwrap();
-        assert!(
-            s.diff()
-                .iter()
-                .all(|f| !f.staged_after.contains("workflow =")),
-            "clearing removes the active-workflow key"
-        );
     }
 
     #[test]

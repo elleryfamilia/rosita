@@ -32,12 +32,6 @@ use crate::workflow::Workflow;
 pub struct Config {
     /// Agent rendered when `--agent` is omitted.
     pub default_agent: String,
-    /// The **global active workflow** id (`[defaults].workflow`), or `None`. This
-    /// is the single house workflow that applies in *every* repo — the primary
-    /// way a workflow is selected (the studio sets it). Resolved against the
-    /// curated built-ins + your own; a per-loadout `workflow` binding, if set,
-    /// still wins over it. Global-only: a repo layer can't set it.
-    pub default_workflow: Option<String>,
     /// Environment-variable exposure policy.
     pub env: EnvConfig,
     /// Codex-adapter knobs.
@@ -272,29 +266,24 @@ impl Config {
 
     /// The workflow active for a run: an explicit `--workflow <id>` override wins
     /// outright (and resolves to `None` if it dangles — a bad override is not
-    /// silently swapped for the profile's binding); otherwise the profile named
-    /// by `profile` decides. The single resolver shared by the render engine and
-    /// `load run`'s launch-env wiring, so the overlay, the generated commands,
-    /// and the `LOADOUT_*_PATH` env vars all describe the same workflow.
+    /// silently swapped for the profile's binding); otherwise the workflow bound
+    /// by the selected loadout (`profile`) decides, or `None` if it binds none.
+    /// There is no global default workflow — the baseline lives on the default
+    /// loadout's Workflow slot like any other binding. The single resolver shared
+    /// by the render engine and `load run`'s launch-env wiring, so the overlay,
+    /// the generated commands, and the `LOADOUT_*_PATH` env vars all agree.
     pub fn resolve_active_workflow(
         &self,
         override_id: Option<&str>,
         profile: Option<&str>,
     ) -> Option<Workflow> {
         // A `--workflow` override wins outright (and resolves to None if it
-        // dangles — never silently swapped for a default).
+        // dangles — never silently swapped for the binding).
         if let Some(id) = override_id {
             return self.resolve_workflow(id);
         }
-        // Then a per-loadout binding, if one is set (the advanced, opt-in layer).
-        if let Some(w) = self.workflow_for_profile(profile) {
-            return Some(w);
-        }
-        // Otherwise the single global active workflow — the same one in every
-        // repo. This is the primary path; the studio sets `[defaults].workflow`.
-        self.default_workflow
-            .as_deref()
-            .and_then(|id| self.resolve_workflow(id))
+        // Otherwise the selected loadout's own workflow binding (or none).
+        self.workflow_for_profile(profile)
     }
 }
 
@@ -385,7 +374,10 @@ struct RawConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RawDefaults {
     agent: Option<String>,
-    workflow: Option<String>,
+    // `workflow` is deprecated: the global active workflow was removed in favor of
+    // the per-loadout Workflow slot (and the default loadout for the baseline). A
+    // leftover `[defaults].workflow` is tolerated and ignored (it stays in the
+    // known-keys list so it doesn't trip the unknown-key warning).
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -489,9 +481,6 @@ impl RawConfig {
             let slot = self.defaults.get_or_insert_with(Default::default);
             if d.agent.is_some() {
                 slot.agent = d.agent;
-            }
-            if d.workflow.is_some() {
-                slot.workflow = d.workflow;
             }
         }
         if let Some(e) = other.env {
@@ -606,7 +595,6 @@ impl RawConfig {
 
         Config {
             default_agent: defaults.agent.unwrap_or_else(|| "claude".to_string()),
-            default_workflow: defaults.workflow,
             env: EnvConfig {
                 allowlist: dedup(env.allowlist.unwrap_or_else(default_env_allowlist)),
                 deny_name_patterns: dedup(
@@ -1132,8 +1120,8 @@ mod tests {
     fn unknown_settings_keys_are_tolerated_for_forward_compat() {
         // A config written by a newer loadout — an unknown `[defaults]` key plus
         // a whole unknown top-level table — must LOAD, not brick, on this binary,
-        // and the known fields still take effect. This is the regression guard
-        // for the `[defaults].workflow`-on-an-older-binary incident.
+        // and the known fields still take effect. (`workflow` is now a deprecated,
+        // ignored `[defaults]` key; it must not brick the load either.)
         use crate::fragment::Layer;
         let c = Config::from_layer_strs(vec![(
             Layer::Global,
@@ -1144,7 +1132,6 @@ mod tests {
         )])
         .expect("unknown tool-managed keys must not fail the load");
         assert_eq!(c.default_agent, "codex");
-        assert_eq!(c.default_workflow.as_deref(), Some("loop"));
     }
 
     #[test]
@@ -1423,9 +1410,10 @@ mod tests {
     }
 
     #[test]
-    fn global_default_workflow_applies_everywhere_with_precedence() {
-        // `[defaults].workflow` is the single house workflow — it applies with no
-        // per-loadout binding at all. An override and a binding still win over it.
+    fn workflow_resolves_from_the_loadout_binding_then_override() {
+        // No global default workflow exists: a loadout with no binding resolves to
+        // None; a bound loadout resolves to its binding; an override wins. A
+        // leftover `[defaults].workflow` is ignored.
         let mut base = RawConfig::default();
         let overlay: RawConfig = toml::from_str(
             "[defaults]\nworkflow = \"superpowers\"\n\n\
@@ -1435,46 +1423,21 @@ mod tests {
         .unwrap();
         base.merge(overlay);
         let c = base.finalize(vec![]);
-        assert_eq!(c.default_workflow.as_deref(), Some("superpowers"));
 
-        // No binding, no override → the global default applies.
-        assert_eq!(
-            c.resolve_active_workflow(None, Some("plain")).map(|w| w.id),
-            Some("superpowers".to_string())
-        );
-        // Off any loadout (profile = None) it still applies — same everywhere.
-        assert_eq!(
-            c.resolve_active_workflow(None, None).map(|w| w.id),
-            Some("superpowers".to_string())
-        );
-        // A per-loadout binding wins over the global default.
+        // The deprecated global key no longer applies: an unbound loadout (and the
+        // no-loadout context) get no workflow.
+        assert!(c.resolve_active_workflow(None, Some("plain")).is_none());
+        assert!(c.resolve_active_workflow(None, None).is_none());
+        // A per-loadout binding resolves.
         assert_eq!(
             c.resolve_active_workflow(None, Some("bound")).map(|w| w.id),
             Some("compound".to_string())
         );
-        // A `--workflow` override wins over everything.
+        // A `--workflow` override wins over the binding.
         assert_eq!(
             c.resolve_active_workflow(Some("spec-driven"), Some("bound"))
                 .map(|w| w.id),
             Some("spec-driven".to_string())
-        );
-    }
-
-    #[test]
-    fn repo_layer_cannot_set_the_global_active_workflow() {
-        // `[defaults].workflow` is global-only (it lives in `[defaults]`, already
-        // stripped from repo layers) — a cloned repo can't choose your workflow.
-        let repo = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(repo_dir(repo.path())).unwrap();
-        std::fs::write(
-            repo_config_path(repo.path()),
-            "[defaults]\nworkflow = \"loop\"\n",
-        )
-        .unwrap();
-        let c = Config::load_from(None, repo.path()).unwrap();
-        assert!(
-            c.default_workflow.is_none(),
-            "a repo layer must not set the active workflow"
         );
     }
 }

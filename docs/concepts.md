@@ -108,9 +108,10 @@ is what makes a workflow more than headings.
 workflow, resolved in this order:
 
 1. `--workflow <id>` on a single run (an override; a bad id applies nothing).
-2. A per-loadout binding — `workflow = "<id>"` on a `[[loadouts]]` block (advanced).
-3. The **global active workflow** — `[defaults].workflow` — the same house
-   process in every repo. This is the primary path; `load studio` sets it.
+2. The workflow the selected loadout binds — `workflow = "<id>"` on its
+   `[[loadouts]]` block (equipped in studio's **Workflow slot**). To get a
+   workflow *everywhere*, bind it on the default (no-targets) loadout. There is
+   no separate global active workflow.
 
 **The catalog.** Six built-ins ship, each modeled on a real practice and stamped
 with provenance: `lean` (Anthropic's explore-plan-code-commit), `boris` (how
