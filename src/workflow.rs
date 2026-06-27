@@ -285,7 +285,7 @@ pub fn canonical_slot(stage_name: &str) -> Option<&'static str> {
         "brainstorm" | "specify" | "spec" | "design" | "ideate" | "discovery" => "brainstorm",
         "plan" | "planning" | "decompose" => "plan",
         "implement" | "iterate" | "code" | "build" | "execute" | "develop" => "implement",
-        "verify" | "review" | "test" | "validate" | "qa" => "verify",
+        "verify" | "review" | "test" | "validate" | "qa" | "audit" | "check" => "verify",
         "ship" | "commit" | "pr" | "push" | "deliver" | "release" | "deploy" | "merge"
         | "finish" | "finishing" => "ship",
         _ => return None,
